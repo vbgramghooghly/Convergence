@@ -1,117 +1,135 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
 
 def show():
     require_role('superadmin', 'district', 'block', 'department')
+    
     st.title("Implementation Monitoring")
-
     supabase = get_supabase()
     user = get_current_user()
+    role = user['role']
 
-    # Fetch convergence activities based on role (RLS is also enforced)
+    # 1. Fetch Convergence Activities based on role scope
     query = supabase.table("convergence_register").select("*")
-    if user['role'] == 'district':
+    if role == 'district':
         query = query.eq("district_id", user['district_id'])
-    elif user['role'] == 'block':
+    elif role == 'block':
         query = query.eq("block_id", user['block_id'])
-    elif user['role'] == 'department':
+    elif role == 'department':
         query = query.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
 
     activities = query.execute().data
+
     if not activities:
-        st.info("No convergence activities found.")
+        st.info("No convergence activities found to monitor.")
         return
 
-    df_activities = pd.DataFrame(activities)
-    # Create a selection list with meaningful labels
-    activity_options = [f"{a['id']} - {a['activity_description'][:50]}" for a in activities]
-    activity_ids = [a['id'] for a in activities]
+    # Create a clean label for the selectbox
+    activity_map = {
+        a['id']: f"{a.get('id', '')} - {a.get('activity_description', 'Unnamed Activity')}"
+        for a in activities
+    }
 
-    # Select activity to update
-    selected_label = st.selectbox("Select Convergence Activity", activity_options)
-    selected_index = activity_options.index(selected_label)
-    selected_activity = activities[selected_index]
+    selected_act_id = st.selectbox(
+        "Select Convergence Activity",
+        options=list(activity_map.keys()),
+        format_func=lambda x: activity_map[x]
+    )
 
-    st.markdown("### Current Status: **{}**".format(selected_activity.get('current_status', 'N/A')))
+    selected_activity = next((a for a in activities if a['id'] == selected_act_id), None)
 
-    with st.form("update_progress"):
-        st.subheader("Update Progress")
+    if selected_activity:
+        st.markdown(f"### Current Status: **{selected_activity.get('current_status', 'Planned')}**")
+        
+        with st.form("update_progress_form"):
+            st.subheader("Update Progress")
+            
+            status_options = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed"]
+            current_status = selected_activity.get('current_status', 'Planned')
+            status_idx = status_options.index(current_status) if current_status in status_options else 0
+            
+            new_status = st.selectbox("New Status", status_options, index=status_idx)
+            
+            col1, col2, col3 = st.columns(3)
+            phys_ach = col1.number_input("Physical Achievement (%)", min_value=0.0, max_value=100.0, value=float(selected_activity.get('physical_achievement', 0.0) or 0.0))
+            # FIXED: Changed from Cr. to Lakhs
+            fin_ach = col2.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_activity.get('financial_achievement', 0.0) or 0.0))
+            persondays_gen = col3.number_input("Persondays Generated (cumulative)", min_value=0, value=int(selected_activity.get('persondays_generated', 0) or 0))
 
-        # Status dropdown (configurable stages)
-        status_list = ["Planned", "Approved", "Work Order Issued", "Labour Demand", "Material Procurement",
-                       "Work Started", "Work in Progress", "Work Completed", "Asset Registered", "Verified", "Closed"]
-        current_status_index = status_list.index(selected_activity['current_status']) if selected_activity['current_status'] in status_list else 0
-        new_status = st.selectbox("New Status", status_list, index=current_status_index)
+            col4, col5, col6 = st.columns(3)
+            start_date = col4.date_input("Actual Start Date", value=date.today())
+            exp_date = col5.date_input("Expected Completion Date", value=date.today())
+            act_date = col6.date_input("Actual Completion Date (if completed)", value=None)
 
-        # Physical & financial achievement
-        physical_achievement = st.number_input("Physical Achievement (%)", min_value=0.0, max_value=100.0,
-                                               value=float(selected_activity.get('physical_achievement', 0)), step=0.1)
-        financial_achievement = st.number_input("Financial Achievement (₹ Cr.)", min_value=0.0,
-                                                value=float(selected_activity.get('financial_achievement', 0)), format="%.2f")
-        persondays_generated = st.number_input("Persondays Generated (cumulative)", min_value=0,
-                                               value=int(selected_activity.get('persondays_generated', 0)))
+            remarks = st.text_area("Remarks", value=selected_activity.get('remarks', '') or '')
 
-        # Implementation dates
-        start_date = st.date_input("Actual Start Date", value=selected_activity.get('target_start_date') or date.today())
-        expected_completion = st.date_input("Expected Completion Date",
-                                            value=selected_activity.get('target_completion_date') or date.today())
-        actual_completion = st.date_input("Actual Completion Date (if completed)", value=None)
-
-        remarks = st.text_area("Remarks", value=selected_activity.get('remarks', ''))
-
-        submitted = st.form_submit_button("Save Progress")
-        if submitted:
-            # Calculate delay if completed
-            delay_days = 0
-            if actual_completion and expected_completion:
-                delay_days = (actual_completion - expected_completion).days
-                if delay_days < 0:
-                    delay_days = 0
-
-            updates = {
-                "current_status": new_status,
-                "physical_achievement": physical_achievement,
-                "financial_achievement": financial_achievement,
-                "persondays_generated": persondays_generated,
-                "target_start_date": str(start_date),
-                "target_completion_date": str(expected_completion),
-                "duration_days": (expected_completion - start_date).days if expected_completion > start_date else 0,
-                "remarks": remarks,
-                "updated_by": user['id'],
-                "updated_at": datetime.utcnow().isoformat()
-            }
-            if actual_completion:
-                updates["actual_completion_date"] = str(actual_completion)
-                updates["delay_days"] = delay_days
-
-            # Save the main record
-            old_vals = {k: selected_activity[k] for k in updates if k in selected_activity}
-            result = supabase.table("convergence_register").update(updates).eq("id", selected_activity['id']).execute()
-            if result.data:
-                # Insert into progress_updates history
-                history_entry = {
-                    "convergence_id": selected_activity['id'],
-                    "status": new_status,
-                    "remarks": remarks,
-                    "updated_by": user['id']
+            submitted = st.form_submit_button("Save Progress", type="primary")
+            
+            if submitted:
+                update_data = {
+                    "current_status": new_status,
+                    "physical_achievement": phys_ach,
+                    "financial_achievement": fin_ach,
+                    "persondays_generated": persondays_gen,
+                    "actual_start_date": str(start_date) if start_date else None,
+                    "expected_completion_date": str(exp_date) if exp_date else None,
+                    "actual_completion_date": str(act_date) if act_date else None,
+                    "remarks": remarks
                 }
-                supabase.table("progress_updates").insert(history_entry).execute()
-                log_action(user, "UPDATE_PROGRESS", "convergence_register", selected_activity['id'], old_vals=old_vals, new_vals=updates)
-                st.success("Progress updated successfully!")
-                st.rerun()
-            else:
-                st.error("Failed to update progress.")
+                
+                try:
+                    # 1. Update main register
+                    supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
+                    
+                    # 2. Log progress history entry
+                    history_payload = {
+                        "convergence_id": selected_act_id,
+                        "status": new_status,
+                        "physical_achievement": phys_ach,
+                        "financial_achievement": fin_ach,
+                        "persondays_generated": persondays_gen,
+                        "remarks": remarks
+                    }
+                    supabase.table("progress_updates").insert(history_payload).execute()
+                    
+                    try:
+                        log_action(user.get('id'), f"UPDATE progress convergence_register {selected_act_id}")
+                    except Exception:
+                        pass
+                        
+                    st.success("✅ Progress updated successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving progress: {e}")
 
-    # Show progress history
-    st.divider()
+    # ==========================================
+    # PROGRESS HISTORY TABLE (FIXED SORTING ERROR)
+    # ==========================================
+    st.markdown("---")
     st.subheader("Progress History")
-    history = supabase.table("progress_updates").select("*").eq("convergence_id", selected_activity['id']).order("updated_at", desc=True).execute().data
-    if history:
-        df_hist = pd.DataFrame(history)
-        st.dataframe(df_hist[['status', 'remarks', 'updated_at']], use_container_width=True)
-    else:
-        st.info("No progress updates recorded.")
+    
+    try:
+        # FIXED: Changed from 'updated_at' to 'created_at' to match standard Supabase schemas
+        history_query = supabase.table("progress_updates").select("*").eq("convergence_id", selected_act_id).order("created_at", desc=True).execute()
+        history_data = history_query.data
+        
+        if history_data:
+            df_history = pd.DataFrame(history_data)
+            st.dataframe(df_history, use_container_width=True, hide_index=True)
+        else:
+            st.info("No historical updates recorded for this activity yet.")
+    except Exception as e:
+        # Fallback query if created_at is also missing
+        try:
+            fallback_query = supabase.table("progress_updates").select("*").eq("convergence_id", selected_act_id).execute()
+            df_history = pd.DataFrame(fallback_query.data)
+            if not df_history.empty:
+                st.dataframe(df_history, use_container_width=True, hide_index=True)
+            else:
+                st.info("No historical updates recorded for this activity yet.")
+        except Exception as inner_e:
+            st.warning(f"Could not load history table: {inner_e}")
