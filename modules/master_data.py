@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from utils.db import get_supabase
 from auth.auth import require_role
-from utils.audit import log_action
 
 def show():
     require_role('superadmin')
@@ -63,7 +62,7 @@ def show():
                     st.success("Deleted successfully!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Cannot delete. This district is in use by other records. (Database Error: 42300/Foreign Key)")
+                    st.error(f"Cannot delete. This district is in use by other records.")
 
     # ---------------------------------------------------------
     # TAB 2: BLOCKS
@@ -115,7 +114,7 @@ def show():
 
         elif action_blk == "🗑️ Delete" and not df_block.empty:
             blk_id = st.selectbox("Select Block to Delete", df_block['id'].tolist(), format_func=lambda x: df_block[df_block['id']==x]['block_name'].values[0])
-            st.warning("⚠️ Warning: Deleting this will fail if users or convergence records are assigned to it.")
+            st.warning("⚠️ Warning: Deleting this will fail if users or records are assigned to it.")
             if st.button("Permanently Delete Block", type="primary"):
                 try:
                     supabase.table("blocks").delete().eq("id", blk_id).execute()
@@ -176,16 +175,14 @@ def show():
     with tabs[3]: render_simple_master_tab("themes", "theme_name", "Theme")
 
     # ---------------------------------------------------------
-    # TAB 5: ACTIVITIES (Custom UI & Auto Importer)
+    # TAB 5: ACTIVITIES (Simplified & Category Removed)
     # ---------------------------------------------------------
     with tabs[4]:
         st.subheader("🛠️ Manage Activities & Department Mapping")
         
-        # Fetch lookup data
         depts = supabase.table("departments").select("id, department_name").eq("active", True).execute().data
         themes = supabase.table("themes").select("id, theme_name").eq("active", True).execute().data
         
-        # Fetch activities
         act_data = supabase.table("activities").select("*, departments(department_name), themes(theme_name)").execute().data
         df_act = pd.DataFrame(act_data)
 
@@ -194,12 +191,12 @@ def show():
             df_act['Theme'] = df_act['themes'].apply(lambda x: x['theme_name'] if isinstance(x, dict) else 'Unassigned')
             
             st.dataframe(
-                df_act[['id', 'category', 'activity_name', 'Department', 'Theme', 'active']], 
+                df_act[['id', 'activity_name', 'Department', 'Theme', 'active']], 
                 use_container_width=True, 
                 hide_index=True
             )
         else:
-            st.info("No activities found. Please add or import records.")
+            st.info("No activities found.")
 
         action_act = st.radio("Action", ["➕ Add New", "✏️ Edit", "🗑️ Delete"], horizontal=True, key="act_action")
 
@@ -211,9 +208,7 @@ def show():
                 sel_dept = col1.selectbox("Department (Optional)", ["None"] + dept_names)
                 
                 theme_names = [t['theme_name'] for t in themes]
-                sel_theme = col2.selectbox("Theme (Optional)", ["None"] + theme_names)
-                
-                cat_sel = col1.selectbox("Category", ["Category I", "Category II", "Category III", "Category IV", "None"])
+                sel_theme = col2.selectbox("Theme (Category)", ["None"] + theme_names)
                 
                 name = st.text_input("Activity Name")
                 desc = st.text_area("Description")
@@ -221,12 +216,10 @@ def show():
                 if st.form_submit_button("Save Activity", type="primary") and name:
                     dept_id = next((d['id'] for d in depts if d['department_name'] == sel_dept), None)
                     theme_id = next((t['id'] for t in themes if t['theme_name'] == sel_theme), None)
-                    cat_val = None if cat_sel == "None" else cat_sel
                     
                     supabase.table("activities").insert({
                         "department_id": dept_id,
                         "theme_id": theme_id,
-                        "category": cat_val,
                         "activity_name": name,
                         "description": desc,
                         "active": True
@@ -245,25 +238,17 @@ def show():
             with st.form("edit_act"):
                 col1, col2 = st.columns(2)
                 
-                # Dept Dropdown mapping
                 dept_names = [d['department_name'] for d in depts]
                 curr_dept = selected.get('Department', 'Unassigned')
                 dept_opts = ["None"] + dept_names
                 dept_idx = dept_opts.index(curr_dept) if curr_dept in dept_opts else 0
                 sel_dept = col1.selectbox("Assign Department", dept_opts, index=dept_idx)
                 
-                # Theme Dropdown mapping
                 theme_names = [t['theme_name'] for t in themes]
                 curr_theme = selected.get('Theme', 'Unassigned')
                 theme_opts = ["None"] + theme_names
                 theme_idx = theme_opts.index(curr_theme) if curr_theme in theme_opts else 0
-                sel_theme = col2.selectbox("Assign Theme", theme_opts, index=theme_idx)
-                
-                # Category 
-                cats = ["Category I", "Category II", "Category III", "Category IV", "None"]
-                curr_cat = selected.get('category')
-                cat_idx = cats.index(curr_cat) if curr_cat in cats else 4
-                cat_sel = col1.selectbox("Category", cats, index=cat_idx)
+                sel_theme = col2.selectbox("Assign Theme (Category)", theme_opts, index=theme_idx)
                 
                 name = st.text_input("Activity Name", value=selected['activity_name'])
                 desc = st.text_area("Description", value=selected.get('description', '') or '')
@@ -272,12 +257,10 @@ def show():
                 if st.form_submit_button("Update & Map Activity", type="primary"):
                     dept_id = next((d['id'] for d in depts if d['department_name'] == sel_dept), None)
                     theme_id = next((t['id'] for t in themes if t['theme_name'] == sel_theme), None)
-                    cat_val = None if cat_sel == "None" else cat_sel
                     
                     supabase.table("activities").update({
                         "department_id": dept_id,
                         "theme_id": theme_id,
-                        "category": cat_val,
                         "activity_name": name,
                         "description": desc,
                         "active": active
@@ -301,9 +284,9 @@ def show():
 
         # --- AUTO IMPORTER ---
         st.markdown("---")
-        with st.expander("🚀 One-Time Auto Importer (Bulk Upload 318 Works)"):
-            st.info("Paste the contents of '318 works list.txt' below to bulk-insert them into the database. You can then map them to Departments using the 'Edit' tool above.")
-            bulk_data = st.text_area("Paste text here (Format: 1 _ Name _ Category):", height=200)
+        with st.expander("🚀 One-Time Auto Importer (Bulk Upload Works)"):
+            st.info("Paste the contents below. Format: 1 _ Name _ Category I")
+            bulk_data = st.text_area("Paste text here:", height=200)
             
             if st.button("Start Bulk Import", type="primary"):
                 if bulk_data:
@@ -311,30 +294,38 @@ def show():
                     success_count = 0
                     progress_bar = st.progress(0)
                     
+                    # Map text categories to your Theme IDs
+                    theme_map = {
+                        "Category I": 1,
+                        "Category II": 2,
+                        "Category III": 3,
+                        "Category IV": 4
+                    }
+                    
                     for i, line in enumerate(lines):
                         parts = line.split(' _ ')
                         if len(parts) >= 3:
                             act_name = parts[1].strip()
-                            category = parts[2].strip()
+                            cat_text = parts[2].strip()
+                            mapped_theme_id = theme_map.get(cat_text, None)
                             
                             try:
                                 supabase.table("activities").insert({
                                     "activity_name": act_name,
-                                    "category": category,
+                                    "theme_id": mapped_theme_id,
                                     "active": True
                                 }).execute()
                                 success_count += 1
                             except Exception as e:
                                 st.error(f"Failed to insert '{act_name}'. Error: {e}")
                         
-                        # Update progress bar
                         progress_bar.progress((i + 1) / len(lines))
                     
-                    st.success(f"✅ Successfully imported {success_count} activities! Refresh or check the table above.")
+                    st.success(f"✅ Successfully imported {success_count} activities!")
                 else:
                     st.warning("Please paste the text data first.")
 
     # ---------------------------------------------------------
-    # TAB 6: FINANCIAL YEARS (Using Helper)
+    # TAB 6: FINANCIAL YEARS
     # ---------------------------------------------------------
     with tabs[5]: render_simple_master_tab("financial_years", "year_name", "Financial Year")
