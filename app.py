@@ -51,7 +51,8 @@ from modules.excel_import import show as show_import
 from modules.master_data import show as show_masterdata
 from modules.users import show as show_users
 from modules.audit import show as show_audit
-from modules.contacts import show as show_contacts  # <--- Added User Directory Module
+from modules.contacts import show as show_contacts
+from modules.ui_ux_controller import show as show_ui_ux  # <--- Added UI/UX Controller Module
 
 # ---------- SIDEBAR HEADER ----------
 logo_path = "assets/logo.png"
@@ -72,14 +73,28 @@ menu = {
     "Reports & Excel": show_reports,
     "Excel Import": show_import,
     "Master Data": show_masterdata,
-    "User Directory": show_contacts,    # <--- Added to dictionary
+    "User Directory": show_contacts,
     "User Management": show_users,
     "Audit Log": show_audit,
+    "🎨 UI/UX Controller": show_ui_ux,  # <--- Added to dictionary
 }
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
 role_pages = {
-    "superadmin": list(menu.keys()),
+    "superadmin": [
+        "Dashboard",
+        "Convergence Register",
+        "Department Targets",
+        "Implementation Monitoring",
+        "Meetings",
+        "Reports & Excel",
+        "Excel Import",
+        "Master Data",
+        "User Directory",
+        "User Management",
+        "Audit Log",
+        "🎨 UI/UX Controller",  # <--- Enabled exclusively for Super Admin
+    ],
     "district": [
         "Dashboard",
         "Convergence Register",
@@ -87,14 +102,14 @@ role_pages = {
         "Implementation Monitoring",
         "Meetings",
         "Reports & Excel",
-        "User Directory",  # <--- Enabled for district users
+        "User Directory",
     ],
     "block": [
         "Dashboard",
         "Convergence Register",
         "Implementation Monitoring",
         "Meetings",
-        "User Directory",  # <--- Enabled for block users
+        "User Directory",
     ],
     "department": [
         "Dashboard",
@@ -102,7 +117,7 @@ role_pages = {
         "Convergence Register",
         "Implementation Monitoring",
         "Reports & Excel",
-        "User Directory",  # <--- Enabled for department users
+        "User Directory",
     ],
 }
 
@@ -120,6 +135,6 @@ selection = st.sidebar.radio("Navigation", allowed_pages)
 
 # ---------- CALL THE SELECTED PAGE ----------
 if selection in menu:
-    menu[selection]()   # Call the show function directly
+    menu[selection]()
 else:
     show_dashboard()
