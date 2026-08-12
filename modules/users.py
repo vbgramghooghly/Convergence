@@ -92,7 +92,7 @@ def show():
     else:
         new_block_id = None
 
-    # Department dropdown (FIXED: Prevent auto-selecting Agriculture)
+    # Department dropdown (Prevent auto-selecting Agriculture)
     if new_role == 'department':
         dept_names = ["-- Select Department --"] + [d['department_name'] for d in depts]
         cur_dept_id = selected_user.get('department_id')
@@ -120,10 +120,13 @@ def show():
                 "block_id": new_block_id if new_role == 'block' else None,
                 "department_id": new_dept_id if new_role == 'department' else None
             }
-            old_vals = {k: selected_user[k] for k in updates if k in selected_user}
             try:
+                # 1. Update Database
                 supabase.table("users").update(updates).eq("id", selected_uid).execute()
-                log_action(user, "UPDATE", "users", selected_uid, old_vals=old_vals, new_vals=updates)
+                
+                # 2. Log Action (FIXED: Removed old_vals argument)
+                log_action(user, "UPDATE", "users", selected_uid, new_vals=updates)
+                
                 st.success("User updated successfully!")
                 st.rerun()
             except Exception as e:
