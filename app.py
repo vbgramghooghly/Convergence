@@ -1,6 +1,7 @@
 import streamlit as st
 from auth.auth import check_password, logout, get_current_user
 import importlib
+import os
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -18,7 +19,11 @@ user = get_current_user()
 role = user['role']
 
 # ---------- SIDEBAR HEADER ----------
-st.sidebar.image("assets/logo.png", width=200)   # optional logo
+# Safe logo loading – only if the file exists
+logo_path = "assets/logo.png"
+if os.path.exists(logo_path):
+    st.sidebar.image(logo_path, width=200)
+
 st.sidebar.title("VB‑G RAM G Convergence")
 st.sidebar.caption(f"FY 2026‑27 | Logged in as: **{user['full_name']}** ({role.upper()})")
 st.sidebar.divider()
@@ -39,7 +44,7 @@ menu = {
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
 role_pages = {
-    "superadmin": list(menu.keys()),   # everything
+    "superadmin": list(menu.keys()),
     "district": [
         "Dashboard",
         "Convergence Register",
@@ -65,7 +70,7 @@ role_pages = {
 
 allowed_pages = role_pages.get(role, [])
 
-# Safety: if role is invalid, log out
+# Safety: if role is invalid, force logout
 if not allowed_pages:
     st.error("Your user role is not configured correctly. Please contact the administrator.")
     logout()
@@ -85,7 +90,7 @@ if selection in menu:
         if hasattr(module, 'show'):
             module.show()
         else:
-            st.error(f"Module '{selection}' is not properly defined (missing show() function).")
+            st.error(f"Module '{selection}' is missing the 'show()' function.")
     except Exception as e:
         st.error(f"Could not load module {selection}: {e}")
 else:
