@@ -1,5 +1,4 @@
 import streamlit as st
-import bcrypt
 from utils.db import get_supabase
 
 def check_password():
@@ -82,40 +81,37 @@ def check_password():
                 else:
                     try:
                         supabase = get_supabase()
-                        # Query users table
-                        response = supabase.table("users").select("*").eq("username", username.strip()).execute()
-                        users = response.data
+                        
+                        # 1. Format the input to match the email structure generated in users.py
+                        clean_input = username.strip()
+                        login_email = clean_input if "@" in clean_input else f"{clean_input}@hooghly.gov.in"
+                        
+                        # 2. Authenticate securely using Supabase Auth
+                        auth_response = supabase.auth.sign_in_with_password({
+                            "email": login_email,
+                            "password": password
+                        })
+                        
+                        # 3. If successful, fetch the user's role profile from the public.users table
+                        user_id = auth_response.user.id
+                        profile_response = supabase.table("users").select("*").eq("id", user_id).execute()
+                        users_data = profile_response.data
 
-                        if not users:
-                            st.error(f"❌ User '{username}' not found in database.")
+                        if not users_data:
+                            st.error("❌ User profile not found in the database.")
                         else:
-                            user = users[0]
-                            if not user.get("active", True):
+                            user_profile = users_data[0]
+                            if not user_profile.get("active", True):
                                 st.error("🚫 This account has been deactivated. Contact Superadmin.")
                             else:
-                                stored_hash = user.get("password_hash", "")
-                                
-                                login_success = False
-                                # Try bcrypt check
-                                try:
-                                    if stored_hash and bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
-                                        login_success = True
-                                except Exception:
-                                    pass
-                                
-                                # Fallback: direct string comparison if hash column stores plain text or different format
-                                if not login_success and stored_hash == password:
-                                    login_success = True
+                                st.session_state.authenticated = True
+                                st.session_state.user = user_profile
+                                st.success("✅ Login successful! Loading workspace...")
+                                st.rerun()
 
-                                if login_success:
-                                    st.session_state.authenticated = True
-                                    st.session_state.user = user
-                                    st.success("✅ Login successful! Loading workspace...")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Incorrect password.")
                     except Exception as e:
-                        st.error(f"Database connection error: {e}")
+                        # Supabase auth errors (like wrong password) will trigger this block
+                        st.error("❌ Incorrect username or password.")
 
     return False
 
@@ -125,6 +121,12 @@ def get_current_user():
 
 def logout():
     """Clears authentication session and reloads the landing page."""
+    try:
+        supabase = get_supabase()
+        supabase.auth.sign_out()
+    except Exception:
+        pass # Fail silently if no active backend session
+        
     st.session_state.authenticated = False
     st.session_state.user = None
     st.rerun()
