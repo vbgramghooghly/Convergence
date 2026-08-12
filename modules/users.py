@@ -150,7 +150,7 @@ def show():
 
     # ---------- BULK CREATE USERS FROM MASTER DATA ----------
     st.subheader("📂 Bulk Create Users from Master Data")
-    st.caption("Upload a CSV with columns: `Administrative`, `Role`, `Username`, `Default Password`")
+    st.caption("Upload a CSV with columns: `Administrative Unit`, `Role`, `Username`, `Default Password`")
     
     uploaded_file = st.file_uploader("Choose Master Data CSV", type="csv")
     
@@ -167,13 +167,14 @@ def show():
             
             # Reverse maps for quick ID lookup by name
             name_to_dist = {d['district_name'].lower().strip(): d['id'] for d in districts}
-            name_to_block = {b['block_name'].lower().strip(): b for b in blocks} # Store whole dict to access district_id
+            name_to_block = {b['block_name'].lower().strip(): b for b in blocks} 
             
             success_count = 0
             
             with st.spinner("Provisioning users..."):
                 for index, row in bulk_df.iterrows():
-                    admin_name = str(row.get('Administrative', '')).strip()
+                    # Fixed to read "Administrative Unit" column matching your CSV exactly
+                    admin_name = str(row.get('Administrative Unit', '')).strip()
                     role = str(row.get('Role', '')).strip().lower()
                     username = str(row.get('Username', '')).strip()
                     password = str(row.get('Default Password', '')).strip()
