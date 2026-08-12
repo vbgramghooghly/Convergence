@@ -1,42 +1,45 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
-from utils.excel import dataframe_to_excel
 
 def show():
+    # Only allow operational roles to access this page
     require_role('superadmin', 'district', 'block', 'department')
-    st.title("Convergence Register")
     
+    st.title("Convergence Register")
     supabase = get_supabase()
     user = get_current_user()
     role = user['role']
 
-    # ---------- Filters (sidebar) ----------
-    st.sidebar.subheader("Filter Register")
-    districts = supabase.table("districts").select("id,district_name").eq("active", True).execute().data
-    departments = supabase.table("departments").select("id,department_name").eq("active", True).execute().data
-    themes = supabase.table("themes").select("id,theme_name").eq("active", True).execute().data
+    # ==========================================
+    # 1. FETCH MASTER DATA FOR LOOKUPS & MAPPING
+    # ==========================================
+    fys = supabase.table("financial_years").select("*").eq("active", True).execute().data
+    districts = supabase.table("districts").select("*").eq("active", True).execute().data
+    blocks = supabase.table("blocks").select("*").eq("active", True).execute().data
+    depts = supabase.table("departments").select("*").eq("active", True).execute().data
+    themes = supabase.table("themes").select("*").eq("active", True).execute().data
+    
+    # Fetch Activities and their Department Mappings
+    activities = supabase.table("activities").select("*").eq("active", True).execute().data
+    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data
 
-    # Role restrictions
-    if role == 'district':
-        districts = [d for d in districts if d['id'] == user['district_id']]
-    elif role == 'block':
-        districts = [d for d in districts if d['id'] == user['district_id']]  # block user sees only parent district
-    elif role == 'department':
-        departments = [d for d in departments if d['id'] == user['department_id']]
-        districts = [d for d in districts if d['id'] == user['district_id']]
-
-    dist_sel = st.sidebar.selectbox("District", ["All"] + [d['district_name'] for d in districts])
-    dept_sel = st.sidebar.selectbox("Department", ["All"] + [d['department_name'] for d in departments])
-    theme_sel = st.sidebar.selectbox("Theme", ["All"] + [t['theme_name'] for t in themes])
-    status_sel = st.sidebar.selectbox("Status", ["All", "Planned", "Approved", "Under Implementation", "Completed", "Delayed"])
-    search_term = st.sidebar.text_input("Search (activity, PIA, etc.)")
-
-    # ---------- Build query ----------
-    query = supabase.table("convergence_register").select("*")
+    # Helper dictionaries for quick ID lookups
+    fy_map = {f['year_name']: f['id'] for f in fys}
+    dist_map = {d['district_name']: d['id'] for d in districts}
+    block_map = {b['block_name']: b['id'] for b in blocks}
+    dept_map = {d['department_name']: d['id'] for d in depts}
+    theme_map_id_to_name = {t['id']: t['theme_name'] for t in themes}
+    
+    # ==========================================
+    # 2. VIEW EXISTING RECORDS
+    # ==========================================
+    # Base query for the register
+    query = supabase.table("convergence_register").select("*, financial_years(year_name), districts(district_name), blocks(block_name), departments(department_name)")
+    
+    # Apply Role-Based Data Filtering
     if role == 'district':
         query = query.eq("district_id", user['district_id'])
     elif role == 'block':
@@ -44,114 +47,218 @@ def show():
     elif role == 'department':
         query = query.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
 
-    if dist_sel != "All":
-        dist_id = next(d['id'] for d in districts if d['district_name'] == dist_sel)
-        query = query.eq("district_id", dist_id)
-    if dept_sel != "All":
-        dept_id = next(d['id'] for d in departments if d['department_name'] == dept_sel)
-        query = query.eq("department_id", dept_id)
-    if theme_sel != "All":
-        theme_id = next(t['id'] for t in themes if t['theme_name'] == theme_sel)
-        query = query.eq("thematic_category_id", theme_id)
-    if status_sel != "All":
-        query = query.eq("current_status", status_sel)
-
-    # Execute and filter by search term (client-side)
-    data = query.execute().data
-    df = pd.DataFrame(data)
-    if search_term and not df.empty:
-        mask = df.apply(lambda row: row.astype(str).str.contains(search_term, case=False).any(), axis=1)
-        df = df[mask]
-
-    # ---------- Display records ----------
-    st.subheader(f"Convergence Activities ({len(df)} records)")
-    if not df.empty:
-        # Convert ID columns to names for readability
-        dist_names = {d['id']: d['district_name'] for d in districts}
-        dept_names = {d['id']: d['department_name'] for d in departments}
-        theme_names = {t['id']: t['theme_name'] for t in themes}
-        df_display = df.copy()
-        df_display['district_id'] = df_display['district_id'].map(dist_names)
-        df_display['department_id'] = df_display['department_id'].map(dept_names)
-        df_display['thematic_category_id'] = df_display['thematic_category_id'].map(theme_names)
-        st.dataframe(df_display, use_container_width=True)
+    records = query.execute().data
+    st.subheader(f"Convergence Activities ({len(records)} records)")
+    
+    if records:
+        df_display = pd.DataFrame(records)
+        # Flatten the nested relational data for clean display
+        df_display['FY'] = df_display['financial_years'].apply(lambda x: x['year_name'] if isinstance(x, dict) else '')
+        df_display['District'] = df_display['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else '')
+        df_display['Block'] = df_display['blocks'].apply(lambda x: x['block_name'] if isinstance(x, dict) else '')
+        df_display['Department'] = df_display['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else '')
         
-        # Download button
-        excel = dataframe_to_excel(df, "Convergence_Register")
-        st.download_button("📥 Download Excel", excel, "convergence_register.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        display_cols = ['FY', 'District', 'Block', 'Department', 'activity_description', 'current_status', 'total_converged_fund']
+        st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
     else:
         st.info("No records found.")
 
-    # ---------- Add / Edit Record ----------
-    with st.expander("➕ Add New Convergence Activity"):
-        with st.form("add_convergence", clear_on_submit=True):
+    st.markdown("---")
+
+    # ==========================================
+    # 3. MANUAL ENTRY FORM (Strict Validation)
+    # ==========================================
+    with st.expander("➕ Add New Convergence Activity", expanded=False):
+        with st.form("add_convergence_form"):
             col1, col2 = st.columns(2)
-            with col1:
-                fy = st.text_input("Financial Year", value="2026-27")
-                district = st.selectbox("District*", [d['district_name'] for d in districts])
-                block_list = supabase.table("blocks").select("id,block_name").eq("active", True).execute().data
-                block = st.selectbox("Block", ["None"] + [b['block_name'] for b in block_list])
-                gp = st.text_input("Gram Panchayat")
-            with col2:
-                dept = st.selectbox("Department*", [d['department_name'] for d in departments])
-                activity_desc = st.text_area("Activity / Work Description*")
-                theme = st.selectbox("Thematic Category", [t['theme_name'] for t in themes])
-                vbgramg = st.checkbox("Permissible under VB-G RAM G?")
+            
+            # --- Row 1: FY and Department ---
+            sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
+            
+            # Lock department if user is a department user, otherwise let them choose
+            if role == 'department':
+                dept_default = next(d['department_name'] for d in depts if d['id'] == user['department_id'])
+                sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
+            else:
+                sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
+                
+            selected_dept_id = dept_map.get(sel_dept)
+
+            # --- Row 2: Location (District & Block) ---
+            if role in ['block', 'district', 'department']:
+                dist_default = next(d['district_name'] for d in districts if d['id'] == user['district_id'])
+                sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
+            else:
+                sel_dist = col1.selectbox("District*", list(dist_map.keys()))
+                
+            selected_dist_id = dist_map.get(sel_dist)
+            
+            # Filter blocks based on district
+            filtered_blocks = [b['block_name'] for b in blocks if b['district_id'] == selected_dist_id]
+            if role == 'block':
+                block_default = next(b['block_name'] for b in blocks if b['id'] == user['block_id'])
+                sel_block = col2.selectbox("Block*", [block_default], disabled=True)
+            else:
+                sel_block = col2.selectbox("Block (Optional)", ["None"] + filtered_blocks)
+
+            # --- Row 3: STRICT ACTIVITY SELECTION ---
+            st.markdown("##### Activity Details")
+            # 1. Find all activity IDs mapped to the selected department
+            mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_dept_id]
+            # 2. Get the actual activity records for those IDs
+            valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
+            valid_act_names = [a['activity_name'] for a in valid_activities]
+            
+            if not valid_act_names:
+                st.warning(f"No approved activities found for {sel_dept} in Master Data. Please configure activities first.")
+                sel_act_name = col1.selectbox("Activity / Work Description*", ["No activities available"], disabled=True)
+                selected_theme_name = "None"
+            else:
+                sel_act_name = col1.selectbox("Activity / Work Description*", valid_act_names)
+                # Auto-determine the Theme based on the selected activity
+                selected_act_record = next((a for a in valid_activities if a['activity_name'] == sel_act_name), None)
+                theme_id = selected_act_record['theme_id'] if selected_act_record else None
+                selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
+            
+            col2.text_input("Thematic Category (Auto-filled)", value=selected_theme_name, disabled=True)
+
+            # --- Row 4: Targets & Financials ---
+            st.markdown("##### Targets & Financials")
             col3, col4 = st.columns(2)
-            with col3:
-                number_status = st.text_input("Number / Status")
-                scope = st.text_area("Scope under Annual Plan")
-                desired_target = st.number_input("Desired Target", min_value=0, value=0)
-                convergence_type = st.selectbox("Type of Convergence", ["Financial", "Technical", "Financial + Technical"])
-            with col4:
-                dept_fund = st.number_input("Department Fund (₹ Cr.)", min_value=0.0, format="%.2f")
-                vbg_fund = st.number_input("VB-G RAM G Fund (₹ Cr.)", min_value=0.0, format="%.2f")
-                pia = st.selectbox("PIA", ["Department", "Gram Panchayat", "Panchayat Samiti", "Other"])
-                expected_pd = st.number_input("Expected Persondays", min_value=0, value=0)
-                start_date = st.date_input("Target Start Date", date.today())
-                end_date = st.date_input("Target Completion Date", date.today())
-            remarks = st.text_area("Remarks")
-            submitted = st.form_submit_button("Save")
+            target = col3.number_input("Physical Target (Number)", min_value=0)
+            persondays = col4.number_input("Expected Persondays", min_value=0)
+            
+            dept_fund = col3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+            vbg_fund = col4.number_input("MGNREGS Fund (₹ Lakhs)", min_value=0.0, step=0.1)
 
+            submitted = st.form_submit_button("Save Convergence Activity", type="primary")
+            
             if submitted:
-                if not activity_desc or not district or not dept:
-                    st.error("Please fill all required fields (District, Department, Activity).")
+                if not valid_act_names:
+                    st.error("Cannot save without a valid approved activity.")
                 else:
-                    dist_id = next(d['id'] for d in districts if d['district_name'] == district)
-                    dept_id = next(d['id'] for d in departments if d['department_name'] == dept)
-                    block_id = None
-                    if block != "None":
-                        block_id = next(b['id'] for b in block_list if b['block_name'] == block)
-                    theme_id = next(t['id'] for t in themes if t['theme_name'] == theme) if theme else None
-
-                    record = {
-                        "financial_year": fy,
-                        "district_id": dist_id,
+                    block_id = block_map.get(sel_block) if sel_block != "None" else None
+                    
+                    insert_data = {
+                        "financial_year_id": fy_map[sel_fy],
+                        "district_id": selected_dist_id,
                         "block_id": block_id,
-                        "gram_panchayat": gp,
-                        "department_id": dept_id,
-                        "activity_description": activity_desc,
+                        "department_id": selected_dept_id,
+                        "activity_description": sel_act_name, # Storing the exact string from master data
                         "thematic_category_id": theme_id,
-                        "vbgramg_permissible": vbgramg,
-                        "number_status": number_status,
-                        "annual_plan_scope": scope,
-                        "desired_target": desired_target,
-                        "convergence_type": convergence_type,
+                        "desired_target": target,
+                        "expected_persondays": persondays,
                         "department_fund": dept_fund,
                         "vbgramg_fund": vbg_fund,
-                        "pia": pia,
-                        "expected_persondays": expected_pd,
-                        "target_start_date": str(start_date),
-                        "target_completion_date": str(end_date),
-                        "duration_days": (end_date - start_date).days if end_date > start_date else 0,
-                        "current_status": "Planned",
-                        "remarks": remarks,
-                        "created_by": user['id']
+                        "total_converged_fund": dept_fund + vbg_fund,
+                        "current_status": "Planned"
                     }
-                    result = supabase.table("convergence_register").insert(record).execute()
-                    if result.data:
-                        log_action(user, "CREATE", "convergence_register", result.data[0]['id'], new_vals=record)
-                        st.success("Activity added successfully!")
+                    
+                    try:
+                        res = supabase.table("convergence_register").insert(insert_data).execute()
+                        log_action(user, "CREATE", "convergence_register", res.data[0]['id'], new_vals=insert_data)
+                        st.success("Activity recorded successfully!")
                         st.rerun()
-                    else:
-                        st.error("Failed to save record.")
+                    except Exception as e:
+                        st.error(f"Error saving record: {e}")
+
+    # ==========================================
+    # 4. BULK UPLOAD MODULE
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📂 Bulk Upload Activities")
+    st.caption("Upload a CSV file to create multiple convergence entries at once. **Only approved activities for the specified department will be accepted.**")
+    
+    # Provide a template mapping guide
+    with st.expander("View CSV Template Requirements"):
+        st.markdown("""
+        Your CSV must contain exact matches for the following column headers:
+        * `Financial Year` (e.g., 2026-27)
+        * `District`
+        * `Block` (Leave blank or write 'None' for district-level projects)
+        * `Department` 
+        * `Activity` (Must exactly match an approved activity mapped to the Department in Master Data)
+        * `Physical Target` (Number)
+        * `Expected Persondays` (Number)
+        * `Department Fund` (Number)
+        * `MGNREGS Fund` (Number)
+        """)
+
+    uploaded_file = st.file_uploader("Upload CSV", type="csv")
+    
+    if uploaded_file:
+        df_upload = pd.read_csv(uploaded_file)
+        st.write("Preview of Uploaded Data:")
+        st.dataframe(df_upload.head(3), use_container_width=True)
+        
+        if st.button("Validate & Import Data", type="primary"):
+            success_count = 0
+            error_log = []
+            
+            with st.spinner("Processing records..."):
+                for index, row in df_upload.iterrows():
+                    try:
+                        # 1. Resolve IDs
+                        fy_str = str(row.get('Financial Year', '')).strip()
+                        dist_str = str(row.get('District', '')).strip()
+                        block_str = str(row.get('Block', 'None')).strip()
+                        dept_str = str(row.get('Department', '')).strip()
+                        act_str = str(row.get('Activity', '')).strip()
+                        
+                        fy_id = fy_map.get(fy_str)
+                        dist_id = dist_map.get(dist_str)
+                        block_id = block_map.get(block_str) if block_str and block_str.lower() != 'none' else None
+                        dept_id = dept_map.get(dept_str)
+                        
+                        if not all([fy_id, dist_id, dept_id]):
+                            error_log.append(f"Row {index+2}: Invalid Master Data references (Check FY, District, or Department).")
+                            continue
+                            
+                        # 2. STRICT VALIDATION: Check if Activity is approved for this Department
+                        mapped_acts = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == dept_id]
+                        valid_acts_for_dept = [a for a in activities if a['id'] in mapped_acts]
+                        
+                        # Find the specific activity the user typed
+                        target_act = next((a for a in valid_acts_for_dept if a['activity_name'].lower() == act_str.lower()), None)
+                        
+                        if not target_act:
+                            error_log.append(f"Row {index+2}: Activity '{act_str}' is NOT approved for {dept_str}.")
+                            continue
+                            
+                        # 3. Calculate Financials
+                        d_fund = float(row.get('Department Fund', 0))
+                        m_fund = float(row.get('MGNREGS Fund', 0))
+                        
+                        insert_data = {
+                            "financial_year_id": fy_id,
+                            "district_id": dist_id,
+                            "block_id": block_id,
+                            "department_id": dept_id,
+                            "activity_description": target_act['activity_name'], # Use the official name from DB
+                            "thematic_category_id": target_act['theme_id'], # Auto-map the theme
+                            "desired_target": int(row.get('Physical Target', 0)),
+                            "expected_persondays": int(row.get('Expected Persondays', 0)),
+                            "department_fund": d_fund,
+                            "vbgramg_fund": m_fund,
+                            "total_converged_fund": d_fund + m_fund,
+                            "current_status": "Planned"
+                        }
+                        
+                        supabase.table("convergence_register").insert(insert_data).execute()
+                        success_count += 1
+                        
+                    except Exception as e:
+                        error_log.append(f"Row {index+2}: Failed to process due to error: {str(e)}")
+            
+            # Summary Reporting
+            if success_count > 0:
+                st.success(f"Successfully imported {success_count} activities!")
+            
+            if error_log:
+                st.error(f"{len(error_log)} rows failed validation and were skipped.")
+                with st.expander("View Error Details"):
+                    for err in error_log:
+                        st.write(err)
+            
+            if success_count > 0 and not error_log:
+                st.rerun()
