@@ -92,7 +92,7 @@ def show():
     else:
         new_block_id = None
 
-    # Department dropdown (Prevent auto-selecting Agriculture)
+    # Department dropdown
     if new_role == 'department':
         dept_names = ["-- Select Department --"] + [d['department_name'] for d in depts]
         cur_dept_id = selected_user.get('department_id')
@@ -100,7 +100,7 @@ def show():
         if cur_dept_id:
             for i, d in enumerate(depts):
                 if d['id'] == cur_dept_id:
-                    dept_index = i + 1 # +1 to account for the "-- Select --" placeholder
+                    dept_index = i + 1 
                     break
         selected_dept_name = st.selectbox("Department", dept_names, index=dept_index)
         new_dept_id = next((d['id'] for d in depts if d['department_name'] == selected_dept_name), None)
@@ -124,7 +124,7 @@ def show():
                 # 1. Update Database
                 supabase.table("users").update(updates).eq("id", selected_uid).execute()
                 
-                # 2. Log Action (FIXED: Removed old_vals argument)
+                # 2. Log Action 
                 log_action(user, "UPDATE", "users", selected_uid, new_vals=updates)
                 
                 st.success("User updated successfully!")
@@ -158,9 +158,7 @@ def show():
     st.subheader("📂 Bulk Create Users from Master Data")
     st.caption("Upload a CSV with columns: `Administrative Unit`, `Role`, `Username`, `Default Password`")
     
-    # Define District for this batch (Needed for Department & Block users)
     bulk_dist_name = st.selectbox("Assign these imported users to District:", [d['district_name'] for d in districts])
-    
     uploaded_file = st.file_uploader("Choose Master Data CSV", type="csv")
     
     if uploaded_file:
@@ -194,12 +192,10 @@ def show():
                         
                     email = f"{username}@hooghly.gov.in"
                     
-                    # Assume district based on the dropdown above
                     dist_id = name_to_dist.get(bulk_dist_name.lower().strip())
                     block_id = None
                     dept_id = None
                     
-                    # 1. Map string names to DB UUIDs
                     if role == 'district':
                         lookup_name = admin_name.lower().replace(" district", "")
                         dist_id = name_to_dist.get(lookup_name)
@@ -222,7 +218,6 @@ def show():
                             st.error(f"Row {index+2}: Could not find department matching '{admin_name}' in Master Data.")
                             continue
                             
-                    # 2. Create Auth User
                     try:
                         auth_response = admin_supabase.auth.admin.create_user({
                             "email": email,
@@ -232,7 +227,6 @@ def show():
                         })
                         new_uuid = auth_response.user.id
                         
-                        # 3. Create Public Profile
                         user_record = {
                             "id": new_uuid,
                             "full_name": admin_name,
@@ -286,7 +280,6 @@ def show():
             new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
             new_dept_id = next((d['id'] for d in depts if d['department_name'] == new_dept_name), None) if new_dept_name else None
             
-            # Format email
             formatted_email = f"{new_email.strip()}@hooghly.gov.in"
 
             try:
