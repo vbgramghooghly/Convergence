@@ -74,7 +74,13 @@ def show():
     if records:
         df_display = pd.DataFrame(records)
         
-        df_display['FY'] = df_display['financial_year_id'].map(fy_reverse_map)
+        # Handle flexible column naming for financial year key
+        fy_col = 'financial_year_id' if 'financial_year_id' in df_display.columns else 'financial_year'
+        if fy_col in df_display.columns:
+            df_display['FY'] = df_display[fy_col].map(fy_reverse_map).fillna(df_display[fy_col])
+        else:
+            df_display['FY'] = 'N/A'
+            
         df_display['District'] = df_display['district_id'].map(dist_reverse_map)
         df_display['Block'] = df_display['block_id'].map(block_reverse_map)
         df_display['Department'] = df_display['department_id'].map(dept_reverse_map)
@@ -114,8 +120,10 @@ def show():
                 if st.button("🗑️ Permanently Delete Activity", type="primary"):
                     try:
                         supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
-                        # FIXED: Passing user's UUID string correctly
-                        log_action(user.get('id'), f"DELETE convergence_register {selected_edit_id}")
+                        try:
+                            log_action(user.get('id'), f"DELETE convergence_register {selected_edit_id}")
+                        except Exception:
+                            pass
                         st.success("Activity deleted successfully!")
                         st.rerun()
                     except Exception as e:
@@ -132,7 +140,6 @@ def show():
                     current_conv = rec.get('convergence_type', CONVERGENCE_TYPES[0])
                     new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
                     
-                    # New Detailed Fields
                     st.markdown("##### Detailed Work Specifications")
                     col_det1, col_det2, col_det3, col_det4 = st.columns([2, 2, 1, 1])
                     new_scheme = col_det1.text_input("Scheme Name", value=rec.get('scheme_name', '') or '')
@@ -169,8 +176,10 @@ def show():
                         }
                         try:
                             supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                            # FIXED: Passing user's UUID string correctly
-                            log_action(user.get('id'), f"UPDATE convergence_register {selected_edit_id}")
+                            try:
+                                log_action(user.get('id'), f"UPDATE convergence_register {selected_edit_id}")
+                            except Exception:
+                                pass
                             st.success("Activity updated successfully!")
                             st.rerun()
                         except Exception as e:
@@ -285,9 +294,10 @@ def show():
                 
                 try:
                     res = supabase.table("convergence_register").insert(insert_data).execute()
-                    # FIXED: Passing user's UUID string correctly
-                    log_action(user.get('id'), f"CREATE convergence_register {res.data[0]['id']}")
-                    # SUCCESS GREEN MESSAGE REQUESTED
+                    try:
+                        log_action(user.get('id'), f"CREATE convergence_register {res.data[0]['id']}")
+                    except Exception:
+                        pass
                     st.success("✅ 1 activity successfully captured and recorded!")
                     st.rerun()
                 except Exception as e:
@@ -394,7 +404,6 @@ def show():
                         error_log.append(f"Row {index+2}: Failed to process due to error: {str(e)}")
             
             if success_count > 0:
-                # SUCCESS GREEN MESSAGE FOR BULK UPLOAD
                 st.success(f"✅ Successfully imported and captured {success_count} activities!")
             
             if error_log:
