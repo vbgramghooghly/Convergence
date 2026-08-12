@@ -1,0 +1,29 @@
+vbgramg-convergence/
+├── app.py
+├── requirements.txt
+├── .env.example
+├── .gitignore
+├── README.md
+├── config/
+│   └── settings.py
+├── database/
+│   ├── schema.sql
+│   └── seed.sql
+├── auth/
+│   └── auth.py
+├── modules/
+│   ├── dashboard.py
+│   ├── department_targets.py
+│   ├── convergence_register.py
+│   ├── meetings.py
+│   ├── reports.py
+│   ├── master_data.py
+│   ├── users.py
+│   └── audit.py
+├── utils/
+│   ├── db.py
+│   ├── excel.py
+│   ├── validators.py
+│   └── helpers.py
+└── assets/
+    └── logo.png
