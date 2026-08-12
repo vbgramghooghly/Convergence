@@ -53,6 +53,9 @@ def show():
     elif role == 'block':
         query = query.eq("block_id", user['block_id'])
     elif role == 'department':
+        if not user.get('department_id'):
+            st.error("🚨 Your user account is missing a Department Assignment. Please contact Superadmin.")
+            st.stop()
         query = query.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
 
     try:
@@ -80,6 +83,75 @@ def show():
     else:
         st.info("No records found.")
 
+    # ==========================================
+    # 2.5 MANAGE (EDIT/DELETE) SAVED ENTRIES
+    # ==========================================
+    # Only District and Superadmin can delete or modify registered entries
+    if role in ['superadmin', 'district'] and records:
+        st.markdown("---")
+        st.subheader("🛠️ Manage (Edit / Delete) Saved Entries")
+        
+        with st.expander("✏️ Edit or 🗑️ Delete an Activity", expanded=False):
+            # Create a readable dropdown option for the records
+            display_options = {
+                r['id']: f"{r['activity_description']} - {dept_reverse_map.get(r['department_id'], 'Unknown')} (₹{r['total_converged_fund']} Lakhs)" 
+                for r in records
+            }
+            
+            selected_edit_id = st.selectbox("Select Activity to Manage", options=list(display_options.keys()), format_func=lambda x: display_options[x])
+            
+            if selected_edit_id:
+                rec = next(r for r in records if r['id'] == selected_edit_id)
+                
+                # Delete Button
+                if st.button("🗑️ Permanently Delete Activity", type="primary"):
+                    try:
+                        supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
+                        log_action(user, "DELETE", "convergence_register", selected_edit_id)
+                        st.success("Activity deleted successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting record: {e}")
+                
+                st.markdown("#### Edit Details")
+                with st.form("edit_conv_form"):
+                    col_e1, col_e2 = st.columns(2)
+                    
+                    status_opts = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed"]
+                    current_status = rec.get('current_status', 'Planned')
+                    new_status = col_e1.selectbox("Update Status", status_opts, index=status_opts.index(current_status) if current_status in status_opts else 0)
+                    
+                    current_conv = rec.get('convergence_type', CONVERGENCE_TYPES[0])
+                    new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
+                    
+                    new_target = col_e1.number_input("Physical Target", value=int(rec.get('desired_target', 0)))
+                    new_pd = col_e2.number_input("Expected Persondays", value=int(rec.get('expected_persondays', 0)))
+                    
+                    new_d_fund = col_e1.number_input("Department Fund (₹ Lakhs)", value=float(rec.get('department_fund', 0.0)))
+                    new_v_fund = col_e2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get('vbgramg_fund', 0.0))) # Name Changed
+                    
+                    if st.form_submit_button("Update Activity Details"):
+                        if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
+                            new_d_fund = 0.0
+                            new_v_fund = 0.0
+                            
+                        update_payload = {
+                            "current_status": new_status,
+                            "convergence_type": new_conv_type,
+                            "desired_target": new_target,
+                            "expected_persondays": new_pd,
+                            "department_fund": new_d_fund,
+                            "vbgramg_fund": new_v_fund,
+                            "total_converged_fund": new_d_fund + new_v_fund
+                        }
+                        try:
+                            supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
+                            log_action(user, "UPDATE", "convergence_register", selected_edit_id, new_vals=update_payload)
+                            st.success("Activity updated successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error updating record: {e}")
+
     st.markdown("---")
 
     # ==========================================
@@ -91,7 +163,10 @@ def show():
         sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
         
         if role == 'department':
-            dept_default = next(d['department_name'] for d in depts if d['id'] == user['department_id'])
+            dept_default = next((d['department_name'] for d in depts if d['id'] == user.get('department_id')), None)
+            if not dept_default:
+                st.error("🚨 Your account is not mapped to any specific department. Please contact the Superadmin.")
+                st.stop()
             sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
         else:
             sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
@@ -115,7 +190,6 @@ def show():
 
         st.markdown("##### Activity & Convergence Type")
         
-        # Dynamic filtering happens here instantly now
         mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_dept_id]
         valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
         valid_act_names = [a['activity_name'] for a in valid_activities]
@@ -148,9 +222,9 @@ def show():
             vbg_fund = 0.0
         else:
             dept_fund = col3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
-            vbg_fund = col4.number_input("MGNREGS Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+            # NAME CHANGED BELOW
+            vbg_fund = col4.number_input("VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1) 
 
-        # Changed to a standard button since we are no longer in an st.form
         st.markdown("<br>", unsafe_allow_html=True)
         submitted = st.button("Save Convergence Activity", type="primary", use_container_width=True)
         
@@ -203,7 +277,7 @@ def show():
         * `Physical Target`
         * `Expected Persondays`
         * `Department Fund` (Will be ignored if Technical Convergence)
-        * `MGNREGS Fund` (Will be ignored if Technical Convergence)
+        * `VB-G RAM G Fund` (Will be ignored if Technical Convergence)
         """)
 
     uploaded_file = st.file_uploader("Upload CSV", type="csv")
@@ -253,7 +327,8 @@ def show():
                             m_fund = 0.0
                         else:
                             d_fund = float(row.get('Department Fund', 0))
-                            m_fund = float(row.get('MGNREGS Fund', 0))
+                            # NAME CHANGED BELOW FOR CSV
+                            m_fund = float(row.get('VB-G RAM G Fund', 0)) 
                         
                         insert_data = {
                             "financial_year_id": fy_id,
