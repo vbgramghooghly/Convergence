@@ -23,7 +23,8 @@ def show():
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data
     block_dict_reverse = {b['id']: b['block_name'] for b in blocks_data}
 
-    contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designations(designation_name)").execute().data
+    # Fetch contacts including the designation_id for committee filtering
+    contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designation_id, designations(designation_name)").execute().data
     contact_map = {}
     for c in contacts_data:
         desig = c.get('designations', {})
@@ -31,11 +32,12 @@ def show():
         contact_map[c['id']] = {
             "name": c.get('full_name', 'Unknown'),
             "designation": desig_name,
+            "designation_id": c.get('designation_id'),
             "phone": c.get('contact_number', 'N/A'),
             "email": c.get('email_id', 'N/A')
         }
 
-    # Global Meeting Fetch based on role
+    # Global Meeting Fetch
     query = supabase.table("meetings").select("*")
     if user['role'] == 'district':
         query = query.eq("district_id", user['district_id']).eq("meeting_type", "District")
@@ -112,8 +114,6 @@ def show():
                         e_dec = st.text_area("Decisions", value=sel_meeting_data.get('decisions', '') or '', key=f"e_de_{detail_sel}")
                         
                         st.markdown("#### 👥 Update Attendance")
-                        st.caption("Re-select the attendees and specify if any subordinates attended to overwrite the previous record.")
-                        
                         curr_att = sel_meeting_data.get('attendees') or []
                         if not isinstance(curr_att, list): curr_att = []
                         valid_curr_att = [cid for cid in curr_att if cid in contact_map]
@@ -222,9 +222,19 @@ def show():
         st.markdown("---")
         st.markdown("### 👥 Dynamic Attendance Register")
         
+        # -------------------------------------------------------------
+        # AUTO-FETCH STATUTORY COMMITTEE MEMBERS FOR PRE-SELECTION
+        # -------------------------------------------------------------
+        statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
+        statutory_desig_ids = [d['id'] for d in statutory_desigs]
+        
+        # Find contact IDs that hold these statutory designations
+        default_attendees = [cid for cid, info in contact_map.items() if info.get('designation_id') in statutory_desig_ids]
+        
         selected_contact_ids = st.multiselect(
-            "Select Invited Officials from Contact Directory", 
+            "Select Invited Officials (Statutory Members are pre-selected automatically)", 
             options=list(contact_map.keys()), 
+            default=default_attendees,
             format_func=lambda x: f"{contact_map[x]['name']} ({contact_map[x]['designation']})"
         )
 
