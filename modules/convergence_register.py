@@ -47,6 +47,13 @@ def show():
         "None", "Sq. Meter", "Cu. Meter", "Running Meter", "Kilometer", 
         "Hectare", "Acre", "Number (Nos.)", "Other"
     ]
+    
+    ORIGIN_SOURCES = [
+        "Normative / Routine", 
+        "District Annual Plan", 
+        "Block Annual Plan", 
+        "Meeting Resolution"
+    ]
 
     # ==========================================
     # 2. VIEW EXISTING RECORDS
@@ -74,7 +81,6 @@ def show():
     if records:
         df_display = pd.DataFrame(records)
         
-        # Handle flexible column naming for financial year key
         fy_col = 'financial_year_id' if 'financial_year_id' in df_display.columns else 'financial_year'
         if fy_col in df_display.columns:
             df_display['FY'] = df_display[fy_col].map(fy_reverse_map).fillna(df_display[fy_col])
@@ -87,12 +93,15 @@ def show():
         
         if 'convergence_type' not in df_display.columns:
             df_display['convergence_type'] = "Not Specified"
+        if 'mis_code' not in df_display.columns:
+            df_display['mis_code'] = ""
+        if 'origin_source' not in df_display.columns:
+            df_display['origin_source'] = "Normative / Routine"
             
         display_cols = ['FY', 'District', 'Block', 'Department', 'activity_description']
         if 'scheme_name' in df_display.columns: display_cols.append('scheme_name')
-        if 'geo_location' in df_display.columns: display_cols.append('geo_location')
         
-        display_cols.extend(['convergence_type', 'current_status', 'total_converged_fund'])
+        display_cols.extend(['mis_code', 'origin_source', 'convergence_type', 'current_status', 'total_converged_fund'])
         
         st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
     else:
@@ -116,7 +125,6 @@ def show():
             if selected_edit_id:
                 rec = next(r for r in records if r['id'] == selected_edit_id)
                 
-                # Delete Button
                 if st.button("🗑️ Permanently Delete Activity", type="primary"):
                     try:
                         supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
@@ -149,6 +157,11 @@ def show():
                     curr_unit = rec.get('dimension_unit', 'None')
                     new_unit = col_det4.selectbox("Unit", UNIT_OPTIONS, index=UNIT_OPTIONS.index(curr_unit) if curr_unit in UNIT_OPTIONS else 0)
 
+                    col_det5, col_det6 = st.columns(2)
+                    new_mis = col_det5.text_input("MIS Code", value=rec.get('mis_code', '') or '')
+                    curr_origin = rec.get('origin_source', 'Normative / Routine')
+                    new_origin = col_det6.selectbox("Source of Activity Linkage", ORIGIN_SOURCES, index=ORIGIN_SOURCES.index(curr_origin) if curr_origin in ORIGIN_SOURCES else 0)
+
                     st.markdown("##### Targets & Financials")
                     col_t1, col_t2 = st.columns(2)
                     new_target = col_t1.number_input("Physical Target", value=int(rec.get('desired_target', 0)))
@@ -169,6 +182,8 @@ def show():
                             "geo_location": new_geo,
                             "work_dimensions": new_dim,
                             "dimension_unit": new_unit if new_unit != "None" else None,
+                            "mis_code": new_mis.strip() if new_mis else None,
+                            "origin_source": new_origin,
                             "desired_target": new_target,
                             "expected_persondays": new_pd,
                             "department_fund": new_d_fund,
@@ -251,6 +266,10 @@ def show():
         inp_dim = col_det3.text_input("Dimension Value (Optional)", placeholder="e.g. 500")
         inp_unit = col_det4.selectbox("Unit", UNIT_OPTIONS)
 
+        col_det5, col_det6 = st.columns(2)
+        inp_mis_code = col_det5.text_input("MIS Code (Optional during planning, required for implementation)")
+        inp_origin = col_det6.selectbox("Source of Activity Linkage", ORIGIN_SOURCES)
+
         st.markdown("##### Targets & Financials")
         col3, col4 = st.columns(2)
         target = col3.number_input("Physical Target (Number)", min_value=0)
@@ -281,10 +300,12 @@ def show():
                     "activity_description": sel_act_name, 
                     "thematic_category_id": theme_id,
                     "convergence_type": sel_conv_type,
-                    "scheme_name": inp_scheme,
-                    "geo_location": inp_geo,
-                    "work_dimensions": inp_dim,
+                    "scheme_name": inp_scheme.strip() if inp_scheme else None,
+                    "geo_location": inp_geo.strip() if inp_geo else None,
+                    "work_dimensions": inp_dim.strip() if inp_dim else None,
                     "dimension_unit": inp_unit if inp_unit != "None" else None,
+                    "mis_code": inp_mis_code.strip() if inp_mis_code else None,
+                    "origin_source": inp_origin,
                     "desired_target": target,
                     "expected_persondays": persondays,
                     "department_fund": dept_fund,
@@ -323,6 +344,8 @@ def show():
         * `Geo Location` (Optional)
         * `Work Dimensions` (Optional)
         * `Dimension Unit` (Optional)
+        * `MIS Code` (Optional)
+        * `Origin Source` (Optional - e.g., 'District Annual Plan', defaults to 'Normative / Routine')
         * `Physical Target`
         * `Expected Persondays`
         * `Department Fund`
@@ -375,9 +398,15 @@ def show():
                             d_fund = 0.0
                             m_fund = 0.0
                         else:
-                            d_fund = float(row.get('Department Fund', 0))
-                            m_fund = float(row.get('VB-G RAM G Fund', 0)) 
+                            d_fund = float(row.get('Department Fund', 0) if pd.notna(row.get('Department Fund')) else 0)
+                            m_fund = float(row.get('VB-G RAM G Fund', 0) if pd.notna(row.get('VB-G RAM G Fund')) else 0) 
                         
+                        mis_val = str(row.get('MIS Code', '')).strip() if pd.notna(row.get('MIS Code')) else None
+                        origin_val = str(row.get('Origin Source', 'Normative / Routine')).strip() if pd.notna(row.get('Origin Source')) else 'Normative / Routine'
+                        
+                        if origin_val not in ORIGIN_SOURCES:
+                            origin_val = 'Normative / Routine'
+
                         insert_data = {
                             "financial_year_id": fy_id,
                             "district_id": dist_id,
@@ -386,12 +415,14 @@ def show():
                             "activity_description": target_act['activity_name'],
                             "thematic_category_id": target_act['theme_id'],
                             "convergence_type": conv_str,
-                            "scheme_name": str(row.get('Scheme Name', '')).strip(),
-                            "geo_location": str(row.get('Geo Location', '')).strip(),
-                            "work_dimensions": str(row.get('Work Dimensions', '')).strip(),
-                            "dimension_unit": str(row.get('Dimension Unit', '')).strip(),
-                            "desired_target": int(row.get('Physical Target', 0)),
-                            "expected_persondays": int(row.get('Expected Persondays', 0)),
+                            "scheme_name": str(row.get('Scheme Name', '')).strip() if pd.notna(row.get('Scheme Name')) else None,
+                            "geo_location": str(row.get('Geo Location', '')).strip() if pd.notna(row.get('Geo Location')) else None,
+                            "work_dimensions": str(row.get('Work Dimensions', '')).strip() if pd.notna(row.get('Work Dimensions')) else None,
+                            "dimension_unit": str(row.get('Dimension Unit', '')).strip() if pd.notna(row.get('Dimension Unit')) else None,
+                            "mis_code": mis_val if mis_val else None,
+                            "origin_source": origin_val,
+                            "desired_target": int(row.get('Physical Target', 0) if pd.notna(row.get('Physical Target')) else 0),
+                            "expected_persondays": int(row.get('Expected Persondays', 0) if pd.notna(row.get('Expected Persondays')) else 0),
                             "department_fund": d_fund,
                             "vbgramg_fund": m_fund,
                             "current_status": "Planned"
