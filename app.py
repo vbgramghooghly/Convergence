@@ -10,6 +10,29 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ---------- CUSTOM COLOR THEMING & STYLING ----------
+st.markdown("""
+    <style>
+        /* Main background and font styling */
+        .main {
+            background-color: #F8F9FA;
+        }
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: #F1F3F5;
+            border-right: 1px solid #E9ECEF;
+        }
+        /* Custom Headers */
+        h1, h2, h3 {
+            color: #1F77B4;
+        }
+        /* Metric Cards Accent */
+        [data-testid="stMetricValue"] {
+            color: #2B8A3E;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ---------- AUTHENTICATION ----------
 if not check_password():
     st.stop()
@@ -28,6 +51,7 @@ from modules.excel_import import show as show_import
 from modules.master_data import show as show_masterdata
 from modules.users import show as show_users
 from modules.audit import show as show_audit
+from modules.contacts import show as show_contacts  # <--- Added User Directory Module
 
 # ---------- SIDEBAR HEADER ----------
 logo_path = "assets/logo.png"
@@ -35,21 +59,22 @@ if os.path.exists(logo_path):
     st.sidebar.image(logo_path, width=200)
 
 st.sidebar.title("VB‑G RAM G Convergence")
-st.sidebar.caption(f"FY 2026‑27 | Logged in as: **{user['full_name']}** ({role.upper()})")
+st.sidebar.markdown(f"<span style='color: #495057;'>FY 2026‑27 | Logged in as:</span><br><b>{user['full_name']}</b> (<span style='color: #1F77B4;'>{role.upper()}</span>)", unsafe_allow_html=True)
 st.sidebar.divider()
 
 # ---------- NAVIGATION MENU ----------
 menu = {
-    "Dashboard":                   show_dashboard,
-    "Convergence Register":        show_convergence,
-    "Department Targets":          show_targets,
-    "Implementation Monitoring":   show_implementation,
-    "Meetings":                    show_meetings,
-    "Reports & Excel":             show_reports,
-    "Excel Import":                show_import,
-    "Master Data":                 show_masterdata,
-    "User Management":             show_users,
-    "Audit Log":                   show_audit,
+    "Dashboard": show_dashboard,
+    "Convergence Register": show_convergence,
+    "Department Targets": show_targets,
+    "Implementation Monitoring": show_implementation,
+    "Meetings": show_meetings,
+    "Reports & Excel": show_reports,
+    "Excel Import": show_import,
+    "Master Data": show_masterdata,
+    "User Directory": show_contacts,    # <--- Added to dictionary
+    "User Management": show_users,
+    "Audit Log": show_audit,
 }
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
@@ -62,12 +87,14 @@ role_pages = {
         "Implementation Monitoring",
         "Meetings",
         "Reports & Excel",
+        "User Directory",  # <--- Enabled for district users
     ],
     "block": [
         "Dashboard",
         "Convergence Register",
         "Implementation Monitoring",
         "Meetings",
+        "User Directory",  # <--- Enabled for block users
     ],
     "department": [
         "Dashboard",
@@ -75,6 +102,7 @@ role_pages = {
         "Convergence Register",
         "Implementation Monitoring",
         "Reports & Excel",
+        "User Directory",  # <--- Enabled for department users
     ],
 }
 
@@ -84,7 +112,7 @@ if not allowed_pages:
     logout()
 
 # ---------- LOGOUT BUTTON ----------
-if st.sidebar.button("🔒 Logout"):
+if st.sidebar.button("🔒 Logout", type="secondary"):
     logout()
 
 # ---------- NAVIGATION RADIO ----------
