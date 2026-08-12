@@ -188,40 +188,95 @@ def show():
             
         dept_dict_act = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
         theme_dict = {t['theme_name']: t['id'] for t in theme_data} if theme_data else {}
-        
-        with st.form("activity_form"):
-            col_a1, col_a2 = st.columns(2)
+        act_dict = {a['activity_name']: a['id'] for a in act_data} if act_data else {}
+
+        # Toggle to switch between Mapping an existing activity or Creating a brand new one
+        action = st.radio("Choose Action", ["Map / Edit Existing Activity", "Create New Activity"], horizontal=True)
+
+        if action == "Map / Edit Existing Activity":
+            # Placed outside the form so Streamlit can auto-update the multiselect defaults below
+            selected_act_name = st.selectbox("Select Activity to Edit", list(act_dict.keys()) if act_dict else ["None"])
             
-            # 2. Change to Multiselect for 1-to-many / many-to-many support
-            sel_depts = col_a1.multiselect("Parent Department(s)", list(dept_dict_act.keys()) if dept_dict_act else [])
-            sel_theme = col_a2.selectbox("Parent Theme", list(theme_dict.keys()) if theme_dict else ["None"])
-            act_name = st.text_input("Activity Name")
+            # Determine current state for pre-filling
+            current_theme_name = "None"
+            current_dept_names = []
             
-            if st.form_submit_button("Save Activity", type="primary"):
-                if not sel_depts:
-                    st.error("Please select at least one department.")
-                elif not act_name:
-                    st.error("Please provide an activity name.")
-                else:
-                    # Step A: Insert Activity First
-                    act_payload = {
-                        "theme_id": theme_dict.get(sel_theme),
-                        "activity_name": act_name,
-                        "active": True
-                    }
-                    response = supabase.table("activities").insert(act_payload).execute()
-                    
-                    # Step B: Insert into the junction table
-                    if response.data:
-                        new_activity_id = response.data[0]['id']
+            if selected_act_name and selected_act_name != "None":
+                act_info = next((a for a in act_data if a['activity_name'] == selected_act_name), None)
+                if act_info:
+                    current_theme_name = act_info.get('themes', {}).get('theme_name', 'None') if act_info.get('themes') else "None"
+                    mappings = act_info.get('activity_departments', [])
+                    if mappings:
+                        current_dept_names = [m['departments']['department_name'] for m in mappings if m.get('departments')]
+
+            with st.form("edit_activity_form"):
+                col_a1, col_a2 = st.columns(2)
+                
+                # Pre-fill Departments
+                default_depts = [d for d in current_dept_names if d in dept_dict_act]
+                sel_depts = col_a1.multiselect("Parent Department(s)", list(dept_dict_act.keys()), default=default_depts)
+                
+                # Pre-fill Theme
+                theme_opts = list(theme_dict.keys())
+                theme_idx = theme_opts.index(current_theme_name) if current_theme_name in theme_opts else 0
+                sel_theme = col_a2.selectbox("Parent Theme", theme_opts if theme_opts else ["None"], index=theme_idx)
+                
+                if st.form_submit_button("Update Mappings", type="primary"):
+                    if not sel_depts:
+                        st.error("Please select at least one department.")
+                    else:
+                        act_id = act_dict.get(selected_act_name)
+                        
+                        # A. Update the Theme in the main activities table
+                        supabase.table("activities").update({
+                            "theme_id": theme_dict.get(sel_theme)
+                        }).eq("id", act_id).execute()
+                        
+                        # B. Clear old department mappings
+                        supabase.table("activity_departments").delete().eq("activity_id", act_id).execute()
+                        
+                        # C. Insert newly selected department mappings
                         junction_payloads = [
-                            {"activity_id": new_activity_id, "department_id": dept_dict_act[dept]}
+                            {"activity_id": act_id, "department_id": dept_dict_act[dept]}
                             for dept in sel_depts
                         ]
                         supabase.table("activity_departments").insert(junction_payloads).execute()
                         
-                        st.success("Activity and department mappings saved successfully!")
+                        st.success(f"Successfully updated mapping for '{selected_act_name}'!")
                         st.rerun()
+
+        else:
+            with st.form("create_activity_form"):
+                col_a1, col_a2 = st.columns(2)
+                sel_depts = col_a1.multiselect("Parent Department(s)", list(dept_dict_act.keys()) if dept_dict_act else [])
+                sel_theme = col_a2.selectbox("Parent Theme", list(theme_dict.keys()) if theme_dict else ["None"])
+                act_name = st.text_input("New Activity Name")
+                
+                if st.form_submit_button("Save New Activity", type="primary"):
+                    if not sel_depts:
+                        st.error("Please select at least one department.")
+                    elif not act_name:
+                        st.error("Please provide an activity name.")
+                    else:
+                        # Insert Activity
+                        act_payload = {
+                            "theme_id": theme_dict.get(sel_theme),
+                            "activity_name": act_name,
+                            "active": True
+                        }
+                        response = supabase.table("activities").insert(act_payload).execute()
+                        
+                        # Insert mappings to Junction Table
+                        if response.data:
+                            new_activity_id = response.data[0]['id']
+                            junction_payloads = [
+                                {"activity_id": new_activity_id, "department_id": dept_dict_act[dept]}
+                                for dept in sel_depts
+                            ]
+                            supabase.table("activity_departments").insert(junction_payloads).execute()
+                            
+                            st.success("New Activity created and mapped successfully!")
+                            st.rerun()
 
     # ======================== TAB 7: FINANCIAL YEARS ========================
     with tab7:
