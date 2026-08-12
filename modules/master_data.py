@@ -74,7 +74,6 @@ def show():
         df_block = pd.DataFrame(block_data)
         
         if not df_block.empty:
-            # Flatten the joined district name for the table display
             df_block['district_name'] = df_block['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else None)
             st.dataframe(df_block[['id', 'district_name', 'block_name', 'block_code', 'active']], use_container_width=True, hide_index=True)
         else:
@@ -126,7 +125,7 @@ def show():
                     st.error("Cannot delete. This block is in use by other records.")
 
     # ---------------------------------------------------------
-    # HELPER: GENERIC CRUD FOR SIMPLE TABLES (Dept, Theme, Activity, FY)
+    # HELPER: GENERIC CRUD FOR SIMPLE TABLES (Dept, Theme, FY)
     # ---------------------------------------------------------
     def render_simple_master_tab(table_name, display_col, label):
         st.subheader(f"🗃️ Manage {label}s")
@@ -171,9 +170,171 @@ def show():
                     st.error("Cannot delete. This record is linked to existing data.")
 
     # ---------------------------------------------------------
-    # RENDER REMAINING TABS USING HELPER
+    # TAB 3 & 4: DEPARTMENTS AND THEMES (Using Helper)
     # ---------------------------------------------------------
     with tabs[2]: render_simple_master_tab("departments", "department_name", "Department")
     with tabs[3]: render_simple_master_tab("themes", "theme_name", "Theme")
-    with tabs[4]: render_simple_master_tab("activities", "activity_name", "Activity")
+
+    # ---------------------------------------------------------
+    # TAB 5: ACTIVITIES (Custom UI & Auto Importer)
+    # ---------------------------------------------------------
+    with tabs[4]:
+        st.subheader("🛠️ Manage Activities & Department Mapping")
+        
+        # Fetch lookup data
+        depts = supabase.table("departments").select("id, department_name").eq("active", True).execute().data
+        themes = supabase.table("themes").select("id, theme_name").eq("active", True).execute().data
+        
+        # Fetch activities
+        act_data = supabase.table("activities").select("*, departments(department_name), themes(theme_name)").execute().data
+        df_act = pd.DataFrame(act_data)
+
+        if not df_act.empty:
+            df_act['Department'] = df_act['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else 'Unassigned')
+            df_act['Theme'] = df_act['themes'].apply(lambda x: x['theme_name'] if isinstance(x, dict) else 'Unassigned')
+            
+            st.dataframe(
+                df_act[['id', 'category', 'activity_name', 'Department', 'Theme', 'active']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("No activities found. Please add or import records.")
+
+        action_act = st.radio("Action", ["➕ Add New", "✏️ Edit", "🗑️ Delete"], horizontal=True, key="act_action")
+
+        if action_act == "➕ Add New":
+            with st.form("add_act"):
+                col1, col2 = st.columns(2)
+                
+                dept_names = [d['department_name'] for d in depts]
+                sel_dept = col1.selectbox("Department (Optional)", ["None"] + dept_names)
+                
+                theme_names = [t['theme_name'] for t in themes]
+                sel_theme = col2.selectbox("Theme (Optional)", ["None"] + theme_names)
+                
+                cat_sel = col1.selectbox("Category", ["Category I", "Category II", "Category III", "Category IV", "None"])
+                
+                name = st.text_input("Activity Name")
+                desc = st.text_area("Description")
+                
+                if st.form_submit_button("Save Activity", type="primary") and name:
+                    dept_id = next((d['id'] for d in depts if d['department_name'] == sel_dept), None)
+                    theme_id = next((t['id'] for t in themes if t['theme_name'] == sel_theme), None)
+                    cat_val = None if cat_sel == "None" else cat_sel
+                    
+                    supabase.table("activities").insert({
+                        "department_id": dept_id,
+                        "theme_id": theme_id,
+                        "category": cat_val,
+                        "activity_name": name,
+                        "description": desc,
+                        "active": True
+                    }).execute()
+                    st.success(f"Successfully added: {name}")
+                    st.rerun()
+
+        elif action_act == "✏️ Edit" and not df_act.empty:
+            act_id = st.selectbox(
+                "Select Activity to Map / Edit", 
+                df_act['id'].tolist(), 
+                format_func=lambda x: df_act[df_act['id']==x]['activity_name'].values[0]
+            )
+            selected = df_act[df_act['id'] == act_id].iloc[0]
+            
+            with st.form("edit_act"):
+                col1, col2 = st.columns(2)
+                
+                # Dept Dropdown mapping
+                dept_names = [d['department_name'] for d in depts]
+                curr_dept = selected.get('Department', 'Unassigned')
+                dept_opts = ["None"] + dept_names
+                dept_idx = dept_opts.index(curr_dept) if curr_dept in dept_opts else 0
+                sel_dept = col1.selectbox("Assign Department", dept_opts, index=dept_idx)
+                
+                # Theme Dropdown mapping
+                theme_names = [t['theme_name'] for t in themes]
+                curr_theme = selected.get('Theme', 'Unassigned')
+                theme_opts = ["None"] + theme_names
+                theme_idx = theme_opts.index(curr_theme) if curr_theme in theme_opts else 0
+                sel_theme = col2.selectbox("Assign Theme", theme_opts, index=theme_idx)
+                
+                # Category 
+                cats = ["Category I", "Category II", "Category III", "Category IV", "None"]
+                curr_cat = selected.get('category')
+                cat_idx = cats.index(curr_cat) if curr_cat in cats else 4
+                cat_sel = col1.selectbox("Category", cats, index=cat_idx)
+                
+                name = st.text_input("Activity Name", value=selected['activity_name'])
+                desc = st.text_area("Description", value=selected.get('description', '') or '')
+                active = st.checkbox("Active Status", value=bool(selected.get('active', True)))
+                
+                if st.form_submit_button("Update & Map Activity", type="primary"):
+                    dept_id = next((d['id'] for d in depts if d['department_name'] == sel_dept), None)
+                    theme_id = next((t['id'] for t in themes if t['theme_name'] == sel_theme), None)
+                    cat_val = None if cat_sel == "None" else cat_sel
+                    
+                    supabase.table("activities").update({
+                        "department_id": dept_id,
+                        "theme_id": theme_id,
+                        "category": cat_val,
+                        "activity_name": name,
+                        "description": desc,
+                        "active": active
+                    }).eq("id", act_id).execute()
+                    st.success("Successfully Mapped and Updated!")
+                    st.rerun()
+
+        elif action_act == "🗑️ Delete" and not df_act.empty:
+            act_id = st.selectbox(
+                "Select Activity to Delete", 
+                df_act['id'].tolist(), 
+                format_func=lambda x: df_act[df_act['id']==x]['activity_name'].values[0]
+            )
+            if st.button("Permanently Delete Activity", type="primary"):
+                try:
+                    supabase.table("activities").delete().eq("id", act_id).execute()
+                    st.success("Deleted successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error("Cannot delete. This activity is linked to existing projects.")
+
+        # --- AUTO IMPORTER ---
+        st.markdown("---")
+        with st.expander("🚀 One-Time Auto Importer (Bulk Upload 318 Works)"):
+            st.info("Paste the contents of '318 works list.txt' below to bulk-insert them into the database. You can then map them to Departments using the 'Edit' tool above.")
+            bulk_data = st.text_area("Paste text here (Format: 1 _ Name _ Category):", height=200)
+            
+            if st.button("Start Bulk Import", type="primary"):
+                if bulk_data:
+                    lines = bulk_data.strip().split('\n')
+                    success_count = 0
+                    progress_bar = st.progress(0)
+                    
+                    for i, line in enumerate(lines):
+                        parts = line.split(' _ ')
+                        if len(parts) >= 3:
+                            act_name = parts[1].strip()
+                            category = parts[2].strip()
+                            
+                            try:
+                                supabase.table("activities").insert({
+                                    "activity_name": act_name,
+                                    "category": category,
+                                    "active": True
+                                }).execute()
+                                success_count += 1
+                            except Exception as e:
+                                st.error(f"Failed to insert '{act_name}'. Error: {e}")
+                        
+                        # Update progress bar
+                        progress_bar.progress((i + 1) / len(lines))
+                    
+                    st.success(f"✅ Successfully imported {success_count} activities! Refresh or check the table above.")
+                else:
+                    st.warning("Please paste the text data first.")
+
+    # ---------------------------------------------------------
+    # TAB 6: FINANCIAL YEARS (Using Helper)
+    # ---------------------------------------------------------
     with tabs[5]: render_simple_master_tab("financial_years", "year_name", "Financial Year")
