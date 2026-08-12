@@ -46,7 +46,6 @@ def show():
     # ==========================================
     # 2. VIEW EXISTING RECORDS
     # ==========================================
-    # FIXED: Using a simple select("*") to avoid PostgREST Foreign Key join errors
     query = supabase.table("convergence_register").select("*")
     
     if role == 'district':
@@ -67,7 +66,6 @@ def show():
     if records:
         df_display = pd.DataFrame(records)
         
-        # FIXED: Mapping IDs to names locally using Pandas instead of SQL Joins
         df_display['FY'] = df_display['financial_year_id'].map(fy_reverse_map)
         df_display['District'] = df_display['district_id'].map(dist_reverse_map)
         df_display['Block'] = df_display['block_id'].map(block_reverse_map)
@@ -85,102 +83,106 @@ def show():
     st.markdown("---")
 
     # ==========================================
-    # 3. MANUAL ENTRY FORM
+    # 3. MANUAL ENTRY FORM (Dynamic Layout, No Form Wrapper)
     # ==========================================
-    with st.expander("➕ Add New Convergence Activity", expanded=False):
-        with st.form("add_convergence_form"):
-            col1, col2 = st.columns(2)
+    with st.expander("➕ Add New Convergence Activity", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
+        
+        if role == 'department':
+            dept_default = next(d['department_name'] for d in depts if d['id'] == user['department_id'])
+            sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
+        else:
+            sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
             
-            sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
-            
-            if role == 'department':
-                dept_default = next(d['department_name'] for d in depts if d['id'] == user['department_id'])
-                sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
-            else:
-                sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
-                
-            selected_dept_id = dept_map.get(sel_dept)
+        selected_dept_id = dept_map.get(sel_dept)
 
-            if role in ['block', 'district', 'department']:
-                dist_default = next(d['district_name'] for d in districts if d['id'] == user['district_id'])
-                sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
-            else:
-                sel_dist = col1.selectbox("District*", list(dist_map.keys()))
-                
-            selected_dist_id = dist_map.get(sel_dist)
+        if role in ['block', 'district', 'department']:
+            dist_default = next(d['district_name'] for d in districts if d['id'] == user['district_id'])
+            sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
+        else:
+            sel_dist = col1.selectbox("District*", list(dist_map.keys()))
             
-            filtered_blocks = [b['block_name'] for b in blocks if b['district_id'] == selected_dist_id]
-            if role == 'block':
-                block_default = next(b['block_name'] for b in blocks if b['id'] == user['block_id'])
-                sel_block = col2.selectbox("Block*", [block_default], disabled=True)
-            else:
-                sel_block = col2.selectbox("Block (Optional)", ["None"] + filtered_blocks)
+        selected_dist_id = dist_map.get(sel_dist)
+        
+        filtered_blocks = [b['block_name'] for b in blocks if b['district_id'] == selected_dist_id]
+        if role == 'block':
+            block_default = next(b['block_name'] for b in blocks if b['id'] == user['block_id'])
+            sel_block = col2.selectbox("Block*", [block_default], disabled=True)
+        else:
+            sel_block = col2.selectbox("Block (Optional)", ["None"] + filtered_blocks)
 
-            st.markdown("##### Activity & Convergence Type")
-            mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_dept_id]
-            valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
-            valid_act_names = [a['activity_name'] for a in valid_activities]
-            
-            col_act1, col_act2 = st.columns(2)
-            
+        st.markdown("##### Activity & Convergence Type")
+        
+        # Dynamic filtering happens here instantly now
+        mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_dept_id]
+        valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
+        valid_act_names = [a['activity_name'] for a in valid_activities]
+        
+        col_act1, col_act2 = st.columns(2)
+        
+        if not valid_act_names:
+            st.warning(f"No approved activities found for {sel_dept}.")
+            sel_act_name = col_act1.selectbox("Activity / Work Description*", ["No activities available"], disabled=True)
+            selected_theme_name = "None"
+            theme_id = None
+        else:
+            sel_act_name = col_act1.selectbox("Activity / Work Description*", valid_act_names)
+            selected_act_record = next((a for a in valid_activities if a['activity_name'] == sel_act_name), None)
+            theme_id = selected_act_record['theme_id'] if selected_act_record else None
+            selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
+        
+        col_act2.text_input("Thematic Category (Auto-filled)", value=selected_theme_name, disabled=True)
+        
+        sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
+
+        st.markdown("##### Targets & Financials")
+        col3, col4 = st.columns(2)
+        target = col3.number_input("Physical Target (Number)", min_value=0)
+        persondays = col4.number_input("Expected Persondays", min_value=0)
+        
+        if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
+            st.info("ℹ️ Technical Convergence selected: Fund involvement is automatically set to zero.")
+            dept_fund = 0.0
+            vbg_fund = 0.0
+        else:
+            dept_fund = col3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+            vbg_fund = col4.number_input("MGNREGS Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+
+        # Changed to a standard button since we are no longer in an st.form
+        st.markdown("<br>", unsafe_allow_html=True)
+        submitted = st.button("Save Convergence Activity", type="primary", use_container_width=True)
+        
+        if submitted:
             if not valid_act_names:
-                st.warning(f"No approved activities found for {sel_dept}.")
-                sel_act_name = col_act1.selectbox("Activity / Work Description*", ["No activities available"], disabled=True)
-                selected_theme_name = "None"
+                st.error("Cannot save without a valid approved activity.")
             else:
-                sel_act_name = col_act1.selectbox("Activity / Work Description*", valid_act_names)
-                selected_act_record = next((a for a in valid_activities if a['activity_name'] == sel_act_name), None)
-                theme_id = selected_act_record['theme_id'] if selected_act_record else None
-                selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
-            
-            col_act2.text_input("Thematic Category (Auto-filled)", value=selected_theme_name, disabled=True)
-            
-            sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
-
-            st.markdown("##### Targets & Financials")
-            col3, col4 = st.columns(2)
-            target = col3.number_input("Physical Target (Number)", min_value=0)
-            persondays = col4.number_input("Expected Persondays", min_value=0)
-            
-            if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
-                st.info("ℹ️ Technical Convergence selected: Fund involvement is automatically set to zero.")
-                dept_fund = 0.0
-                vbg_fund = 0.0
-            else:
-                dept_fund = col3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
-                vbg_fund = col4.number_input("MGNREGS Fund (₹ Lakhs)", min_value=0.0, step=0.1)
-
-            submitted = st.form_submit_button("Save Convergence Activity", type="primary")
-            
-            if submitted:
-                if not valid_act_names:
-                    st.error("Cannot save without a valid approved activity.")
-                else:
-                    block_id = block_map.get(sel_block) if sel_block != "None" else None
-                    
-                    insert_data = {
-                        "financial_year_id": fy_map[sel_fy],
-                        "district_id": selected_dist_id,
-                        "block_id": block_id,
-                        "department_id": selected_dept_id,
-                        "activity_description": sel_act_name, 
-                        "thematic_category_id": theme_id,
-                        "convergence_type": sel_conv_type,
-                        "desired_target": target,
-                        "expected_persondays": persondays,
-                        "department_fund": dept_fund,
-                        "vbgramg_fund": vbg_fund,
-                        "total_converged_fund": dept_fund + vbg_fund,
-                        "current_status": "Planned"
-                    }
-                    
-                    try:
-                        res = supabase.table("convergence_register").insert(insert_data).execute()
-                        log_action(user, "CREATE", "convergence_register", res.data[0]['id'], new_vals=insert_data)
-                        st.success("Activity recorded successfully!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving record: {e}")
+                block_id = block_map.get(sel_block) if sel_block != "None" else None
+                
+                insert_data = {
+                    "financial_year_id": fy_map[sel_fy],
+                    "district_id": selected_dist_id,
+                    "block_id": block_id,
+                    "department_id": selected_dept_id,
+                    "activity_description": sel_act_name, 
+                    "thematic_category_id": theme_id,
+                    "convergence_type": sel_conv_type,
+                    "desired_target": target,
+                    "expected_persondays": persondays,
+                    "department_fund": dept_fund,
+                    "vbgramg_fund": vbg_fund,
+                    "total_converged_fund": dept_fund + vbg_fund,
+                    "current_status": "Planned"
+                }
+                
+                try:
+                    res = supabase.table("convergence_register").insert(insert_data).execute()
+                    log_action(user, "CREATE", "convergence_register", res.data[0]['id'], new_vals=insert_data)
+                    st.success("Activity recorded successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving record: {e}")
 
     # ==========================================
     # 4. BULK UPLOAD MODULE
