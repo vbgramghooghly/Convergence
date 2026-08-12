@@ -3,16 +3,72 @@ import pandas as pd
 from utils.db import get_supabase
 from auth.auth import require_role
 
+def inject_tab_css():
+    """Injects modern, trendy CSS to elevate the UI of Streamlit tabs."""
+    st.markdown("""
+        <style>
+        /* Base styling for all tabs (making them look like pills) */
+        div[data-testid="stTabs"] button[role="tab"] {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 30px; /* Fully rounded pill shape */
+            padding: 8px 20px;
+            margin-right: 10px;
+            font-weight: 600;
+            color: #4B5563;
+            transition: all 0.25s ease-in-out;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        
+        /* Hover effect for unselected tabs */
+        div[data-testid="stTabs"] button[role="tab"]:hover {
+            background-color: #F3F4F6;
+            border-color: #D1D5DB;
+            color: #111827;
+            transform: translateY(-1px);
+        }
+        
+        /* Styling for the ACTIVE selected tab */
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+            background-color: #1F77B4 !important; /* Brand Blue */
+            color: white !important;
+            border-color: #1F77B4 !important;
+            box-shadow: 0 4px 10px -2px rgba(31, 119, 180, 0.4) !important;
+        }
+        
+        /* Hide the default Streamlit bottom blue highlight line */
+        div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+            display: none;
+        }
+        
+        /* Add some breathing room below the tabs before the content starts */
+        div[data-testid="stTabs"] [data-baseweb="tab-panel"] {
+            padding-top: 25px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
 def show():
     require_role('superadmin')
+    
+    # Inject the fancy CSS
+    inject_tab_css()
+    
     st.markdown("<h1 style='color: #1F77B4;'>⚙️ Master Data Management</h1>", unsafe_allow_html=True)
     st.markdown("---")
 
     supabase = get_supabase()
 
+    # Added Emojis to all tabs for a modern look
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "Districts", "Blocks", "Departments", "🏢 Wings/Parastatals", 
-        "Themes", "Activities", "Financial Years", "🎓 Designations"
+        "🗺️ Districts", 
+        "🏘️ Blocks", 
+        "🏢 Departments", 
+        "🏛️ Wings/Parastatals", 
+        "🎯 Themes", 
+        "🛠️ Activities", 
+        "📅 Financial Years", 
+        "🎓 Designations"
     ])
 
     # ======================== TAB 1: DISTRICTS ========================
@@ -65,7 +121,7 @@ def show():
 
     # ======================== TAB 4: WINGS/PARASTATALS ========================
     with tab4:
-        st.subheader("🏢 Manage Department Wings, Schemes & Parastatals")
+        st.subheader("🏛️ Manage Department Wings, Schemes & Parastatals")
         dept_dict_w = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
         wings_data = supabase.table("department_wings").select("*, departments(department_name)").order("department_id").execute().data
         
