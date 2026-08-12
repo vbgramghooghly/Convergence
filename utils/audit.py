@@ -1,15 +1,19 @@
+# utils/audit.py
 import streamlit as st
-from supabase import create_client
-from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY # Make sure to import SERVICE_KEY here too!
+from utils.db import get_supabase
+from datetime import datetime
 
-def get_supabase():
-    # Use Streamlit caching to reuse connection
-    if "supabase_client" not in st.session_state:
-        st.session_state.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return st.session_state.supabase_client
-
-def run_sql(sql: str):
-    # Only for service key operations, e.g., seed data
-    from supabase import create_client, Client
-    service_client = create_client(SUPABASE_URL, SERVICE_KEY)
-    return service_client.rpc('exec_sql', {'query': sql}).execute()
+def log_action(user_id: str, action: str, details: str = ""):
+    """Logs a user action to the database."""
+    supabase = get_supabase()
+    
+    # Example insertion into an 'audit_logs' table
+    data = {
+        "user_id": user_id,
+        "action": action,
+        "details": details,
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Execute the insert
+    supabase.table("audit_logs").insert(data).execute()
