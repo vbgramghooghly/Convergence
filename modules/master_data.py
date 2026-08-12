@@ -14,13 +14,28 @@ def show():
     # Define Tabs
     tabs = st.tabs(["Districts", "Blocks", "Departments", "Themes", "Activities", "Financial Years"])
 
+    # ==========================================
+    # GLOBAL FETCH: Load base tables to avoid SQL Join errors
+    # ==========================================
+    try:
+        raw_districts = supabase.table("districts").select("*").execute().data
+        df_dist = pd.DataFrame(raw_districts)
+        dist_map = {d['id']: d['district_name'] for d in raw_districts} if raw_districts else {}
+        
+        raw_depts = supabase.table("departments").select("*").execute().data
+        dept_map = {d['id']: d['department_name'] for d in raw_depts} if raw_depts else {}
+        
+        raw_themes = supabase.table("themes").select("*").execute().data
+        theme_map = {t['id']: t['theme_name'] for t in raw_themes} if raw_themes else {}
+    except Exception as e:
+        st.error(f"Error loading master data: {e}")
+        return
+
     # ---------------------------------------------------------
     # TAB 1: DISTRICTS
     # ---------------------------------------------------------
     with tabs[0]:
         st.subheader("📍 Manage Districts")
-        dist_data = supabase.table("districts").select("*").execute().data
-        df_dist = pd.DataFrame(dist_data)
         
         if not df_dist.empty:
             st.dataframe(df_dist[['id', 'district_name', 'district_code', 'active']], use_container_width=True, hide_index=True)
@@ -69,11 +84,12 @@ def show():
     # ---------------------------------------------------------
     with tabs[1]:
         st.subheader("🗺️ Manage Blocks")
-        block_data = supabase.table("blocks").select("*, districts(district_name)").execute().data
+        block_data = supabase.table("blocks").select("*").execute().data
         df_block = pd.DataFrame(block_data)
         
         if not df_block.empty:
-            df_block['district_name'] = df_block['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else None)
+            # Safely map district names using Pandas instead of SQL Joins
+            df_block['district_name'] = df_block['district_id'].map(dist_map).fillna("Unknown")
             st.dataframe(df_block[['id', 'district_name', 'block_name', 'block_code', 'active']], use_container_width=True, hide_index=True)
         else:
             st.info("No blocks found.")
@@ -169,35 +185,42 @@ def show():
                     st.error("Cannot delete. This record is linked to existing data.")
 
     # ---------------------------------------------------------
-    # TAB 3 & 4: DEPARTMENTS AND THEMES (Using Helper)
+    # TAB 3, 4, 6: DEPARTMENTS, THEMES, FY
     # ---------------------------------------------------------
     with tabs[2]: render_simple_master_tab("departments", "department_name", "Department")
     with tabs[3]: render_simple_master_tab("themes", "theme_name", "Theme")
+    with tabs[5]: render_simple_master_tab("financial_years", "year_name", "Financial Year")
 
-  # ---------------------------------------------------------
-    # TAB 5: ACTIVITIES (Multi-Department Mapping)
+    # ---------------------------------------------------------
+    # TAB 5: ACTIVITIES (FIXED MAPPING LOGIC)
     # ---------------------------------------------------------
     with tabs[4]:
         st.subheader("🛠️ Manage Activities & Multi-Department Mapping")
         
-        depts = supabase.table("departments").select("id, department_name").eq("active", True).execute().data
-        themes = supabase.table("themes").select("id, theme_name").eq("active", True).execute().data
+        # Filter only active depts and themes for the dropdowns
+        active_depts = [d for d in raw_depts if d.get('active', True)]
+        active_themes = [t for t in raw_themes if t.get('active', True)]
         
-        # Fetch activities and their mapped departments from the junction table
-        act_data = supabase.table("activities").select("*, themes(theme_name)").execute().data
-        mapping_data = supabase.table("activity_departments").select("activity_id, departments(department_name)").execute().data
+        dept_names_map = {d['department_name']: d['id'] for d in active_depts}
+        theme_names_map = {t['theme_name']: t['id'] for t in active_themes}
+
+        # Safe fetch (No SQL Joins)
+        act_data = supabase.table("activities").select("*").execute().data
+        mapping_data = supabase.table("activity_departments").select("*").execute().data
         
         df_act = pd.DataFrame(act_data)
         df_map = pd.DataFrame(mapping_data)
 
         if not df_act.empty:
-            # Format Theme name
-            df_act['Theme'] = df_act['themes'].apply(lambda x: x['theme_name'] if isinstance(x, dict) else 'Unassigned')
+            # 1. Map Theme Name using dictionary
+            df_act['Theme'] = df_act['theme_id'].map(theme_map).fillna('Unassigned')
             
-            # Aggregate multiple departments into a comma-separated string for display
-            if not df_map.empty and 'departments' in df_map.columns:
-                df_map['dept_name'] = df_map['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else None)
-                dept_agg = df_map.groupby('activity_id')['dept_name'].apply(lambda x: ', '.join(x.dropna())).reset_index(name='Departments')
+            # 2. Map Multiple Departments safely
+            if not df_map.empty:
+                df_map['dept_name'] = df_map['department_id'].map(dept_map)
+                
+                # Group by activity and join department names with commas
+                dept_agg = df_map.dropna(subset=['dept_name']).groupby('activity_id')['dept_name'].apply(lambda x: ', '.join(x)).reset_index(name='Departments')
                 df_act = df_act.merge(dept_agg, left_on='id', right_on='activity_id', how='left')
             else:
                 df_act['Departments'] = 'Unassigned'
@@ -214,9 +237,6 @@ def show():
 
         action_act = st.radio("Action", ["➕ Add New", "✏️ Edit / Map", "🗑️ Delete"], horizontal=True, key="act_action")
 
-        dept_names_map = {d['department_name']: d['id'] for d in depts}
-        theme_names_map = {t['theme_name']: t['id'] for t in themes}
-
         if action_act == "➕ Add New":
             with st.form("add_act"):
                 col1, col2 = st.columns(2)
@@ -230,7 +250,7 @@ def show():
                 if st.form_submit_button("Save Activity", type="primary") and name:
                     theme_id = theme_names_map.get(sel_theme, None)
                     
-                    # 1. Insert Activity
+                    # Insert Activity
                     res = supabase.table("activities").insert({
                         "theme_id": theme_id,
                         "activity_name": name,
@@ -240,7 +260,7 @@ def show():
                     
                     if res.data:
                         new_act_id = res.data[0]['id']
-                        # 2. Insert selected departments into junction table
+                        # Insert mappings
                         for d_name in sel_depts:
                             supabase.table("activity_departments").insert({
                                 "activity_id": new_act_id,
@@ -258,10 +278,11 @@ def show():
             )
             selected = df_act[df_act['id'] == act_id].iloc[0]
             
-            # Fetch currently mapped departments for this activity
-            current_mapped_depts = df_map[df_map['activity_id'] == act_id]['departments'].apply(
-                lambda x: x['department_name'] if isinstance(x, dict) else None
-            ).dropna().tolist() if not df_map.empty else []
+            # Fetch currently mapped departments safely
+            if not df_map.empty:
+                current_mapped_depts = df_map[df_map['activity_id'] == act_id]['department_id'].map(dept_map).dropna().tolist()
+            else:
+                current_mapped_depts = []
 
             with st.form("edit_act"):
                 col1, col2 = st.columns(2)
@@ -312,7 +333,3 @@ def show():
                     st.rerun()
                 except Exception as e:
                     st.error("Cannot delete. This activity is linked to existing projects.")
-    # ---------------------------------------------------------
-    # TAB 6: FINANCIAL YEARS
-    # ---------------------------------------------------------
-    with tabs[5]: render_simple_master_tab("financial_years", "year_name", "Financial Year")
