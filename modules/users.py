@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
+from supabase import create_client
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
-from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY   # add SERVICE_KEY
+from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY   
 
 def show():
     require_role('superadmin')
@@ -19,10 +20,12 @@ def show():
         return
 
     df = pd.DataFrame(users_data)
-    # Fetch district, block, department names for display
+    
+    # Fetch district, block, department names for display & mapping
     districts = supabase.table("districts").select("id,district_name").execute().data
-    blocks = supabase.table("blocks").select("id,block_name").execute().data
+    blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data
     depts = supabase.table("departments").select("id,department_name").execute().data
+    
     dist_map = {d['id']: d['district_name'] for d in districts}
     block_map = {b['id']: b['block_name'] for b in blocks}
     dept_map = {d['id']: d['department_name'] for d in depts}
@@ -31,6 +34,7 @@ def show():
     df_display['district_name'] = df_display['district_id'].map(dist_map)
     df_display['block_name'] = df_display['block_id'].map(block_map)
     df_display['department_name'] = df_display['department_id'].map(dept_map)
+    
     st.dataframe(
         df_display[['full_name', 'role', 'district_name', 'block_name', 'department_name', 'active']],
         use_container_width=True,
@@ -68,7 +72,7 @@ def show():
     else:
         new_dist_id = None
 
-    # Block dropdown (only for block role, filtered by selected district)
+    # Block dropdown 
     if new_role == 'block' and new_dist_id is not None:
         filtered_blocks = [b for b in blocks if b['district_id'] == new_dist_id]
         if filtered_blocks:
@@ -88,7 +92,7 @@ def show():
     else:
         new_block_id = None
 
-    # Department dropdown (only for department role)
+    # Department dropdown 
     if new_role == 'department':
         dept_names = [d['department_name'] for d in depts]
         cur_dept_id = selected_user.get('department_id')
@@ -105,7 +109,7 @@ def show():
 
     active = st.checkbox("Active Account", value=selected_user.get('active', True))
 
-    if st.button("Update User", type="primary"):
+    if st.button("Update User Profile", type="primary"):
         updates = {
             "role": new_role,
             "active": active,
@@ -121,39 +125,142 @@ def show():
             st.rerun()
         except Exception as e:
             st.error(f"Failed to update user: {e}")
+            
+    # --- ADMIN PASSWORD ALTERNATION ---
+    with st.expander("🔑 Change / Alternate User Password"):
+        st.warning("This will immediately overwrite the user's current password.")
+        new_pw = st.text_input("New Password", type="password")
+        if st.button("Reset Password"):
+            if not SERVICE_KEY:
+                st.error("Service key is required to alter passwords.")
+            elif len(new_pw) < 6:
+                st.error("Password must be at least 6 characters.")
+            else:
+                try:
+                    admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
+                    admin_supabase.auth.admin.update_user_by_id(
+                        selected_uid,
+                        {"password": new_pw}
+                    )
+                    st.success(f"Password for {selected_user['full_name']} updated successfully!")
+                except Exception as e:
+                    st.error(f"Error resetting password: {e}")
 
-    # ---------- CREATE NEW USER ----------
     st.markdown("---")
-    st.subheader("➕ Create New User")
-    st.caption("A new user will be created in Supabase Auth and linked to the public.users table.")
 
+    # ---------- BULK CREATE USERS FROM MASTER DATA ----------
+    st.subheader("📂 Bulk Create Users from Master Data")
+    st.caption("Upload a CSV with columns: `Administrative`, `Role`, `Username`, `Default Password`")
+    
+    uploaded_file = st.file_uploader("Choose Master Data CSV", type="csv")
+    
+    if uploaded_file:
+        bulk_df = pd.read_csv(uploaded_file)
+        st.dataframe(bulk_df.head(), use_container_width=True)
+        
+        if st.button("Run Bulk Import", type="primary"):
+            if not SERVICE_KEY:
+                st.error("Service key is required for bulk user creation.")
+                st.stop()
+                
+            admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
+            
+            # Reverse maps for quick ID lookup by name
+            name_to_dist = {d['district_name'].lower().strip(): d['id'] for d in districts}
+            name_to_block = {b['block_name'].lower().strip(): b for b in blocks} # Store whole dict to access district_id
+            
+            success_count = 0
+            
+            with st.spinner("Provisioning users..."):
+                for index, row in bulk_df.iterrows():
+                    admin_name = str(row.get('Administrative', '')).strip()
+                    role = str(row.get('Role', '')).strip().lower()
+                    username = str(row.get('Username', '')).strip()
+                    password = str(row.get('Default Password', '')).strip()
+                    
+                    if not all([admin_name, role, username, password]):
+                        st.warning(f"Row {index+1}: Missing data, skipping.")
+                        continue
+                        
+                    email = f"{username}@hooghly.gov.in"
+                    dist_id = None
+                    block_id = None
+                    
+                    # 1. Map string names to DB UUIDs
+                    if role == 'district':
+                        # Handle potential "Hooghly District" vs "Hooghly" naming discrepancies
+                        lookup_name = admin_name.lower().replace(" district", "")
+                        dist_id = name_to_dist.get(lookup_name)
+                        if not dist_id:
+                            st.error(f"Row {index+1}: Could not find district matching '{admin_name}'")
+                            continue
+                            
+                    elif role == 'block':
+                        block_data = name_to_block.get(admin_name.lower())
+                        if block_data:
+                            block_id = block_data['id']
+                            dist_id = block_data['district_id']
+                        else:
+                            st.error(f"Row {index+1}: Could not find block matching '{admin_name}'")
+                            continue
+                            
+                    # 2. Create Auth User
+                    try:
+                        auth_response = admin_supabase.auth.admin.create_user({
+                            "email": email,
+                            "password": password,
+                            "email_confirm": True,
+                            "user_metadata": {"full_name": admin_name}
+                        })
+                        new_uuid = auth_response.user.id
+                        
+                        # 3. Create Public Profile
+                        user_record = {
+                            "id": new_uuid,
+                            "full_name": admin_name,
+                            "role": role,
+                            "district_id": dist_id,
+                            "block_id": block_id,
+                            "department_id": None,
+                            "active": True
+                        }
+                        supabase.table("users").insert(user_record).execute()
+                        success_count += 1
+                        
+                    except Exception as e:
+                        st.error(f"Failed to create {username}: {str(e)}")
+                        
+            st.success(f"Bulk import complete! {success_count} users created.")
+            st.rerun()
+
+    # ---------- CREATE NEW USER (MANUAL) ----------
+    st.markdown("---")
+    st.subheader("➕ Create Single User Manually")
+    
     with st.form("create_user_form"):
         new_fullname = st.text_input("Full Name")
         new_email = st.text_input("Email Address")
         new_password = st.text_input("Password", type="password")
         new_user_role = st.selectbox("Initial Role", ['district', 'block', 'department'])
-        new_dist_name = st.selectbox("District", district_list)
-        new_block_name = None
-        if new_user_role == 'block':
-            # We'll filter after form submission
-            st.caption("Block will be assigned after creation (editing required)")
+        
+        district_list_form = [d['district_name'] for d in districts]
+        new_dist_name = st.selectbox("District", district_list_form)
+        
         new_dept_name = None
         if new_user_role == 'department':
-            new_dept_name = st.selectbox("Department", dept_names)
+            dept_names_form = [d['department_name'] for d in depts]
+            new_dept_name = st.selectbox("Department", dept_names_form)
 
         submitted = st.form_submit_button("Create User")
         if submitted:
-            # Check if service key is available
             if not SERVICE_KEY:
-                st.error("Service key is not configured. Cannot create user automatically. Please create the user manually in Supabase Authentication and then assign the UUID here.")
+                st.error("Service key is not configured.")
                 st.stop()
 
-            # Map names to IDs
-            new_dist_id = dist_map.get(new_dist_name)
-            new_dept_id = dept_map.get(new_dept_name) if new_dept_name else None
+            new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
+            new_dept_id = next((d['id'] for d in depts if d['department_name'] == new_dept_name), None) if new_dept_name else None
 
             try:
-                # Create the auth user via admin API
                 admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
                 auth_response = admin_supabase.auth.admin.create_user({
                     "email": new_email,
@@ -161,25 +268,20 @@ def show():
                     "email_confirm": True,
                     "user_metadata": {"full_name": new_fullname}
                 })
-                if not auth_response.user:
-                    st.error("Auth user creation failed.")
-                    st.stop()
-
+                
                 new_uuid = auth_response.user.id
-
-                # Insert into public.users
                 user_record = {
                     "id": new_uuid,
                     "full_name": new_fullname,
                     "role": new_user_role,
                     "district_id": new_dist_id,
-                    "block_id": None,   # block can be assigned later via edit
+                    "block_id": None,   
                     "department_id": new_dept_id,
                     "active": True
                 }
                 supabase.table("users").insert(user_record).execute()
                 log_action(user, "CREATE", "users", new_uuid, new_vals=user_record)
-                st.success(f"User {new_fullname} created successfully! They can now log in.")
+                st.success(f"User {new_fullname} created successfully!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error creating user: {e}")
