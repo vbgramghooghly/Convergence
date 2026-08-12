@@ -21,7 +21,7 @@ def show():
 
     df = pd.DataFrame(users_data)
     
-    # Fetch district, block, department names for display & mapping
+    # Fetch master data
     districts = supabase.table("districts").select("id,district_name").execute().data
     blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data
     depts = supabase.table("departments").select("id,department_name").execute().data
@@ -49,7 +49,7 @@ def show():
     selected_uid = st.selectbox(
         "Select user to edit",
         user_ids,
-        format_func=lambda x: df[df['id']==x]['full_name'].values[0]
+        format_func=lambda x: f"{df[df['id']==x]['full_name'].values[0]} ({df[df['id']==x]['role'].values[0].upper()})"
     )
     selected_user = df[df['id'] == selected_uid].iloc[0].to_dict()
 
@@ -92,39 +92,42 @@ def show():
     else:
         new_block_id = None
 
-    # Department dropdown 
+    # Department dropdown (FIXED: Prevent auto-selecting Agriculture)
     if new_role == 'department':
-        dept_names = [d['department_name'] for d in depts]
+        dept_names = ["-- Select Department --"] + [d['department_name'] for d in depts]
         cur_dept_id = selected_user.get('department_id')
         dept_index = 0
         if cur_dept_id:
             for i, d in enumerate(depts):
                 if d['id'] == cur_dept_id:
-                    dept_index = i
+                    dept_index = i + 1 # +1 to account for the "-- Select --" placeholder
                     break
         selected_dept_name = st.selectbox("Department", dept_names, index=dept_index)
-        new_dept_id = next(d['id'] for d in depts if d['department_name'] == selected_dept_name)
+        new_dept_id = next((d['id'] for d in depts if d['department_name'] == selected_dept_name), None)
     else:
         new_dept_id = None
 
     active = st.checkbox("Active Account", value=selected_user.get('active', True))
 
     if st.button("Update User Profile", type="primary"):
-        updates = {
-            "role": new_role,
-            "active": active,
-            "district_id": new_dist_id,
-            "block_id": new_block_id if new_role == 'block' else None,
-            "department_id": new_dept_id if new_role == 'department' else None
-        }
-        old_vals = {k: selected_user[k] for k in updates if k in selected_user}
-        try:
-            supabase.table("users").update(updates).eq("id", selected_uid).execute()
-            log_action(user, "UPDATE", "users", selected_uid, old_vals=old_vals, new_vals=updates)
-            st.success("User updated successfully!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Failed to update user: {e}")
+        if new_role == 'department' and not new_dept_id:
+            st.error("Please select a valid Department from the dropdown.")
+        else:
+            updates = {
+                "role": new_role,
+                "active": active,
+                "district_id": new_dist_id,
+                "block_id": new_block_id if new_role == 'block' else None,
+                "department_id": new_dept_id if new_role == 'department' else None
+            }
+            old_vals = {k: selected_user[k] for k in updates if k in selected_user}
+            try:
+                supabase.table("users").update(updates).eq("id", selected_uid).execute()
+                log_action(user, "UPDATE", "users", selected_uid, old_vals=old_vals, new_vals=updates)
+                st.success("User updated successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to update user: {e}")
             
     # --- ADMIN PASSWORD ALTERNATION ---
     with st.expander("🔑 Change / Alternate User Password"):
@@ -152,6 +155,9 @@ def show():
     st.subheader("📂 Bulk Create Users from Master Data")
     st.caption("Upload a CSV with columns: `Administrative Unit`, `Role`, `Username`, `Default Password`")
     
+    # Define District for this batch (Needed for Department & Block users)
+    bulk_dist_name = st.selectbox("Assign these imported users to District:", [d['district_name'] for d in districts])
+    
     uploaded_file = st.file_uploader("Choose Master Data CSV", type="csv")
     
     if uploaded_file:
@@ -168,32 +174,34 @@ def show():
             # Reverse maps for quick ID lookup by name
             name_to_dist = {d['district_name'].lower().strip(): d['id'] for d in districts}
             name_to_block = {b['block_name'].lower().strip(): b for b in blocks} 
+            name_to_dept = {d['department_name'].lower().strip(): d['id'] for d in depts}
             
             success_count = 0
             
             with st.spinner("Provisioning users..."):
                 for index, row in bulk_df.iterrows():
-                    # Fixed to read "Administrative Unit" column matching your CSV exactly
                     admin_name = str(row.get('Administrative Unit', '')).strip()
                     role = str(row.get('Role', '')).strip().lower()
                     username = str(row.get('Username', '')).strip()
                     password = str(row.get('Default Password', '')).strip()
                     
                     if not all([admin_name, role, username, password]):
-                        st.warning(f"Row {index+1}: Missing data, skipping.")
+                        st.warning(f"Row {index+2}: Missing data, skipping.")
                         continue
                         
                     email = f"{username}@hooghly.gov.in"
-                    dist_id = None
+                    
+                    # Assume district based on the dropdown above
+                    dist_id = name_to_dist.get(bulk_dist_name.lower().strip())
                     block_id = None
+                    dept_id = None
                     
                     # 1. Map string names to DB UUIDs
                     if role == 'district':
-                        # Handle potential "Hooghly District" vs "Hooghly" naming discrepancies
                         lookup_name = admin_name.lower().replace(" district", "")
                         dist_id = name_to_dist.get(lookup_name)
                         if not dist_id:
-                            st.error(f"Row {index+1}: Could not find district matching '{admin_name}'")
+                            st.error(f"Row {index+2}: Could not find district matching '{admin_name}'")
                             continue
                             
                     elif role == 'block':
@@ -202,7 +210,13 @@ def show():
                             block_id = block_data['id']
                             dist_id = block_data['district_id']
                         else:
-                            st.error(f"Row {index+1}: Could not find block matching '{admin_name}'")
+                            st.error(f"Row {index+2}: Could not find block matching '{admin_name}'")
+                            continue
+                            
+                    elif role == 'department':
+                        dept_id = name_to_dept.get(admin_name.lower())
+                        if not dept_id:
+                            st.error(f"Row {index+2}: Could not find department matching '{admin_name}' in Master Data.")
                             continue
                             
                     # 2. Create Auth User
@@ -222,7 +236,7 @@ def show():
                             "role": role,
                             "district_id": dist_id,
                             "block_id": block_id,
-                            "department_id": None,
+                            "department_id": dept_id,
                             "active": True
                         }
                         supabase.table("users").insert(user_record).execute()
@@ -240,7 +254,7 @@ def show():
     
     with st.form("create_user_form"):
         new_fullname = st.text_input("Full Name")
-        new_email = st.text_input("Email Address")
+        new_email = st.text_input("Username (without @domain)")
         new_password = st.text_input("Password", type="password")
         new_user_role = st.selectbox("Initial Role", ['district', 'block', 'department'])
         
@@ -249,7 +263,7 @@ def show():
         
         new_dept_name = None
         if new_user_role == 'department':
-            dept_names_form = [d['department_name'] for d in depts]
+            dept_names_form = ["-- Select Department --"] + [d['department_name'] for d in depts]
             new_dept_name = st.selectbox("Department", dept_names_form)
 
         submitted = st.form_submit_button("Create User")
@@ -257,14 +271,25 @@ def show():
             if not SERVICE_KEY:
                 st.error("Service key is not configured.")
                 st.stop()
+                
+            if new_user_role == 'department' and new_dept_name == "-- Select Department --":
+                st.error("You must select a specific department for a Department user.")
+                st.stop()
+                
+            if not new_email or not new_password or not new_fullname:
+                st.error("Name, Username, and Password are required.")
+                st.stop()
 
             new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
             new_dept_id = next((d['id'] for d in depts if d['department_name'] == new_dept_name), None) if new_dept_name else None
+            
+            # Format email
+            formatted_email = f"{new_email.strip()}@hooghly.gov.in"
 
             try:
                 admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
                 auth_response = admin_supabase.auth.admin.create_user({
-                    "email": new_email,
+                    "email": formatted_email,
                     "password": new_password,
                     "email_confirm": True,
                     "user_metadata": {"full_name": new_fullname}
