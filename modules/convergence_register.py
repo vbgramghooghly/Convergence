@@ -114,8 +114,8 @@ def show():
                 if st.button("🗑️ Permanently Delete Activity", type="primary"):
                     try:
                         supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
-                        # FIXED: Passing user's full name string instead of user dict
-                        log_action(user.get('full_name', 'Admin'), f"DELETE convergence_register {selected_edit_id}")
+                        # FIXED: Passing user's UUID string correctly
+                        log_action(user.get('id'), f"DELETE convergence_register {selected_edit_id}")
                         st.success("Activity deleted successfully!")
                         st.rerun()
                     except Exception as e:
@@ -169,8 +169,8 @@ def show():
                         }
                         try:
                             supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                            # FIXED: Passing user's full name string instead of user dict
-                            log_action(user.get('full_name', 'Admin'), f"UPDATE convergence_register {selected_edit_id}")
+                            # FIXED: Passing user's UUID string correctly
+                            log_action(user.get('id'), f"UPDATE convergence_register {selected_edit_id}")
                             st.success("Activity updated successfully!")
                             st.rerun()
                         except Exception as e:
@@ -285,9 +285,10 @@ def show():
                 
                 try:
                     res = supabase.table("convergence_register").insert(insert_data).execute()
-                    # FIXED: Passing user's full name string instead of user dict
-                    log_action(user.get('full_name', 'Admin'), f"CREATE convergence_register {res.data[0]['id']}")
-                    st.success("Activity recorded successfully!")
+                    # FIXED: Passing user's UUID string correctly
+                    log_action(user.get('id'), f"CREATE convergence_register {res.data[0]['id']}")
+                    # SUCCESS GREEN MESSAGE REQUESTED
+                    st.success("✅ 1 activity successfully captured and recorded!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error saving record: {e}")
@@ -393,7 +394,8 @@ def show():
                         error_log.append(f"Row {index+2}: Failed to process due to error: {str(e)}")
             
             if success_count > 0:
-                st.success(f"Successfully imported {success_count} activities!")
+                # SUCCESS GREEN MESSAGE FOR BULK UPLOAD
+                st.success(f"✅ Successfully imported and captured {success_count} activities!")
             
             if error_log:
                 st.error(f"{len(error_log)} rows failed validation and were skipped.")
