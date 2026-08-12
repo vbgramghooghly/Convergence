@@ -114,7 +114,8 @@ def show():
                 if st.button("🗑️ Permanently Delete Activity", type="primary"):
                     try:
                         supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
-                        log_action(user, "DELETE", "convergence_register", selected_edit_id)
+                        # FIXED: Passed within 2-3 positional arguments limit
+                        log_action(user, f"DELETE convergence_register {selected_edit_id}")
                         st.success("Activity deleted successfully!")
                         st.rerun()
                     except Exception as e:
@@ -168,8 +169,8 @@ def show():
                         }
                         try:
                             supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                            # FIXED: Removed 'new_vals' argument
-                            log_action(user, "UPDATE", "convergence_register", selected_edit_id)
+                            # FIXED: Passed within 2-3 positional arguments limit
+                            log_action(user, f"UPDATE convergence_register {selected_edit_id}")
                             st.success("Activity updated successfully!")
                             st.rerun()
                         except Exception as e:
@@ -284,8 +285,8 @@ def show():
                 
                 try:
                     res = supabase.table("convergence_register").insert(insert_data).execute()
-                    # FIXED: Removed 'new_vals' argument
-                    log_action(user, "CREATE", "convergence_register", res.data[0]['id'])
+                    # FIXED: Passed within 2-3 positional arguments limit
+                    log_action(user, f"CREATE convergence_register {res.data[0]['id']}")
                     st.success("Activity recorded successfully!")
                     st.rerun()
                 except Exception as e:
