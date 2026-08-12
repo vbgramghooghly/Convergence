@@ -24,13 +24,19 @@ def show():
     activities = supabase.table("activities").select("*").eq("active", True).execute().data
     act_dept_mapping = supabase.table("activity_departments").select("*").execute().data
 
+    # Forward maps (Name -> ID) for Forms
     fy_map = {f['year_name']: f['id'] for f in fys}
     dist_map = {d['district_name']: d['id'] for d in districts}
     block_map = {b['block_name']: b['id'] for b in blocks}
     dept_map = {d['department_name']: d['id'] for d in depts}
     theme_map_id_to_name = {t['id']: t['theme_name'] for t in themes}
     
-    # Define the Convergence Types based on business logic
+    # Reverse maps (ID -> Name) for Displaying the Dataframe safely
+    fy_reverse_map = {f['id']: f['year_name'] for f in fys}
+    dist_reverse_map = {d['id']: d['district_name'] for d in districts}
+    block_reverse_map = {b['id']: b['block_name'] for b in blocks}
+    dept_reverse_map = {d['id']: d['department_name'] for d in depts}
+
     CONVERGENCE_TYPES = [
         "Technical Convergence (Zero Fund/NOC)",
         "Financial (as PIA)",
@@ -40,7 +46,8 @@ def show():
     # ==========================================
     # 2. VIEW EXISTING RECORDS
     # ==========================================
-    query = supabase.table("convergence_register").select("*, financial_years(year_name), districts(district_name), blocks(block_name), departments(department_name)")
+    # FIXED: Using a simple select("*") to avoid PostgREST Foreign Key join errors
+    query = supabase.table("convergence_register").select("*")
     
     if role == 'district':
         query = query.eq("district_id", user['district_id'])
@@ -49,23 +56,28 @@ def show():
     elif role == 'department':
         query = query.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
 
-    records = query.execute().data
+    try:
+        records = query.execute().data
+    except Exception as e:
+        st.error(f"Database error while fetching records: {e}")
+        records = []
+
     st.subheader(f"Convergence Activities ({len(records)} records)")
     
     if records:
         df_display = pd.DataFrame(records)
-        df_display['FY'] = df_display['financial_years'].apply(lambda x: x['year_name'] if isinstance(x, dict) else '')
-        df_display['District'] = df_display['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else '')
-        df_display['Block'] = df_display['blocks'].apply(lambda x: x['block_name'] if isinstance(x, dict) else '')
-        df_display['Department'] = df_display['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else '')
         
-        # Added convergence_type to display
-        display_cols = ['FY', 'District', 'Block', 'Department', 'activity_description', 'convergence_type', 'current_status', 'total_converged_fund']
+        # FIXED: Mapping IDs to names locally using Pandas instead of SQL Joins
+        df_display['FY'] = df_display['financial_year_id'].map(fy_reverse_map)
+        df_display['District'] = df_display['district_id'].map(dist_reverse_map)
+        df_display['Block'] = df_display['block_id'].map(block_reverse_map)
+        df_display['Department'] = df_display['department_id'].map(dept_reverse_map)
         
-        # Handle cases where existing DB rows might not have convergence_type yet
         if 'convergence_type' not in df_display.columns:
             df_display['convergence_type'] = "Not Specified"
             
+        display_cols = ['FY', 'District', 'Block', 'Department', 'activity_description', 'convergence_type', 'current_status', 'total_converged_fund']
+        
         st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
     else:
         st.info("No records found.")
@@ -123,7 +135,6 @@ def show():
             
             col_act2.text_input("Thematic Category (Auto-filled)", value=selected_theme_name, disabled=True)
             
-            # --- NEW: Convergence Type Dropdown ---
             sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
 
             st.markdown("##### Targets & Financials")
@@ -131,7 +142,6 @@ def show():
             target = col3.number_input("Physical Target (Number)", min_value=0)
             persondays = col4.number_input("Expected Persondays", min_value=0)
             
-            # --- Dynamic Financial Logic ---
             if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
                 st.info("ℹ️ Technical Convergence selected: Fund involvement is automatically set to zero.")
                 dept_fund = 0.0
@@ -155,7 +165,7 @@ def show():
                         "department_id": selected_dept_id,
                         "activity_description": sel_act_name, 
                         "thematic_category_id": theme_id,
-                        "convergence_type": sel_conv_type, # New field
+                        "convergence_type": sel_conv_type,
                         "desired_target": target,
                         "expected_persondays": persondays,
                         "department_fund": dept_fund,
@@ -236,7 +246,6 @@ def show():
                             error_log.append(f"Row {index+2}: Activity '{act_str}' is NOT approved for {dept_str}.")
                             continue
                             
-                        # Apply zero-fund logic for technical convergence during bulk upload
                         if conv_str == "Technical Convergence (Zero Fund/NOC)":
                             d_fund = 0.0
                             m_fund = 0.0
