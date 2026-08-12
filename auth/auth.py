@@ -18,12 +18,21 @@ def check_password():
 
     if not st.session_state.authenticated:
         with st.form("login"):
-            email = st.text_input("Email")
+            # 1. Update the label so users know they can enter just a username
+            user_input = st.text_input("Username / Email")
             password = st.text_input("Password", type="password")
+            
             if st.form_submit_button("Log in"):
+                # 2. Automatically append domain if no '@' is found
+                if "@" not in user_input:
+                    login_email = f"{user_input.strip()}@hooghly.gov.in"
+                else:
+                    login_email = user_input.strip()
+                    
                 try:
-                    # Use Supabase Auth
-                    auth_response = supabase.auth.sign_in_with_password({"email": email, "password": password})
+                    # 3. Use the formatted login_email here
+                    auth_response = supabase.auth.sign_in_with_password({"email": login_email, "password": password})
+                    
                     if auth_response.user:
                         # Get user details from our users table
                         user_data = supabase.table("users").select("*").eq("id", auth_response.user.id).single().execute()
@@ -40,7 +49,8 @@ def check_password():
                     else:
                         st.error("Invalid credentials")
                 except Exception as e:
-                    st.error(f"Login failed: {e}")
+                    # Generic error to not leak internal Supabase error details to the user
+                    st.error(f"Login failed: Invalid login credentials")
         return False
     return True
 
