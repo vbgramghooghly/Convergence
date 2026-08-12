@@ -22,8 +22,8 @@ def check_password():
             .stApp {
                 background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%);
             }
-            /* Highlighted Login Card Container */
-            .login-card {
+            /* Directly style the Streamlit Form into a Highlighted Login Card */
+            [data-testid="stForm"] {
                 background: #FFFFFF;
                 padding: 35px;
                 border-radius: 16px;
@@ -69,10 +69,8 @@ def check_password():
     with col_right:
         st.markdown("<br><br>", unsafe_allow_html=True)
         
-        # ---------- HIGHLIGHTED LOGIN PANEL CONTAINER ----------
-        st.markdown("<div class='login-card'>", unsafe_allow_html=True)
         st.markdown("### 🔐 Portal Login")
-        st.markdown("<p style='color: #718096; font-size: 0.9rem;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #718096; font-size: 0.9rem; margin-bottom: 15px;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
         
         with st.form("login_form"):
             username = st.text_input("Username / Email", placeholder="Enter your username")
@@ -107,7 +105,6 @@ def check_password():
                                     st.error("❌ Invalid username or password.")
                     except Exception as e:
                         st.error(f"Database connection error: {e}")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     return False
 
