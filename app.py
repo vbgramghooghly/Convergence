@@ -95,7 +95,7 @@ st.markdown(f"""
 try:
     from modules.dashboard import show as show_dashboard
     from modules.convergence_register import show as show_convergence
-    from modules.department_targets import show as show_targets
+    # department_targets import removed (merged into implementation)
     from modules.implementation import show as show_implementation
     from modules.meetings import show as show_meetings
     from modules.reports import show as show_reports
@@ -119,12 +119,12 @@ st.sidebar.markdown(f"<span style='color: #495057; font-size: 0.9rem;'>FY 2026â€
 st.sidebar.divider()
 
 # ---------- ROLEâ€‘BASED ACCESS CONTROL ----------
+# Consolidated 'Implementation Monitoring' and 'Department Targets' into one tab
 role_pages = {
     "superadmin": [
         "Dashboard",
         "Convergence Register",
-        "Department Targets",
-        "Implementation Monitoring",
+        "Implementation & Targets",
         "Meetings",
         "Reports & Excel",
         "Excel Import",
@@ -137,8 +137,7 @@ role_pages = {
     "district": [
         "Dashboard",
         "Convergence Register",
-        "Department Targets",
-        "Implementation Monitoring",
+        "Implementation & Targets",
         "Meetings",
         "Reports & Excel",
         "User Directory",
@@ -146,15 +145,15 @@ role_pages = {
     "block": [
         "Dashboard",
         "Convergence Register",
-        "Implementation Monitoring",
+        "Implementation & Targets",
         "Meetings",
         "User Directory",
     ],
     "department": [
         "Dashboard",
-        "Department Targets",
         "Convergence Register",
-        "Implementation Monitoring",
+        "Implementation & Targets",
+        "Meetings",
         "Reports & Excel",
         "User Directory",
     ],
@@ -173,8 +172,7 @@ st.sidebar.divider()
 menu = {
     "Dashboard": show_dashboard,
     "Convergence Register": show_convergence,
-    "Department Targets": show_targets,
-    "Implementation Monitoring": show_implementation,
+    "Implementation & Targets": show_implementation,
     "Meetings": show_meetings,
     "Reports & Excel": show_reports,
     "Excel Import": show_import,
