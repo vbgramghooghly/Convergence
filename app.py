@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+from utils.db import get_supabase
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -193,13 +194,38 @@ if selection in menu:
 else:
     show_dashboard()
 
-# ---------- ACCESSIBILITY & LOGOUT AT THE BOTTOM OF SIDEBAR ----------
+
+# ---------- ACCESSIBILITY, SECURITY & LOGOUT ----------
 st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
 st.sidebar.divider()
 
+# Accessibility
 st.sidebar.markdown("### 🔠 Accessibility")
 st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, key="global_font_size", step=1)
+st.sidebar.divider()
 
+# Change Password
+st.sidebar.markdown("### 🔐 Account Security")
+with st.sidebar.expander("Change My Password"):
+    with st.form("change_password_form"):
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm New Password", type="password")
+        submit_password = st.form_submit_button("Update Password", use_container_width=True)
+        
+        if submit_password:
+            if len(new_password) < 6:
+                st.error("Password must be at least 6 characters.")
+            elif new_password != confirm_password:
+                st.error("Passwords do not match.")
+            else:
+                try:
+                    supabase = get_supabase()
+                    supabase.auth.update_user({"password": new_password})
+                    st.success("✅ Password updated successfully!")
+                except Exception as e:
+                    st.error(f"Error updating password: {e}")
+
+# Logout
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
