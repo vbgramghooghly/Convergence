@@ -1,0 +1,19 @@
+[theme]
+# A sophisticated deep teal/blue for primary actions and accents
+primaryColor = "#1F77B4" 
+
+# Clean, crisp white background for the main canvas
+backgroundColor = "#F8F9FA" 
+
+# A very subtle slate-gray for the sidebar to create visual hierarchy
+secondaryBackgroundColor = "#E9ECEF" 
+
+# Deep charcoal text for high contrast and readability without being stark black
+textColor = "#2C3E50" 
+
+# Clean, modern sans-serif font
+font = "sans serif"
+
+[layout]
+# Forces the app to use the full width of the monitor
+max_content_width = 1200
