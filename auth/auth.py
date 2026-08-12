@@ -20,18 +20,19 @@ def check_password():
             /* Hide default streamlit header/footer elements on login screen */
             header {visibility: hidden;}
             .stApp {
-                background: linear-gradient(135deg, #F8F9FA 0%, #E9ECEF 100%);
+                background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%);
             }
-            /* Modern Login Card Container */
+            /* Highlighted Login Card Container */
             .login-card {
                 background: #FFFFFF;
-                padding: 40px;
+                padding: 35px;
                 border-radius: 16px;
-                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-                border: 1px solid #E2E8F0;
+                box-shadow: 0 12px 30px -10px rgba(31, 119, 180, 0.25);
+                border: 2px solid #1F77B4;
+                border-top: 6px solid #1F77B4;
             }
             .portal-title {
-                font-size: 2.2rem;
+                font-size: 2.3rem;
                 font-weight: 800;
                 color: #1F77B4;
                 margin-bottom: 0px;
@@ -44,7 +45,7 @@ def check_password():
             .feature-item {
                 font-size: 1.05rem;
                 color: #2D3748;
-                margin-bottom: 12px;
+                margin-bottom: 14px;
                 font-weight: 500;
             }
         </style>
@@ -68,44 +69,45 @@ def check_password():
     with col_right:
         st.markdown("<br><br>", unsafe_allow_html=True)
         
-        # Wrapped inside a clean visual container form
-        with st.container():
-            st.markdown("### 🔐 Portal Login")
-            st.markdown("<p style='color: #718096; font-size: 0.9rem;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
+        # ---------- HIGHLIGHTED LOGIN PANEL CONTAINER ----------
+        st.markdown("<div class='login-card'>", unsafe_allow_html=True)
+        st.markdown("### 🔐 Portal Login")
+        st.markdown("<p style='color: #718096; font-size: 0.9rem;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            username = st.text_input("Username / Email", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
             
-            with st.form("login_form"):
-                username = st.text_input("Username / Email", placeholder="Enter your username")
-                password = st.text_input("Password", type="password", placeholder="Enter your password")
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                submit_btn = st.form_submit_button("Sign In to Workspace", type="primary", use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            submit_btn = st.form_submit_button("Sign In to Workspace", type="primary", use_container_width=True)
 
-                if submit_btn:
-                    if not username or not password:
-                        st.error("⚠️ Please enter both username and password.")
-                    else:
-                        try:
-                            supabase = get_supabase()
-                            response = supabase.table("users").select("*").eq("username", username).execute()
-                            users = response.data
+            if submit_btn:
+                if not username or not password:
+                    st.error("⚠️ Please enter both username and password.")
+                else:
+                    try:
+                        supabase = get_supabase()
+                        response = supabase.table("users").select("*").eq("username", username).execute()
+                        users = response.data
 
-                            if not users:
-                                st.error("❌ Invalid username or password.")
+                        if not users:
+                            st.error("❌ Invalid username or password.")
+                        else:
+                            user = users[0]
+                            if not user.get("active", True):
+                                st.error("🚫 This account has been deactivated. Contact Superadmin.")
                             else:
-                                user = users[0]
-                                if not user.get("active", True):
-                                    st.error("🚫 This account has been deactivated. Contact Superadmin.")
+                                stored_hash = user["password_hash"]
+                                if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                                    st.session_state.authenticated = True
+                                    st.session_state.user = user
+                                    st.success("✅ Login successful! Loading workspace...")
+                                    st.rerun()
                                 else:
-                                    stored_hash = user["password_hash"]
-                                    if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
-                                        st.session_state.authenticated = True
-                                        st.session_state.user = user
-                                        st.success("✅ Login successful! Loading workspace...")
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Invalid username or password.")
-                        except Exception as e:
-                            st.error(f"Database connection error: {e}")
+                                    st.error("❌ Invalid username or password.")
+                    except Exception as e:
+                        st.error(f"Database connection error: {e}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     return False
 
