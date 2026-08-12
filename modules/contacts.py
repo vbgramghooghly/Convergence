@@ -42,8 +42,12 @@ def show():
         df['District'] = df['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else 'District Office')
         df['Block'] = df['blocks'].apply(lambda x: x['block_name'] if isinstance(x, dict) else 'N/A')
         
-        display_df = df[['full_name', 'Designation', 'contact_number', 'whatsapp_number', 'email_id', 'District', 'Block']]
-        display_df.columns = ['Name', 'Designation', 'Contact Number', 'WhatsApp Number', 'Email ID', 'District', 'Block']
+        # Ensure new columns exist in dataframe to prevent KeyError if DB is empty or updating
+        if 'office' not in df.columns: df['office'] = ''
+        if 'sub_office' not in df.columns: df['sub_office'] = ''
+        
+        display_df = df[['full_name', 'Designation', 'office', 'sub_office', 'contact_number', 'whatsapp_number', 'email_id', 'District', 'Block']]
+        display_df.columns = ['Name', 'Designation', 'Office', 'Sub Office', 'Contact Number', 'WhatsApp Number', 'Email ID', 'District', 'Block']
         
         # Export & Print Buttons
         col_dl, col_pr, _ = st.columns([1.5, 1.5, 7])
@@ -157,6 +161,11 @@ def show():
         contact_no = col3.text_input("Contact Number", value=existing_record.get('contact_number', ''))
         whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number', ''))
         email = col5.text_input("Email ID", value=existing_record.get('email_id', ''))
+        
+        # New row for Office and Sub Office (Optional)
+        col6, col7 = st.columns(2)
+        office = col6.text_input("Office (Optional)", value=existing_record.get('office', ''))
+        sub_office = col7.text_input("Sub Office (Optional)", value=existing_record.get('sub_office', ''))
 
         submitted = st.form_submit_button("Save / Update Contact Details", type="primary")
 
@@ -168,6 +177,8 @@ def show():
                 "contact_number": contact_no,
                 "whatsapp_number": whatsapp_no,
                 "email_id": email,
+                "office": office if office.strip() else None,
+                "sub_office": sub_office if sub_office.strip() else None,
                 "district_id": target_district_id,
                 "block_id": target_block_id,
                 "active": True
