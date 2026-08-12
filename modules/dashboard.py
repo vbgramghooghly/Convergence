@@ -16,7 +16,6 @@ def show():
 
     # ---------- GLOBAL FILTERS ----------
     st.sidebar.header("Filters")
-    # Districts – only show districts relevant to role
     districts_query = supabase.table("districts").select("id,district_name").eq("active", True)
     if role == 'district':
         districts_query = districts_query.eq("id", user['district_id'])
@@ -24,27 +23,21 @@ def show():
     district_names = ["All"] + [d['district_name'] for d in districts_data]
     district_sel = st.sidebar.selectbox("District", district_names, key="district_filter")
 
-    # Departments
     dept_data = supabase.table("departments").select("id,department_name").eq("active", True).execute().data
     if role == 'department':
         dept_data = [d for d in dept_data if d['id'] == user['department_id']]
     dept_names = ["All"] + [d['department_name'] for d in dept_data]
     dept_sel = st.sidebar.selectbox("Department", dept_names, key="dept_filter")
 
-    # Themes
     theme_data = supabase.table("themes").select("id,theme_name").eq("active", True).execute().data
     theme_names = ["All"] + [t['theme_name'] for t in theme_data]
     theme_sel = st.sidebar.selectbox("Theme", theme_names, key="theme_filter")
 
-    # Status
     status_list = ["All", "Planned", "Approved", "Under Implementation", "Completed", "Delayed"]
     status_sel = st.sidebar.selectbox("Status", status_list, key="status_filter")
 
     # ---------- DATA FETCHING (scoped) ----------
-    # Base query
     query = supabase.table("convergence_register").select("*")
-
-    # Role scoping (RLS duplicate but client-side for performance)
     if role == 'district':
         query = query.eq("district_id", user['district_id'])
     elif role == 'block':
@@ -52,7 +45,6 @@ def show():
     elif role == 'department':
         query = query.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
 
-    # Apply UI filters
     if district_sel != "All":
         dist_id = next(d['id'] for d in districts_data if d['district_name'] == district_sel)
         query = query.eq("district_id", dist_id)
@@ -65,11 +57,9 @@ def show():
     if status_sel != "All":
         query = query.eq("current_status", status_sel)
 
-    # Execute
     data = query.execute().data
     df = pd.DataFrame(data)
 
-    # If empty, show message and stop
     if df.empty:
         st.info("No convergence activities match the current filters and your access level.")
         return
@@ -100,13 +90,11 @@ def show():
         actual_pd = df['persondays_generated'].sum()
         st.metric("Actual Persondays", f"{actual_pd:,}")
     with col8:
-        # Completion %: count status=Completed / total
         completed = len(df[df['current_status'] == 'Completed'])
         total_acts = len(df)
         completion = (completed / total_acts * 100) if total_acts else 0
         st.metric("Completion %", f"{completion:.1f}%")
     with col9:
-        # Physical achievement avg
         phys_avg = df['physical_achievement'].mean()
         st.metric("Avg Physical Ach.", f"{phys_avg:.1f}%")
     with col10:
@@ -117,18 +105,16 @@ def show():
     st.markdown("---")
     st.subheader("Performance Visualizations")
 
-    # Chart 1: Department-wise Target vs Achievement (aggregate)
+    # Chart 1: Department-wise Target vs Achievement
     if not df.empty and 'department_id' in df.columns:
         dept_perf = df.groupby('department_id').agg(
             Target=('desired_target', 'sum'),
-            Achievement=('physical_achievement', 'mean'),  # or we could sum financial
+            Achievement=('physical_achievement', 'mean'),
             Department_Fund=('department_fund', 'sum'),
             VBGFund=('vbgramg_fund', 'sum')
         ).reset_index()
-        # merge with department names
         dept_names_map = {d['id']: d['department_name'] for d in dept_data}
         dept_perf['Department'] = dept_perf['department_id'].map(dept_names_map)
-        # Chart
         fig1 = go.Figure(data=[
             go.Bar(name='Target (count)', x=dept_perf['Department'], y=dept_perf['Target']),
             go.Bar(name='Avg Physical Ach. %', x=dept_perf['Department'], y=dept_perf['Achievement'])
@@ -148,7 +134,7 @@ def show():
                       title="District-wise Target vs Achievement")
         st.plotly_chart(fig2, use_container_width=True)
 
-    # Chart 3: Department Fund vs VB-G RAM G Fund (stacked)
+    # Chart 3: Department Fund vs VB-G RAM G Fund
     if not df.empty:
         fig3 = px.bar(df.groupby('department_id')[['department_fund', 'vbgramg_fund']].sum().reset_index(),
                       x='department_id', y=['department_fund', 'vbgramg_fund'],
@@ -168,7 +154,7 @@ def show():
                       title="Financial Convergence by Theme")
         st.plotly_chart(fig4, use_container_width=True)
 
-    # Chart 5: Technical Convergence by Department (convergence_type filter)
+    # Chart 5: Technical Convergence by Department
     tech_df = df[df['convergence_type'].isin(['Technical', 'Financial + Technical'])]
     if not tech_df.empty:
         tech_count = tech_df.groupby('department_id').size().reset_index(name='Count')
@@ -176,7 +162,7 @@ def show():
         fig5 = px.bar(tech_count, x='Department', y='Count', title="Technical Convergence Activities by Department")
         st.plotly_chart(fig5, use_container_width=True)
 
-    # Chart 6: Expected vs Actual Persondays (by district or department)
+    # Chart 6: Expected vs Actual Persondays
     if not df.empty:
         pd_comp = df.groupby('district_id').agg(
             Expected=('expected_persondays', 'sum'),
@@ -196,9 +182,7 @@ def show():
     fig7 = px.pie(status_count, values='Count', names='Status', title="Activity Status Distribution")
     st.plotly_chart(fig7, use_container_width=True)
 
-    # Chart 8: Monthly Progress (if date fields available, can be added later)
-
-    # Chart 9: Top 10 Performing Departments (by physical achievement %)
+    # Chart 9: Top 10 Performing Departments
     if not df.empty:
         top_dept = df.groupby('department_id')['physical_achievement'].mean().nlargest(10).reset_index()
         top_dept['Department'] = top_dept['department_id'].map(dept_names_map)
@@ -214,10 +198,9 @@ def show():
                        title="Top 10 Performing Districts (Avg Physical Ach.)")
         st.plotly_chart(fig10, use_container_width=True)
 
-    # ---------- PERFORMANCE SCORE (configurable) ----------
+    # ---------- PERFORMANCE SCORE ----------
     st.subheader("Overall Performance Score")
     weights = {"physical": 0.3, "financial": 0.3, "personday": 0.2, "timeliness": 0.2}
-    # Try to fetch from system_settings
     try:
         settings = supabase.table("system_settings").select("*").execute().data
         if settings:
@@ -229,9 +212,7 @@ def show():
 
     df['score_physical'] = df['physical_achievement'] * weights['physical']
     df['score_financial'] = (df['financial_achievement'] / (df['total_converged_fund'] + 0.001)) * 100 * weights['financial']
-    # Personday score: actual/expected clamped to 100%
     df['score_personday'] = (df['persondays_generated'] / (df['expected_persondays'] + 0.001)).clip(0, 1) * 100 * weights['personday']
-    # Timeliness: inverse delay (simplified)
     df['delay_days'] = df.get('delay_days', 0)
     df['score_timeliness'] = ((1 - (df['delay_days'] / (df['duration_days'] + 1)).clip(0,1)) * 100) * weights['timeliness']
     df['overall_score'] = df[['score_physical','score_financial','score_personday','score_timeliness']].sum(axis=1)
@@ -239,7 +220,6 @@ def show():
     avg_score = df['overall_score'].mean()
     st.metric("Average Performance Score", f"{avg_score:.1f} / 100")
 
-    # Performance categories
     def score_label(x):
         if x >= 75: return "Excellent"
         elif x >= 50: return "Good"
@@ -251,11 +231,9 @@ def show():
     fig_perf = px.pie(perf_counts, values='Count', names='Category', title="Performance Categories")
     st.plotly_chart(fig_perf, use_container_width=True)
 
-    # ---------- MEETING ACTION POINTS (if applicable) ----------
+    # ---------- MEETING ACTION POINTS ----------
     if role in ['superadmin', 'district']:
         st.subheader("Convergence Meeting Action Points")
-        ap_query = supabase.table("meeting_action_points").select("status", count="exact").execute()
-        # Fetch all APs for summary
         ap_data = supabase.table("meeting_action_points").select("status").execute().data
         if ap_data:
             ap_df = pd.DataFrame(ap_data)
