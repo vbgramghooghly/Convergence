@@ -42,6 +42,11 @@ def show():
         "Financial (as PIA)",
         "Financial (as Non-PIA)"
     ]
+    
+    UNIT_OPTIONS = [
+        "None", "Sq. Meter", "Cu. Meter", "Running Meter", "Kilometer", 
+        "Hectare", "Acre", "Number (Nos.)", "Other"
+    ]
 
     # ==========================================
     # 2. VIEW EXISTING RECORDS
@@ -77,7 +82,6 @@ def show():
         if 'convergence_type' not in df_display.columns:
             df_display['convergence_type'] = "Not Specified"
             
-        # Include new detail columns in the view if they exist
         display_cols = ['FY', 'District', 'Block', 'Department', 'activity_description']
         if 'scheme_name' in df_display.columns: display_cols.append('scheme_name')
         if 'geo_location' in df_display.columns: display_cols.append('geo_location')
@@ -129,10 +133,13 @@ def show():
                     
                     # New Detailed Fields
                     st.markdown("##### Detailed Work Specifications")
-                    col_det1, col_det2, col_det3 = st.columns(3)
+                    col_det1, col_det2, col_det3, col_det4 = st.columns([2, 2, 1, 1])
                     new_scheme = col_det1.text_input("Scheme Name", value=rec.get('scheme_name', '') or '')
                     new_geo = col_det2.text_input("Geo Location (Village/GP/Lat-Long)", value=rec.get('geo_location', '') or '')
-                    new_dim = col_det3.text_input("Dimensions (Area/Length/Breadth)", value=rec.get('work_dimensions', '') or '')
+                    new_dim = col_det3.text_input("Dimension Value", value=rec.get('work_dimensions', '') or '')
+                    
+                    curr_unit = rec.get('dimension_unit', 'None')
+                    new_unit = col_det4.selectbox("Unit", UNIT_OPTIONS, index=UNIT_OPTIONS.index(curr_unit) if curr_unit in UNIT_OPTIONS else 0)
 
                     st.markdown("##### Targets & Financials")
                     col_t1, col_t2 = st.columns(2)
@@ -153,6 +160,7 @@ def show():
                             "scheme_name": new_scheme,
                             "geo_location": new_geo,
                             "work_dimensions": new_dim,
+                            "dimension_unit": new_unit if new_unit != "None" else None,
                             "desired_target": new_target,
                             "expected_persondays": new_pd,
                             "department_fund": new_d_fund,
@@ -225,12 +233,12 @@ def show():
         
         sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
 
-        # NEW DETAILED FIELDS
         st.markdown("##### Detailed Work Specifications")
-        col_det1, col_det2, col_det3 = st.columns(3)
+        col_det1, col_det2, col_det3, col_det4 = st.columns([2, 2, 1, 1])
         inp_scheme = col_det1.text_input("Scheme Name (Optional)")
         inp_geo = col_det2.text_input("Geo Location (Village/GP/Lat-Long) (Optional)")
-        inp_dim = col_det3.text_input("Dimensions (Area/Length/Breadth) (Optional)")
+        inp_dim = col_det3.text_input("Dimension Value (Optional)", placeholder="e.g. 500")
+        inp_unit = col_det4.selectbox("Unit", UNIT_OPTIONS)
 
         st.markdown("##### Targets & Financials")
         col3, col4 = st.columns(2)
@@ -262,9 +270,10 @@ def show():
                     "activity_description": sel_act_name, 
                     "thematic_category_id": theme_id,
                     "convergence_type": sel_conv_type,
-                    "scheme_name": inp_scheme,         # New Field
-                    "geo_location": inp_geo,           # New Field
-                    "work_dimensions": inp_dim,        # New Field
+                    "scheme_name": inp_scheme,
+                    "geo_location": inp_geo,
+                    "work_dimensions": inp_dim,
+                    "dimension_unit": inp_unit if inp_unit != "None" else None,
                     "desired_target": target,
                     "expected_persondays": persondays,
                     "department_fund": dept_fund,
@@ -299,6 +308,7 @@ def show():
         * `Scheme Name` (Optional)
         * `Geo Location` (Optional)
         * `Work Dimensions` (Optional)
+        * `Dimension Unit` (Optional)
         * `Physical Target`
         * `Expected Persondays`
         * `Department Fund`
@@ -365,6 +375,7 @@ def show():
                             "scheme_name": str(row.get('Scheme Name', '')).strip(),
                             "geo_location": str(row.get('Geo Location', '')).strip(),
                             "work_dimensions": str(row.get('Work Dimensions', '')).strip(),
+                            "dimension_unit": str(row.get('Dimension Unit', '')).strip(),
                             "desired_target": int(row.get('Physical Target', 0)),
                             "expected_persondays": int(row.get('Expected Persondays', 0)),
                             "department_fund": d_fund,
