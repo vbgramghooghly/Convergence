@@ -50,67 +50,6 @@ st.sidebar.title("VB‑G RAM G Convergence")
 st.sidebar.markdown(f"<span style='color: #495057; font-size: 0.9rem;'>FY 2026‑27</span><br><span style='font-size: 0.85rem;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
 st.sidebar.divider()
 
-# ---------- FONT SIZE ACCESSIBILITY SLIDER ----------
-st.sidebar.markdown("### 🔠 Accessibility")
-global_font_size = st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, value=15, step=1)
-st.sidebar.divider()
-
-# ---------- DYNAMIC FONT SIZE & UI STYLING ----------
-st.markdown(f"""
-    <style>
-        /* Main background and global font scaling */
-        .main {{
-            background-color: #F8F9FA;
-            font-size: {global_font_size}px !important;
-        }}
-        .main p, .main span, .main label, .main div {{
-            font-size: {global_font_size}px !important;
-        }}
-        /* Sidebar styling */
-        [data-testid="stSidebar"] {{
-            background-color: #F1F3F5;
-            border-right: 1px solid #E9ECEF;
-            padding-bottom: 20px;
-        }}
-        /* Custom Headers */
-        h1 {{
-            font-size: {global_font_size + 12}px !important;
-            color: #1F77B4;
-        }}
-        h2 {{
-            font-size: {global_font_size + 8}px !important;
-            color: #1F77B4;
-        }}
-        h3 {{
-            font-size: {global_font_size + 4}px !important;
-            color: #1F77B4;
-        }}
-        /* Metric Cards Accent */
-        [data-testid="stMetricValue"] {{
-            color: #2B8A3E;
-            font-size: {global_font_size + 10}px !important;
-        }}
-        /* FIXED: Explicitly target sidebar radio text, paragraphs, and spans for dynamic scaling */
-        [data-testid="stSidebar"] [role="radiogroup"] label, 
-        [data-testid="stSidebar"] [role="radiogroup"] label p, 
-        [data-testid="stSidebar"] [role="radiogroup"] label span {{
-            font-size: {global_font_size + 2}px !important;
-            font-weight: 700 !important;
-            color: #2C3E50 !important;
-        }}
-        [data-testid="stSidebar"] [role="radiogroup"] label {{
-            padding: 8px 12px !important;
-            border-radius: 8px;
-            margin-bottom: 4px;
-            transition: all 0.2s ease-in-out;
-        }}
-        [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
-            background-color: #E2E8F0 !important;
-            color: #1F77B4 !important;
-        }}
-    </style>
-""", unsafe_allow_html=True)
-
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
 role_pages = {
     "superadmin": [
@@ -161,13 +100,77 @@ if not allowed_pages:
 # ---------- NAVIGATION MENU (PLACED FIRST) ----------
 selection = st.sidebar.radio("Navigation", allowed_pages, label_visibility="collapsed")
 
-# Spacer to push logout button to the bottom
+# ---------- ACCESSIBILITY SLIDER & LOGOUT AT THE BOTTOM ----------
 st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
 st.sidebar.divider()
 
-# ---------- LOGOUT BUTTON AT THE BOTTOM ----------
+st.sidebar.markdown("### 🔠 Accessibility")
+global_font_size = st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, value=15, step=1)
+
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
+
+# ---------- DYNAMIC FONT SIZE & HOVER STYLING ----------
+st.markdown(f"""
+    <style>
+        /* Main background and global font scaling */
+        .main {{
+            background-color: #F8F9FA;
+            font-size: {global_font_size}px !important;
+        }}
+        .main p, .main span, .main label, .main div {{
+            font-size: {global_font_size}px !important;
+        }}
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {{
+            background-color: #F1F3F5;
+            border-right: 1px solid #E9ECEF;
+            padding-bottom: 20px;
+        }}
+        /* Custom Headers */
+        h1 {{
+            font-size: {global_font_size + 12}px !important;
+            color: #1F77B4;
+        }}
+        h2 {{
+            font-size: {global_font_size + 8}px !important;
+            color: #1F77B4;
+        }}
+        h3 {{
+            font-size: {global_font_size + 4}px !important;
+            color: #1F77B4;
+        }}
+        /* Metric Cards Accent */
+        [data-testid="stMetricValue"] {{
+            color: #2B8A3E;
+            font-size: {global_font_size + 10}px !important;
+        }}
+        /* Sidebar Navigation Menu Styling & Distinct Hover Effects */
+        [data-testid="stSidebar"] [role="radiogroup"] label, 
+        [data-testid="stSidebar"] [role="radiogroup"] label p, 
+        [data-testid="stSidebar"] [role="radiogroup"] label span {{
+            font-size: {global_font_size + 2}px !important;
+            font-weight: 700 !important;
+            color: #2C3E50 !important;
+            transition: all 0.2s ease-in-out;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label {{
+            padding: 10px 14px !important;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
+            background-color: #D0E1FD !important;
+            color: #1A56DB !important;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover p,
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover span {{
+            color: #1A56DB !important;
+        }}
+    </style>
+""", unsafe_allow_html=True)
 
 # ---------- IMPORT ALL MODULES FOR ROUTING ----------
 menu = {
