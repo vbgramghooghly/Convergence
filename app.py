@@ -95,11 +95,9 @@ st.markdown(f"""
 try:
     from modules.dashboard import show as show_dashboard
     from modules.convergence_register import show as show_convergence
-    # department_targets import removed (merged into implementation)
     from modules.implementation import show as show_implementation
     from modules.meetings import show as show_meetings
     from modules.reports import show as show_reports
-    from modules.excel_import import show as show_import
     from modules.master_data import show as show_masterdata
     from modules.users import show as show_users
     from modules.audit import show as show_audit
@@ -119,7 +117,6 @@ st.sidebar.markdown(f"<span style='color: #495057; font-size: 0.9rem;'>FY 2026�
 st.sidebar.divider()
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
-# Consolidated 'Implementation Monitoring' and 'Department Targets' into one tab
 role_pages = {
     "superadmin": [
         "Dashboard",
@@ -127,7 +124,6 @@ role_pages = {
         "Implementation & Targets",
         "Meetings",
         "Reports & Excel",
-        "Excel Import",
         "Master Data",
         "User Directory",
         "User Management",
@@ -175,7 +171,6 @@ menu = {
     "Implementation & Targets": show_implementation,
     "Meetings": show_meetings,
     "Reports & Excel": show_reports,
-    "Excel Import": show_import,
     "Master Data": show_masterdata,
     "User Directory": show_contacts,
     "User Management": show_users,
@@ -183,7 +178,7 @@ menu = {
     "🎨 UI/UX Controller": show_ui_ux,
 }
 
-# ---------- CALL THE SELECTED PAGE (RENDERS PAGE DATA FILTERS BELOW MENUS) ----------
+# ---------- CALL THE SELECTED PAGE ----------
 if selection in menu:
     try:
         menu[selection]()
@@ -218,7 +213,6 @@ with st.sidebar.expander("Change My Password"):
             else:
                 try:
                     supabase = get_supabase()
-                    # Securely updates the authenticated user's password via Supabase
                     supabase.auth.update_user({"password": new_pw})
                     st.success("✅ Password updated successfully! Use it on your next login.")
                 except Exception as e:
