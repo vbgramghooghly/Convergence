@@ -79,7 +79,8 @@ def show():
                 result = supabase.table("meetings").insert(meeting_data).execute()
                 if result.data:
                     st.success("Meeting recorded.")
-                    log_action(user, "CREATE", "meetings", result.data[0]['id'], new_vals=meeting_data)
+                    # Fixed: Changed new_vals to details
+                    log_action(user, "CREATE", "meetings", result.data[0]['id'], details=meeting_data)
                     st.rerun()
                 else:
                     st.error("Failed to save meeting.")
@@ -129,7 +130,8 @@ def show():
                     res = supabase.table("meeting_action_points").insert(action_data).execute()
                     if res.data:
                         st.success("Action point added.")
-                        log_action(user, "CREATE", "meeting_action_points", res.data[0]['id'], new_vals=action_data)
+                        # Fixed: Changed new_vals to details
+                        log_action(user, "CREATE", "meeting_action_points", res.data[0]['id'], details=action_data)
                         st.rerun()
                     else:
                         st.error("Failed to add.")
@@ -146,7 +148,8 @@ def show():
                 new_ap_status = st.selectbox("New Status", ['Open', 'In Progress', 'Completed', 'Overdue'], key="ap_status")
                 if st.button("Update Action Point"):
                     supabase.table("meeting_action_points").update({"status": new_ap_status}).eq("id", ap_id).execute()
-                    log_action(user, "UPDATE", "meeting_action_points", ap_id, new_vals={"status": new_ap_status})
+                    # Fixed: Changed new_vals to details
+                    log_action(user, "UPDATE", "meeting_action_points", ap_id, details={"status": new_ap_status})
                     st.rerun()
             else:
                 st.info("No action points for this meeting yet.")
