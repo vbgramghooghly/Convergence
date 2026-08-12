@@ -11,8 +11,8 @@ def show():
 
     supabase = get_supabase()
 
-    # Define Tabs
-    tabs = st.tabs(["Districts", "Blocks", "Departments", "Themes", "Activities", "Financial Years"])
+    # Define Tabs (Includes Designations as the 7th tab)
+    tabs = st.tabs(["Districts", "Blocks", "Departments", "Themes", "Activities", "Financial Years", "Designations"])
 
     # ==========================================
     # GLOBAL FETCH: Load base tables to avoid SQL Join errors
@@ -88,7 +88,6 @@ def show():
         df_block = pd.DataFrame(block_data)
         
         if not df_block.empty:
-            # Safely map district names using Pandas instead of SQL Joins
             df_block['district_name'] = df_block['district_id'].map(dist_map).fillna("Unknown")
             st.dataframe(df_block[['id', 'district_name', 'block_name', 'block_code', 'active']], use_container_width=True, hide_index=True)
         else:
@@ -140,7 +139,7 @@ def show():
                     st.error("Cannot delete. This block is in use by other records.")
 
     # ---------------------------------------------------------
-    # HELPER: GENERIC CRUD FOR SIMPLE TABLES (Dept, Theme, FY)
+    # HELPER: GENERIC CRUD FOR SIMPLE TABLES
     # ---------------------------------------------------------
     def render_simple_master_tab(table_name, display_col, label):
         st.subheader(f"🗃️ Manage {label}s")
@@ -185,26 +184,25 @@ def show():
                     st.error("Cannot delete. This record is linked to existing data.")
 
     # ---------------------------------------------------------
-    # TAB 3, 4, 6: DEPARTMENTS, THEMES, FY
+    # RENDER SIMPLE TABS (Departments, Themes, Financial Years, Designations)
     # ---------------------------------------------------------
     with tabs[2]: render_simple_master_tab("departments", "department_name", "Department")
     with tabs[3]: render_simple_master_tab("themes", "theme_name", "Theme")
     with tabs[5]: render_simple_master_tab("financial_years", "year_name", "Financial Year")
+    with tabs[6]: render_simple_master_tab("designations", "designation_name", "Designation")
 
     # ---------------------------------------------------------
-    # TAB 5: ACTIVITIES (FIXED MAPPING LOGIC)
+    # TAB 5: ACTIVITIES (Multi-Department Mapping)
     # ---------------------------------------------------------
     with tabs[4]:
         st.subheader("🛠️ Manage Activities & Multi-Department Mapping")
         
-        # Filter only active depts and themes for the dropdowns
         active_depts = [d for d in raw_depts if d.get('active', True)]
         active_themes = [t for t in raw_themes if t.get('active', True)]
         
         dept_names_map = {d['department_name']: d['id'] for d in active_depts}
         theme_names_map = {t['theme_name']: t['id'] for t in active_themes}
 
-        # Safe fetch (No SQL Joins)
         act_data = supabase.table("activities").select("*").execute().data
         mapping_data = supabase.table("activity_departments").select("*").execute().data
         
@@ -212,14 +210,10 @@ def show():
         df_map = pd.DataFrame(mapping_data)
 
         if not df_act.empty:
-            # 1. Map Theme Name using dictionary
             df_act['Theme'] = df_act['theme_id'].map(theme_map).fillna('Unassigned')
             
-            # 2. Map Multiple Departments safely
             if not df_map.empty:
                 df_map['dept_name'] = df_map['department_id'].map(dept_map)
-                
-                # Group by activity and join department names with commas
                 dept_agg = df_map.dropna(subset=['dept_name']).groupby('activity_id')['dept_name'].apply(lambda x: ', '.join(x)).reset_index(name='Departments')
                 df_act = df_act.merge(dept_agg, left_on='id', right_on='activity_id', how='left')
             else:
@@ -250,7 +244,6 @@ def show():
                 if st.form_submit_button("Save Activity", type="primary") and name:
                     theme_id = theme_names_map.get(sel_theme, None)
                     
-                    # Insert Activity
                     res = supabase.table("activities").insert({
                         "theme_id": theme_id,
                         "activity_name": name,
@@ -260,7 +253,6 @@ def show():
                     
                     if res.data:
                         new_act_id = res.data[0]['id']
-                        # Insert mappings
                         for d_name in sel_depts:
                             supabase.table("activity_departments").insert({
                                 "activity_id": new_act_id,
@@ -278,7 +270,6 @@ def show():
             )
             selected = df_act[df_act['id'] == act_id].iloc[0]
             
-            # Fetch currently mapped departments safely
             if not df_map.empty:
                 current_mapped_depts = df_map[df_map['activity_id'] == act_id]['department_id'].map(dept_map).dropna().tolist()
             else:
@@ -301,7 +292,6 @@ def show():
                 if st.form_submit_button("Update & Map Activity", type="primary"):
                     theme_id = theme_names_map.get(sel_theme, None)
                     
-                    # 1. Update basic info
                     supabase.table("activities").update({
                         "theme_id": theme_id,
                         "activity_name": name,
@@ -309,7 +299,6 @@ def show():
                         "active": active
                     }).eq("id", act_id).execute()
                     
-                    # 2. Refresh junction table mappings (delete old, insert new)
                     supabase.table("activity_departments").delete().eq("activity_id", act_id).execute()
                     for d_name in sel_depts:
                         supabase.table("activity_departments").insert({
