@@ -20,6 +20,7 @@ st.markdown("""
         [data-testid="stSidebar"] {
             background-color: #F1F3F5;
             border-right: 1px solid #E9ECEF;
+            padding-bottom: 20px;
         }
         /* Custom Headers */
         h1, h2, h3 {
@@ -28,6 +29,20 @@ st.markdown("""
         /* Metric Cards Accent */
         [data-testid="stMetricValue"] {
             color: #2B8A3E;
+        }
+        /* Enhance sidebar navigation menu visibility */
+        [data-testid="stSidebar"] [role="radiogroup"] label {
+            font-size: 15px !important;
+            font-weight: 600 !important;
+            color: #2C3E50 !important;
+            padding: 8px 12px !important;
+            border-radius: 8px;
+            margin-bottom: 4px;
+            transition: all 0.2s ease-in-out;
+        }
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover {
+            background-color: #E2E8F0 !important;
+            color: #1F77B4 !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -64,30 +79,14 @@ except Exception as e:
     st.error(f"Error importing modules: {e}")
     st.stop()
 
-# ---------- SIDEBAR HEADER ----------
+# ---------- SIDEBAR HEADER INFO ----------
 logo_path = "assets/logo.png"
 if os.path.exists(logo_path):
-    st.sidebar.image(logo_path, width=200)
+    st.sidebar.image(logo_path, width=180)
 
 st.sidebar.title("VB‑G RAM G Convergence")
-st.sidebar.markdown(f"<span style='color: #495057;'>FY 2026‑27 | Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4;'>{role.upper()}</span>)", unsafe_allow_html=True)
+st.sidebar.markdown(f"<span style='color: #495057; font-size: 0.9rem;'>FY 2026‑27</span><br><span style='font-size: 0.85rem;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
 st.sidebar.divider()
-
-# ---------- NAVIGATION MENU ----------
-menu = {
-    "Dashboard": show_dashboard,
-    "Convergence Register": show_convergence,
-    "Department Targets": show_targets,
-    "Implementation Monitoring": show_implementation,
-    "Meetings": show_meetings,
-    "Reports & Excel": show_reports,
-    "Excel Import": show_import,
-    "Master Data": show_masterdata,
-    "User Directory": show_contacts,
-    "User Management": show_users,
-    "Audit Log": show_audit,
-    "🎨 UI/UX Controller": show_ui_ux,
-}
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
 role_pages = {
@@ -136,12 +135,32 @@ if not allowed_pages:
     st.error("Your user role is not configured correctly. Please contact the administrator.")
     logout()
 
-# ---------- LOGOUT BUTTON ----------
-if st.sidebar.button("🔒 Logout", type="secondary"):
+# ---------- NAVIGATION MENU (PLACED FIRST) ----------
+selection = st.sidebar.radio("Navigation", allowed_pages, label_visibility="collapsed")
+
+# Spacer to push logout button to the bottom
+st.sidebar.markdown("<br>" * 3, unsafe_allow_html=True)
+st.sidebar.divider()
+
+# ---------- LOGOUT BUTTON AT THE BOTTOM ----------
+if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
 
-# ---------- NAVIGATION RADIO ----------
-selection = st.sidebar.radio("Navigation", allowed_pages)
+# ---------- IMPORT ALL MODULES FOR ROUTING ----------
+menu = {
+    "Dashboard": show_dashboard,
+    "Convergence Register": show_convergence,
+    "Department Targets": show_targets,
+    "Implementation Monitoring": show_implementation,
+    "Meetings": show_meetings,
+    "Reports & Excel": show_reports,
+    "Excel Import": show_import,
+    "Master Data": show_masterdata,
+    "User Directory": show_contacts,
+    "User Management": show_users,
+    "Audit Log": show_audit,
+    "🎨 UI/UX Controller": show_ui_ux,
+}
 
 # ---------- CALL THE SELECTED PAGE ----------
 if selection in menu:
