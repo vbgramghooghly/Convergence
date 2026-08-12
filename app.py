@@ -23,6 +23,73 @@ if not user or 'role' not in user:
 
 role = user['role']
 
+# ---------- FONT SIZE SESSION STATE INITIALIZATION ----------
+if 'global_font_size' not in st.session_state:
+    st.session_state.global_font_size = 15
+
+global_font_size = st.session_state.global_font_size
+
+# ---------- DYNAMIC FONT SIZE & HOVER STYLING ----------
+st.markdown(f"""
+    <style>
+        /* Main background and global font scaling */
+        .main {{
+            background-color: #F8F9FA;
+            font-size: {global_font_size}px !important;
+        }}
+        .main p, .main span, .main label, .main div {{
+            font-size: {global_font_size}px !important;
+        }}
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {{
+            background-color: #F1F3F5;
+            border-right: 1px solid #E9ECEF;
+            padding-bottom: 20px;
+        }}
+        /* Custom Headers */
+        h1 {{
+            font-size: {global_font_size + 12}px !important;
+            color: #1F77B4;
+        }}
+        h2 {{
+            font-size: {global_font_size + 8}px !important;
+            color: #1F77B4;
+        }}
+        h3 {{
+            font-size: {global_font_size + 4}px !important;
+            color: #1F77B4;
+        }}
+        /* Metric Cards Accent */
+        [data-testid="stMetricValue"] {{
+            color: #2B8A3E;
+            font-size: {global_font_size + 10}px !important;
+        }}
+        /* Sidebar Navigation Menu Styling & Distinct Hover Effects */
+        [data-testid="stSidebar"] [role="radiogroup"] label, 
+        [data-testid="stSidebar"] [role="radiogroup"] label p, 
+        [data-testid="stSidebar"] [role="radiogroup"] label span {{
+            font-size: {global_font_size + 2}px !important;
+            font-weight: 700 !important;
+            color: #2C3E50 !important;
+            transition: all 0.2s ease-in-out;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label {{
+            padding: 10px 14px !important;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
+            background-color: #D0E1FD !important;
+            color: #1A56DB !important;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover p,
+        [data-testid="stSidebar"] [role="radiogroup"] label:hover span {{
+            color: #1A56DB !important;
+        }}
+    </style>
+""", unsafe_allow_html=True)
+
 # ---------- IMPORT ALL MODULES SAFELY ----------
 try:
     from modules.dashboard import show as show_dashboard
@@ -97,80 +164,9 @@ if not allowed_pages:
     st.error("Your user role is not configured correctly. Please contact the administrator.")
     logout()
 
-# ---------- NAVIGATION MENU (PLACED FIRST) ----------
+# ---------- NAVIGATION MENU (TOP OF SIDEBAR) ----------
 selection = st.sidebar.radio("Navigation", allowed_pages, label_visibility="collapsed")
-
-# ---------- ACCESSIBILITY SLIDER & LOGOUT AT THE BOTTOM ----------
-st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
 st.sidebar.divider()
-
-st.sidebar.markdown("### 🔠 Accessibility")
-global_font_size = st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, value=15, step=1)
-
-st.sidebar.markdown("<br>", unsafe_allow_html=True)
-if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
-    logout()
-
-# ---------- DYNAMIC FONT SIZE & HOVER STYLING ----------
-st.markdown(f"""
-    <style>
-        /* Main background and global font scaling */
-        .main {{
-            background-color: #F8F9FA;
-            font-size: {global_font_size}px !important;
-        }}
-        .main p, .main span, .main label, .main div {{
-            font-size: {global_font_size}px !important;
-        }}
-        /* Sidebar styling */
-        [data-testid="stSidebar"] {{
-            background-color: #F1F3F5;
-            border-right: 1px solid #E9ECEF;
-            padding-bottom: 20px;
-        }}
-        /* Custom Headers */
-        h1 {{
-            font-size: {global_font_size + 12}px !important;
-            color: #1F77B4;
-        }}
-        h2 {{
-            font-size: {global_font_size + 8}px !important;
-            color: #1F77B4;
-        }}
-        h3 {{
-            font-size: {global_font_size + 4}px !important;
-            color: #1F77B4;
-        }}
-        /* Metric Cards Accent */
-        [data-testid="stMetricValue"] {{
-            color: #2B8A3E;
-            font-size: {global_font_size + 10}px !important;
-        }}
-        /* Sidebar Navigation Menu Styling & Distinct Hover Effects */
-        [data-testid="stSidebar"] [role="radiogroup"] label, 
-        [data-testid="stSidebar"] [role="radiogroup"] label p, 
-        [data-testid="stSidebar"] [role="radiogroup"] label span {{
-            font-size: {global_font_size + 2}px !important;
-            font-weight: 700 !important;
-            color: #2C3E50 !important;
-            transition: all 0.2s ease-in-out;
-        }}
-        [data-testid="stSidebar"] [role="radiogroup"] label {{
-            padding: 10px 14px !important;
-            border-radius: 8px;
-            margin-bottom: 6px;
-            cursor: pointer;
-        }}
-        [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
-            background-color: #D0E1FD !important;
-            color: #1A56DB !important;
-        }}
-        [data-testid="stSidebar"] [role="radiogroup"] label:hover p,
-        [data-testid="stSidebar"] [role="radiogroup"] label:hover span {{
-            color: #1A56DB !important;
-        }}
-    </style>
-""", unsafe_allow_html=True)
 
 # ---------- IMPORT ALL MODULES FOR ROUTING ----------
 menu = {
@@ -188,7 +184,7 @@ menu = {
     "🎨 UI/UX Controller": show_ui_ux,
 }
 
-# ---------- CALL THE SELECTED PAGE ----------
+# ---------- CALL THE SELECTED PAGE (RENDERS PAGE DATA FILTERS BELOW MENUS) ----------
 if selection in menu:
     try:
         menu[selection]()
@@ -196,3 +192,14 @@ if selection in menu:
         st.error(f"An error occurred while loading this page: {e}")
 else:
     show_dashboard()
+
+# ---------- ACCESSIBILITY & LOGOUT AT THE BOTTOM OF SIDEBAR ----------
+st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
+st.sidebar.divider()
+
+st.sidebar.markdown("### 🔠 Accessibility")
+st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, key="global_font_size", step=1)
+
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
+if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
+    logout()
