@@ -118,13 +118,13 @@ def show():
         st.metric("Total Target", f"{total_target:,}" if total_target else 0)
     with col3:
         total_dept_fund = df.get('department_fund', pd.Series([0])).sum()
-        st.metric("Dept. Fund (₹ Cr)", f"₹{total_dept_fund:.2f}")
+        st.metric("Dept. Fund (₹ Lakhs)", f"₹{total_dept_fund:,.2f}")
     with col4:
         total_vbg_fund = df.get('vbgramg_fund', pd.Series([0])).sum()
-        st.metric("MGNREGS Fund (₹ Cr)", f"₹{total_vbg_fund:.2f}")
+        st.metric("VB-G RAM G Fund (₹ Lakhs)", f"₹{total_vbg_fund:,.2f}")
     with col5:
         total_converged = df.get('total_converged_fund', pd.Series([0])).sum()
-        st.metric("Total Converged", f"₹{total_converged:.2f}")
+        st.metric("Total Converged (₹ Lakhs)", f"₹{total_converged:,.2f}")
 
     # Add a visual spacer
     st.write("") 
@@ -146,7 +146,7 @@ def show():
         st.metric("Avg Physical Ach.", f"{phys_avg:.1f}%")
     with col10:
         fin_avg = df.get('financial_achievement', pd.Series([0])).mean()
-        st.metric("Avg Financial Ach.", f"₹{fin_avg:.2f} Cr" if not pd.isna(fin_avg) else "₹0")
+        st.metric("Avg Financial Ach.", f"₹{fin_avg:,.2f} Lakhs" if not pd.isna(fin_avg) else "₹0 Lakhs")
 
     # ---------- CHARTS ----------
     st.markdown("<br>", unsafe_allow_html=True)
@@ -190,7 +190,7 @@ def show():
             fig3 = px.bar(
                 df.groupby('department_id')[['department_fund', 'vbgramg_fund']].sum().reset_index(),
                 x='department_id', y=['department_fund', 'vbgramg_fund'],
-                labels={'value': 'Fund (₹ Cr.)', 'variable': 'Source'},
+                labels={'value': 'Fund (₹ Lakhs)', 'variable': 'Source'},
                 color_discrete_sequence=[CHART_COLORS[2], CHART_COLORS[4]]
             )
             fig3 = apply_trendy_layout(fig3, "Financial Convergence by Department")
@@ -224,6 +224,7 @@ def show():
             fig4 = px.bar(
                 theme_perf, x='Theme', y=['Dept_Fund', 'VBG_Fund'], 
                 barmode='stack',
+                labels={'value': 'Fund (₹ Lakhs)', 'variable': 'Source'},
                 color_discrete_sequence=[CHART_COLORS[0], CHART_COLORS[1]]
             )
             fig4 = apply_trendy_layout(fig4, "Financial Convergence by Theme")
@@ -234,7 +235,6 @@ def show():
     st.subheader("Delayed Activities")
     delayed = df[df.get('delay_days', 0) > 0] if 'delay_days' in df.columns else pd.DataFrame()
     if not delayed.empty:
-        # Use Streamlit's new column config to make the dataframe look modern
         st.dataframe(
             delayed[['activity_description', 'current_status', 'delay_days']].head(10),
             use_container_width=True,
