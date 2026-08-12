@@ -163,33 +163,65 @@ def show():
     with tab6:
         st.subheader("Manage Activities")
         
-        # Fetch activities with joined department and theme names
-        act_data = supabase.table("activities").select("*, themes(theme_name), departments(department_name)").order("activity_name").execute().data
+        # 1. Fetch activities with Many-to-Many junction mapping (activity_departments)
+        act_data = supabase.table("activities").select(
+            "id, activity_name, active, themes(theme_name), activity_departments(departments(department_name))"
+        ).order("activity_name").execute().data
+        
         if act_data:
             df_a = pd.DataFrame(act_data)
-            df_a['Department'] = df_a['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else '')
-            df_a['Theme'] = df_a['themes'].apply(lambda x: x['theme_name'] if isinstance(x, dict) else '')
-            st.dataframe(df_a[['id', 'Department', 'Theme', 'activity_name', 'active']], use_container_width=True, hide_index=True)
+            
+            # Helper function to unpack the nested JSON array from the many-to-many relationship
+            def extract_departments(mapping_list):
+                if not isinstance(mapping_list, list): return ""
+                dept_names = [
+                    mapping.get('departments', {}).get('department_name', '') 
+                    for mapping in mapping_list if mapping.get('departments')
+                ]
+                return ", ".join(filter(None, dept_names))
+            
+            # Safely process and extract nested data
+            df_a['Departments'] = df_a.get('activity_departments', []).apply(extract_departments)
+            df_a['Theme'] = df_a.get('themes', {}).apply(lambda x: x.get('theme_name', '') if isinstance(x, dict) else '')
+            
+            st.dataframe(df_a[['id', 'Departments', 'Theme', 'activity_name', 'active']], use_container_width=True, hide_index=True)
             
         dept_dict_act = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
         theme_dict = {t['theme_name']: t['id'] for t in theme_data} if theme_data else {}
         
         with st.form("activity_form"):
             col_a1, col_a2 = st.columns(2)
-            sel_dept = col_a1.selectbox("Parent Department", list(dept_dict_act.keys()) if dept_dict_act else ["None"])
+            
+            # 2. Change to Multiselect for 1-to-many / many-to-many support
+            sel_depts = col_a1.multiselect("Parent Department(s)", list(dept_dict_act.keys()) if dept_dict_act else [])
             sel_theme = col_a2.selectbox("Parent Theme", list(theme_dict.keys()) if theme_dict else ["None"])
             act_name = st.text_input("Activity Name")
             
             if st.form_submit_button("Save Activity", type="primary"):
-                payload = {
-                    "department_id": dept_dict_act.get(sel_dept),
-                    "theme_id": theme_dict.get(sel_theme),
-                    "activity_name": act_name,
-                    "active": True
-                }
-                supabase.table("activities").insert(payload).execute()
-                st.success("Activity added!")
-                st.rerun()
+                if not sel_depts:
+                    st.error("Please select at least one department.")
+                elif not act_name:
+                    st.error("Please provide an activity name.")
+                else:
+                    # Step A: Insert Activity First
+                    act_payload = {
+                        "theme_id": theme_dict.get(sel_theme),
+                        "activity_name": act_name,
+                        "active": True
+                    }
+                    response = supabase.table("activities").insert(act_payload).execute()
+                    
+                    # Step B: Insert into the junction table
+                    if response.data:
+                        new_activity_id = response.data[0]['id']
+                        junction_payloads = [
+                            {"activity_id": new_activity_id, "department_id": dept_dict_act[dept]}
+                            for dept in sel_depts
+                        ]
+                        supabase.table("activity_departments").insert(junction_payloads).execute()
+                        
+                        st.success("Activity and department mappings saved successfully!")
+                        st.rerun()
 
     # ======================== TAB 7: FINANCIAL YEARS ========================
     with tab7:
