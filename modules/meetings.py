@@ -23,7 +23,6 @@ def show():
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data
     block_dict_reverse = {b['id']: b['block_name'] for b in blocks_data}
 
-    # Fetch from Contacts Directory (Not Users) to get full details
     contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designations(designation_name)").execute().data
     contact_map = {}
     for c in contacts_data:
@@ -46,7 +45,6 @@ def show():
     meetings = query.order("meeting_date", desc=True).execute().data
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
 
-    # Tab layout
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📅 Meeting Dashboard",
         "📝 Schedule & Mark Attendance", 
@@ -55,7 +53,7 @@ def show():
         "⏭️ Next Meeting Prep"
     ])
 
-    # ======================== TAB 1: MEETING DASHBOARD & EDITING ========================
+    # ======================== TAB 1: MEETING DASHBOARD ========================
     with tab1:
         st.subheader("Meeting Dashboard")
         if not df_meetings.empty:
@@ -94,9 +92,7 @@ def show():
                 else:
                     st.info("No detailed attendance captured for this meeting.")
 
-                # -------------------------------------------------------------------
-                # EDIT PAST MEETING OPTIONS (Restricted to District, Block, Superadmin)
-                # -------------------------------------------------------------------
+                # EDIT PAST MEETING OPTIONS
                 if user['role'] in ['superadmin', 'district', 'block']:
                     st.markdown("---")
                     with st.expander("✏️ Edit Past Meeting Data & Attendance"):
@@ -176,7 +172,6 @@ def show():
                                 "attendees": e_attendees,
                                 "detailed_attendance": e_detailed_attendance_payload
                             }
-                            
                             try:
                                 supabase.table("meetings").update(update_payload).eq("id", detail_sel).execute()
                                 log_action(user, "UPDATE", "meetings", detail_sel, details=update_payload)
@@ -191,7 +186,6 @@ def show():
     # ======================== TAB 2: SCHEDULE & ATTENDANCE BUILDER ========================
     with tab2:
         st.subheader("Schedule New Convergence Meeting")
-        st.caption("Statutory requirement for District and Block Level convergence planning.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         if user['role'] in ['superadmin', 'district']:
@@ -227,7 +221,6 @@ def show():
         
         st.markdown("---")
         st.markdown("### 👥 Dynamic Attendance Register")
-        st.caption("Select registered officials from the Contacts Directory. If a subordinate attended, check the box and enter their details temporarily.")
         
         selected_contact_ids = st.multiselect(
             "Select Invited Officials from Contact Directory", 
@@ -243,7 +236,6 @@ def show():
                 contact = contact_map[cid]
                 with st.container(border=True):
                     st.markdown(f"**{contact['name']}** | {contact['designation']} | {contact['phone']} | {contact['email']}")
-                    
                     is_sub = st.checkbox(f"Attended by Subordinate/Representative instead of {contact['name']}?", key=f"chk_{cid}")
                     
                     sub_name, sub_desig, sub_phone = "", "", ""
@@ -278,7 +270,6 @@ def show():
                 "detailed_attendance": detailed_attendance_payload, 
                 "created_by": user['id']
             }
-            
             if meeting_type == 'District':
                 meeting_data["district_id"] = dist_dict[dist_sel] if user['role'] != 'district' else user['district_id']
             else:
@@ -319,7 +310,7 @@ def show():
                     deadline = col_r5.date_input("Deadline", date.today())
                     status = col_r6.selectbox("Current Status", [
                         'Not Started', 'Under Process', 'Departmental Action Pending', 
-                        'Approved', 'Under Execution', 'Completed', 'Dropped'
+                        'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
                     ])
 
                     if st.form_submit_button("Adopt Resolution", type="primary"):
@@ -349,6 +340,7 @@ def show():
                 
                 def get_flag(row):
                     if row['status'] in ['Completed', 'Dropped']: return "✅ Closed"
+                    if row['status'] == 'Not Feasible (Requires Review)': return "🔴 FOR REVIEW"
                     if row['Days Remaining'] < 0: return "🚨 OVERDUE"
                     if row['Days Remaining'] == 0: return "⚠️ Due Today"
                     return "⏳ On Track"
@@ -363,7 +355,7 @@ def show():
                     ap_id = col_u1.selectbox("Select Resolution ID", df_ap['id'].tolist())
                     new_ap_status = col_u2.selectbox("Update Status", [
                         'Not Started', 'Under Process', 'Departmental Action Pending', 
-                        'Approved', 'Under Execution', 'Completed', 'Dropped'
+                        'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
                     ])
                     remarks = st.text_area("Outcome / Action Taken (Will be printed for Chairperson)")
                     
@@ -418,7 +410,6 @@ def show():
             if not df_meetings.empty and 'meeting_sel' in locals() and 'ap_query' in locals() and ap_query:
                 sel_meeting_data = df_meetings[df_meetings['id'] == meeting_sel].iloc[0]
                 
-                # Format Detailed Attendance for Print
                 att_data = sel_meeting_data.get('detailed_attendance')
                 attendance_html = ""
                 if att_data and isinstance(att_data, list):
@@ -439,7 +430,6 @@ def show():
                 else:
                     attendance_html = "<p>No detailed attendance recorded.</p>"
                 
-                # Format Resolution Table for Print
                 print_df = df_ap[['Department', 'action_point', 'target', 'status', 'remarks']].copy()
                 print_df.columns = ['Department', 'Resolution / Commitment', 'Target', 'Status', 'Outcome / Remarks']
                 html_table = print_df.to_html(index=False, classes="print-table")
@@ -561,17 +551,29 @@ def show():
     # ======================== TAB 5: NEXT MEETING AGENDA PREP ========================
     with tab5:
         st.subheader("⏭️ Next Meeting Agenda Preparation")
+        
         if not df_meetings.empty and 'meeting_sel' in locals() and 'ap_query' in locals() and ap_query:
-            pending_df = df_ap[~df_ap['status'].isin(['Completed', 'Dropped'])]
+            active_mask = ~df_ap['status'].isin(['Completed', 'Dropped'])
+            active_df = df_ap[active_mask]
             
-            if not pending_df.empty:
-                st.warning(f"⚠️ There are {len(pending_df)} pending/overdue items to be carried forward to the next meeting.")
-                st.dataframe(pending_df[['Department', 'action_point', 'Tracker Flag', 'remarks']], use_container_width=True, hide_index=True)
+            unfeasible_df = active_df[active_df['status'] == 'Not Feasible (Requires Review)']
+            pending_df = active_df[active_df['status'] != 'Not Feasible (Requires Review)']
+            
+            if not unfeasible_df.empty or not pending_df.empty:
+                st.warning(f"⚠️ There are {len(active_df)} items (including {len(unfeasible_df)} flagged as Not Feasible) for the next agenda.")
                 
                 agenda_text = "AGENDA ITEMS FOR NEXT MEETING (Auto-Generated):\n\n"
-                for idx, row in pending_df.iterrows():
-                    agenda_text += f"- [{row['Department']}] Follow-up on: {row['action_point']} (Status: {row['Tracker Flag']})\n"
                 
-                st.text_area("Copy this text to paste into the 'Agenda' field of your next Meeting:", value=agenda_text, height=200)
+                if not unfeasible_df.empty:
+                    agenda_text += "🔴 ITEMS FLAGGED AS NOT FEASIBLE (FOR IMMEDIATE REVIEW):\n"
+                    for idx, row in unfeasible_df.iterrows():
+                        agenda_text += f"- [{row['Department']}] {row['action_point']}\n  Reason: {row['remarks']}\n\n"
+                        
+                if not pending_df.empty:
+                    agenda_text += "⏳ PENDING / OVERDUE COMMITMENTS:\n"
+                    for idx, row in pending_df.iterrows():
+                        agenda_text += f"- [{row['Department']}] {row['action_point']} (Status: {row['Tracker Flag']})\n"
+                
+                st.text_area("Copy this text to paste into the 'Agenda' field of your next Meeting:", value=agenda_text, height=300)
             else:
                 st.success("🎉 All resolutions for this meeting are Complete! No baggage for the next meeting.")
