@@ -52,13 +52,13 @@ st.sidebar.divider()
 
 # ---------- FONT SIZE ACCESSIBILITY SLIDER ----------
 st.sidebar.markdown("### 🔠 Accessibility")
-global_font_size = st.sidebar.slider("Font Size Scaling", min_value=12, max_value=22, value=15, step=1)
+global_font_size = st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, value=15, step=1)
 st.sidebar.divider()
 
 # ---------- DYNAMIC FONT SIZE & UI STYLING ----------
 st.markdown(f"""
     <style>
-        /* Main background and font scaling */
+        /* Main background and global font scaling */
         .main {{
             background-color: #F8F9FA;
             font-size: {global_font_size}px !important;
@@ -90,14 +90,18 @@ st.markdown(f"""
             color: #2B8A3E;
             font-size: {global_font_size + 10}px !important;
         }}
-        /* Enhance sidebar navigation menu visibility with larger font */
-        [data-testid="stSidebar"] [role="radiogroup"] label {{
-            font-size: {global_font_size + 1}px !important;
+        /* FIXED: Explicitly target sidebar radio text, paragraphs, and spans for dynamic scaling */
+        [data-testid="stSidebar"] [role="radiogroup"] label, 
+        [data-testid="stSidebar"] [role="radiogroup"] label p, 
+        [data-testid="stSidebar"] [role="radiogroup"] label span {{
+            font-size: {global_font_size + 2}px !important;
             font-weight: 700 !important;
             color: #2C3E50 !important;
-            padding: 10px 14px !important;
+        }}
+        [data-testid="stSidebar"] [role="radiogroup"] label {{
+            padding: 8px 12px !important;
             border-radius: 8px;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
             transition: all 0.2s ease-in-out;
         }}
         [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
