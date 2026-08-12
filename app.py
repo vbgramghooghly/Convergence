@@ -195,37 +195,38 @@ else:
     show_dashboard()
 
 
-# ---------- ACCESSIBILITY, SECURITY & LOGOUT ----------
+# ---------- ACCESSIBILITY, SECURITY, & LOGOUT ----------
 st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
 st.sidebar.divider()
 
-# Accessibility
+# 1. Accessibility Slider
 st.sidebar.markdown("### 🔠 Accessibility")
 st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, key="global_font_size", step=1)
 st.sidebar.divider()
 
-# Change Password
+# 2. Change Password Expander
 st.sidebar.markdown("### 🔐 Account Security")
 with st.sidebar.expander("Change My Password"):
-    with st.form("change_password_form"):
-        new_password = st.text_input("New Password", type="password")
-        confirm_password = st.text_input("Confirm New Password", type="password")
-        submit_password = st.form_submit_button("Update Password", use_container_width=True)
+    with st.form("change_my_password_form"):
+        new_pw = st.text_input("New Password", type="password")
+        confirm_pw = st.text_input("Confirm New Password", type="password")
+        submit_pw = st.form_submit_button("Update Password", use_container_width=True)
         
-        if submit_password:
-            if len(new_password) < 6:
+        if submit_pw:
+            if len(new_pw) < 6:
                 st.error("Password must be at least 6 characters.")
-            elif new_password != confirm_password:
+            elif new_pw != confirm_pw:
                 st.error("Passwords do not match.")
             else:
                 try:
                     supabase = get_supabase()
-                    supabase.auth.update_user({"password": new_password})
-                    st.success("✅ Password updated successfully!")
+                    # Securely updates the authenticated user's password via Supabase
+                    supabase.auth.update_user({"password": new_pw})
+                    st.success("✅ Password updated successfully! Use it on your next login.")
                 except Exception as e:
                     st.error(f"Error updating password: {e}")
 
-# Logout
+# 3. Logout Button
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
