@@ -30,7 +30,7 @@ if 'global_font_size' not in st.session_state:
 
 global_font_size = st.session_state.global_font_size
 
-# ---------- DYNAMIC FONT SIZE & HOVER STYLING ----------
+# ---------- MODERN SAAS SIDEBAR & UI STYLING ----------
 st.markdown(f"""
     <style>
         /* Main background and global font scaling */
@@ -41,12 +41,14 @@ st.markdown(f"""
         .main p, .main span, .main label, .main div {{
             font-size: {global_font_size}px !important;
         }}
-        /* Sidebar styling */
+        
+        /* Sleek Modern Sidebar */
         [data-testid="stSidebar"] {{
-            background-color: #F1F3F5;
-            border-right: 1px solid #E9ECEF;
+            background-color: #F8F9FA;
+            border-right: 1px solid #E5E7EB;
             padding-bottom: 20px;
         }}
+        
         /* Custom Headers */
         h1 {{
             font-size: {global_font_size + 12}px !important;
@@ -60,33 +62,59 @@ st.markdown(f"""
             font-size: {global_font_size + 4}px !important;
             color: #1F77B4;
         }}
+        
         /* Metric Cards Accent */
         [data-testid="stMetricValue"] {{
             color: #2B8A3E;
             font-size: {global_font_size + 10}px !important;
         }}
-        /* Sidebar Navigation Menu Styling & Distinct Hover Effects */
-        [data-testid="stSidebar"] [role="radiogroup"] label, 
+        
+        /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION (HOVER & SELECT) --- */
+        [data-testid="stSidebar"] [role="radiogroup"] {{
+            gap: 6px !important;
+        }}
+        
+        [data-testid="stSidebar"] [role="radiogroup"] label {{
+            background-color: transparent !important;
+            border: 1px solid transparent !important;
+            padding: 10px 14px !important;
+            border-radius: 10px !important;
+            margin-bottom: 2px !important;
+            cursor: pointer !important;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        }}
+        
         [data-testid="stSidebar"] [role="radiogroup"] label p, 
         [data-testid="stSidebar"] [role="radiogroup"] label span {{
-            font-size: {global_font_size + 2}px !important;
-            font-weight: 700 !important;
-            color: #2C3E50 !important;
-            transition: all 0.2s ease-in-out;
+            font-size: {global_font_size + 1}px !important;
+            font-weight: 600 !important;
+            color: #4B5563 !important;
+            transition: color 0.2s ease !important;
         }}
-        [data-testid="stSidebar"] [role="radiogroup"] label {{
-            padding: 10px 14px !important;
-            border-radius: 8px;
-            margin-bottom: 6px;
-            cursor: pointer;
-        }}
+        
+        /* Hover State */
         [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
-            background-color: #D0E1FD !important;
-            color: #1A56DB !important;
+            background-color: #EEF2F6 !important;
+            border-color: #E5E7EB !important;
+            transform: translateX(3px);
         }}
+        
         [data-testid="stSidebar"] [role="radiogroup"] label:hover p,
         [data-testid="stSidebar"] [role="radiogroup"] label:hover span {{
-            color: #1A56DB !important;
+            color: #1F77B4 !important;
+        }}
+        
+        /* Active / Selected State Styling */
+        [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
+            background-color: #1F77B4 !important;
+            border-color: #1F77B4 !important;
+            box-shadow: 0 4px 12px rgba(31, 119, 180, 0.25) !important;
+        }}
+        
+        [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p,
+        [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) span {{
+            color: #FFFFFF !important;
+            font-weight: 700 !important;
         }}
     </style>
 """, unsafe_allow_html=True)
@@ -113,45 +141,45 @@ if os.path.exists(logo_path):
     st.sidebar.image(logo_path, width=180)
 
 st.sidebar.title("VB‑G RAM G Convergence")
-st.sidebar.markdown(f"<span style='color: #495057; font-size: 0.9rem;'>FY 2026‑27</span><br><span style='font-size: 0.85rem;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
+st.sidebar.markdown(f"<span style='color: #4B5563; font-size: 0.85rem;'>FY 2026‑27</span><br><span style='font-size: 0.8rem; color: #6B7280;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
 st.sidebar.divider()
 
-# ---------- ROLE‑BASED ACCESS CONTROL ----------
+# ---------- SORTED & LOGICAL ROLE‑BASED NAVIGATION ----------
 role_pages = {
     "superadmin": [
-        "Dashboard",
-        "Convergence Register",
-        "Implementation & Targets",
-        "Meetings",
-        "Reports & Excel",
-        "Master Data",
-        "User Directory",
-        "User Management",
-        "Audit Log",
+        "📊 Dashboard",
+        "📋 Convergence Register",
+        "🚀 Implementation & Targets",
+        "🤝 Meetings",
+        "📇 User Directory",
+        "📈 Reports & Excel",
+        "⚙️ Master Data",
+        "👥 User Management",
+        "🛡️ Audit Log",
         "🎨 UI/UX Controller",
     ],
     "district": [
-        "Dashboard",
-        "Convergence Register",
-        "Implementation & Targets",
-        "Meetings",
-        "Reports & Excel",
-        "User Directory",
+        "📊 Dashboard",
+        "📋 Convergence Register",
+        "🚀 Implementation & Targets",
+        "🤝 Meetings",
+        "📇 User Directory",
+        "📈 Reports & Excel",
     ],
     "block": [
-        "Dashboard",
-        "Convergence Register",
-        "Implementation & Targets",
-        "Meetings",
-        "User Directory",
+        "📊 Dashboard",
+        "📋 Convergence Register",
+        "🚀 Implementation & Targets",
+        "🤝 Meetings",
+        "📇 User Directory",
     ],
     "department": [
-        "Dashboard",
-        "Convergence Register",
-        "Implementation & Targets",
-        "Meetings",
-        "Reports & Excel",
-        "User Directory",
+        "📊 Dashboard",
+        "📋 Convergence Register",
+        "🚀 Implementation & Targets",
+        "🤝 Meetings",
+        "📇 User Directory",
+        "📈 Reports & Excel",
     ],
 }
 
@@ -164,17 +192,17 @@ if not allowed_pages:
 selection = st.sidebar.radio("Navigation", allowed_pages, label_visibility="collapsed")
 st.sidebar.divider()
 
-# ---------- IMPORT ALL MODULES FOR ROUTING ----------
+# ---------- ROUTING MAPPING (MATCHING EMOJIS) ----------
 menu = {
-    "Dashboard": show_dashboard,
-    "Convergence Register": show_convergence,
-    "Implementation & Targets": show_implementation,
-    "Meetings": show_meetings,
-    "Reports & Excel": show_reports,
-    "Master Data": show_masterdata,
-    "User Directory": show_contacts,
-    "User Management": show_users,
-    "Audit Log": show_audit,
+    "📊 Dashboard": show_dashboard,
+    "📋 Convergence Register": show_convergence,
+    "🚀 Implementation & Targets": show_implementation,
+    "🤝 Meetings": show_meetings,
+    "📈 Reports & Excel": show_reports,
+    "⚙️ Master Data": show_masterdata,
+    "📇 User Directory": show_contacts,
+    "👥 User Management": show_users,
+    "🛡️ Audit Log": show_audit,
     "🎨 UI/UX Controller": show_ui_ux,
 }
 
