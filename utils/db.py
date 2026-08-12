@@ -1,5 +1,6 @@
+import streamlit as st
 from supabase import create_client
-from config.settings import SUPABASE_URL, SUPABASE_KEY
+from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY
 
 def get_supabase():
     # Use Streamlit caching to reuse connection
