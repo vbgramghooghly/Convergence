@@ -230,11 +230,14 @@ def show():
         selected_dist_id = dist_map.get(sel_dist)
         
         filtered_blocks = [b['block_name'] for b in blocks if b['district_id'] == selected_dist_id]
+        
+        # Block Selection (Now Mandatory)
         if role == 'block':
             block_default = next(b['block_name'] for b in blocks if b['id'] == user['block_id'])
             sel_block = col2.selectbox("Block*", [block_default], disabled=True)
         else:
-            sel_block = col2.selectbox("Block (Optional)", ["None"] + filtered_blocks)
+            # Force user to choose a block
+            sel_block = col2.selectbox("Block*", ["Select Block"] + filtered_blocks)
 
         st.markdown("##### Activity & Convergence Type")
         
@@ -289,8 +292,10 @@ def show():
         if submitted:
             if not valid_act_names:
                 st.error("Cannot save without a valid approved activity.")
+            elif sel_block == "Select Block":
+                st.error("Please select a valid Block to proceed.")
             else:
-                block_id = block_map.get(sel_block) if sel_block != "None" else None
+                block_id = block_map.get(sel_block)
                 
                 insert_data = {
                     "financial_year_id": fy_map[sel_fy],
@@ -336,7 +341,7 @@ def show():
         Your CSV must contain exact matches for the following column headers:
         * `Financial Year` (e.g., 2026-27)
         * `District`
-        * `Block` (Leave blank or write 'None')
+        * `Block` (Mandatory field)
         * `Department` 
         * `Activity` 
         * `Convergence Type` (Must be: 'Technical Convergence (Zero Fund/NOC)', 'Financial (as PIA)', or 'Financial (as Non-PIA)')
@@ -368,18 +373,19 @@ def show():
                     try:
                         fy_str = str(row.get('Financial Year', '')).strip()
                         dist_str = str(row.get('District', '')).strip()
-                        block_str = str(row.get('Block', 'None')).strip()
+                        block_str = str(row.get('Block', '')).strip()  # Default to empty string instead of 'None'
                         dept_str = str(row.get('Department', '')).strip()
                         act_str = str(row.get('Activity', '')).strip()
                         conv_str = str(row.get('Convergence Type', '')).strip()
                         
                         fy_id = fy_map.get(fy_str)
                         dist_id = dist_map.get(dist_str)
-                        block_id = block_map.get(block_str) if block_str and block_str.lower() != 'none' else None
+                        block_id = block_map.get(block_str) # Fetch strictly mapped block
                         dept_id = dept_map.get(dept_str)
                         
-                        if not all([fy_id, dist_id, dept_id]):
-                            error_log.append(f"Row {index+2}: Invalid Master Data references.")
+                        # Added strict check for block_id in bulk validation
+                        if not all([fy_id, dist_id, block_id, dept_id]):
+                            error_log.append(f"Row {index+2}: Invalid Master Data references (Ensure FY, District, Block, and Department are provided and exact matches).")
                             continue
                             
                         if conv_str not in CONVERGENCE_TYPES:
