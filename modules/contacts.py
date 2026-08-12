@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import base64
 from utils.db import get_supabase
 from auth.auth import get_current_user
 
@@ -22,7 +23,7 @@ def show():
     # 2. Fetch Contacts with Joins
     query = supabase.table("contacts").select("*, designations(designation_name), districts(district_name), blocks(block_name)")
     
-    # Role-based filtering
+    # Role-based filtering (Superadmin & Department skip these conditions and fetch ALL)
     if user['role'] == 'block':
         query = query.eq("block_id", user['block_id'])
     elif user['role'] == 'district':
@@ -31,9 +32,11 @@ def show():
     contacts_data = query.execute().data
     df = pd.DataFrame(contacts_data)
 
-    # 3. Display Directory Table
+    # 3. Display Directory Table & Export Options
     st.subheader("📋 Directory List")
+    
     if not df.empty:
+        # Format the fetched nested JSON into clean columns
         df['Designation'] = df['designations'].apply(lambda x: x['designation_name'] if isinstance(x, dict) else 'Unassigned')
         df['District'] = df['districts'].apply(lambda x: x['district_name'] if isinstance(x, dict) else 'District Office')
         df['Block'] = df['blocks'].apply(lambda x: x['block_name'] if isinstance(x, dict) else 'N/A')
@@ -41,10 +44,60 @@ def show():
         display_df = df[['full_name', 'Designation', 'contact_number', 'whatsapp_number', 'email_id', 'District', 'Block']]
         display_df.columns = ['Name', 'Designation', 'Contact Number', 'WhatsApp Number', 'Email ID', 'District', 'Block']
         
+        # Export & Print Buttons
+        col_dl, col_pr, _ = st.columns([1.5, 1.5, 7])
+        
+        # Download button (CSV)
+        csv = display_df.to_csv(index=False).encode('utf-8')
+        col_dl.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name="official_contact_directory.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        # Print button (Generates a clean HTML page for printing)
+        html_table = display_df.to_html(index=False)
+        printable_html = f"""
+        <html>
+        <head>
+            <title>Official Contact Directory</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 20px; }}
+                h2 {{ text-align: center; color: #1F77B4; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #dddddd; padding: 8px; text-align: left; font-size: 12px; }}
+                th {{ background-color: #f2f2f2; }}
+                @media print {{
+                    .no-print {{ display: none; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <button class="no-print" onclick="window.print()" style="padding: 10px; font-size: 16px; cursor: pointer;">🖨️ Print Document</button>
+            <h2>Official Contact Directory</h2>
+            {html_table}
+        </body>
+        </html>
+        """
+        b64_html = base64.b64encode(printable_html.encode('utf-8')).decode('utf-8')
+        print_href = f'''
+        <a href="data:text/html;base64,{b64_html}" target="_blank" style="text-decoration: none;">
+            <div style="background-color: #f0f2f6; color: #31333F; border: 1px solid #dcdde1; padding: 6px 12px; border-radius: 6px; text-align: center; font-family: sans-serif; font-size: 14px; cursor: pointer; transition: all 0.2s;">
+                🖨️ Print Directory
+            </div>
+        </a>
+        '''
+        col_pr.markdown(print_href, unsafe_allow_html=True)
+
+        # Show the actual dataframe
+        st.markdown("<br>", unsafe_allow_html=True)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("No contact records found. Please update your profile information below.")
 
+    # 4. Update Profile Form
     st.markdown("---")
     st.subheader("✏️ Update My Contact Information")
 
