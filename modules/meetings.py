@@ -55,7 +55,7 @@ def show():
         "⏭️ Next Meeting Prep"
     ])
 
-    # ======================== TAB 1: MEETING DASHBOARD & DETAILS ========================
+    # ======================== TAB 1: MEETING DASHBOARD & EDITING ========================
     with tab1:
         st.subheader("Meeting Dashboard")
         if not df_meetings.empty:
@@ -70,13 +70,13 @@ def show():
             with st.container(border=True):
                 st.markdown(f"<h3 style='color: #2B8A3E;'>Meeting Details: {sel_meeting_data['meeting_date']}</h3>", unsafe_allow_html=True)
                 col_d1, col_d2 = st.columns(2)
-                col_d1.write(f"**Chairperson:** {sel_meeting_data['chairperson']}")
-                col_d1.write(f"**Level:** {sel_meeting_data['meeting_type']}")
-                col_d2.write(f"**Venue:** {sel_meeting_data['venue']}")
-                col_d2.write(f"**Financial Year:** {sel_meeting_data['financial_year']}")
+                col_d1.write(f"**Chairperson:** {sel_meeting_data.get('chairperson', 'None')}")
+                col_d1.write(f"**Level:** {sel_meeting_data.get('meeting_type', 'None')}")
+                col_d2.write(f"**Venue:** {sel_meeting_data.get('venue', 'None')}")
+                col_d2.write(f"**Financial Year:** {sel_meeting_data.get('financial_year', 'None')}")
                 
-                st.write(f"**Objective:** {sel_meeting_data['objective']}")
-                st.write(f"**General Decisions:** {sel_meeting_data['decisions']}")
+                st.write(f"**Objective:** {sel_meeting_data.get('objective', 'None')}")
+                st.write(f"**General Decisions:** {sel_meeting_data.get('decisions', 'None')}")
                 
                 st.markdown("#### 👥 Detailed Attendance Register")
                 att_data = sel_meeting_data.get('detailed_attendance')
@@ -93,6 +93,98 @@ def show():
                     st.dataframe(disp_att_df.style.apply(highlight_subs, axis=1), use_container_width=True, hide_index=True)
                 else:
                     st.info("No detailed attendance captured for this meeting.")
+
+                # -------------------------------------------------------------------
+                # EDIT PAST MEETING OPTIONS (Restricted to District, Block, Superadmin)
+                # -------------------------------------------------------------------
+                if user['role'] in ['superadmin', 'district', 'block']:
+                    st.markdown("---")
+                    with st.expander("✏️ Edit Past Meeting Data & Attendance"):
+                        st.markdown("### Update Meeting Record")
+                        
+                        curr_fy = sel_meeting_data.get('financial_year', '2026-27') or '2026-27'
+                        fy_options = ["2026-27", "2027-28", "2028-29"]
+                        fy_idx = fy_options.index(curr_fy) if curr_fy in fy_options else 0
+                        
+                        e_fy = st.selectbox("Financial Year", fy_options, index=fy_idx, key=f"e_fy_{detail_sel}")
+                        
+                        col_e1, col_e2 = st.columns(2)
+                        e_chair = col_e1.text_input("Chairperson", value=sel_meeting_data.get('chairperson', '') or '', key=f"e_ch_{detail_sel}")
+                        e_venue = col_e2.text_input("Venue", value=sel_meeting_data.get('venue', '') or '', key=f"e_ve_{detail_sel}")
+                        
+                        e_obj = st.text_input("Objective", value=sel_meeting_data.get('objective', '') or '', key=f"e_ob_{detail_sel}")
+                        e_dec = st.text_area("Decisions", value=sel_meeting_data.get('decisions', '') or '', key=f"e_de_{detail_sel}")
+                        
+                        st.markdown("#### 👥 Update Attendance")
+                        st.caption("Re-select the attendees and specify if any subordinates attended to overwrite the previous record.")
+                        
+                        curr_att = sel_meeting_data.get('attendees') or []
+                        if not isinstance(curr_att, list): curr_att = []
+                        valid_curr_att = [cid for cid in curr_att if cid in contact_map]
+                        
+                        e_attendees = st.multiselect(
+                            "Select Invited Officials",
+                            options=list(contact_map.keys()),
+                            default=valid_curr_att,
+                            format_func=lambda x: f"{contact_map[x]['name']} ({contact_map[x]['designation']})",
+                            key=f"e_ms_{detail_sel}"
+                        )
+                        
+                        existing_det_att = sel_meeting_data.get('detailed_attendance') or []
+                        if not isinstance(existing_det_att, list): existing_det_att = []
+                        existing_subs = {item.get('contact_id'): item for item in existing_det_att if isinstance(item, dict)}
+                        
+                        e_detailed_attendance_payload = []
+                        if e_attendees:
+                            st.markdown("##### Verify Attendance & Representatives")
+                            for cid in e_attendees:
+                                contact = contact_map[cid]
+                                prev_data = existing_subs.get(cid, {})
+                                prev_is_sub = prev_data.get('attended_by_subordinate', False)
+                                
+                                with st.container(border=True):
+                                    st.markdown(f"**{contact['name']}** | {contact['designation']} | {contact['phone']} | {contact['email']}")
+                                    is_sub = st.checkbox(f"Attended by Subordinate/Representative?", value=prev_is_sub, key=f"e_chk_{cid}_{detail_sel}")
+                                    
+                                    sub_name, sub_desig, sub_phone = prev_data.get('subordinate_name', ''), prev_data.get('subordinate_designation', ''), prev_data.get('subordinate_phone', '')
+                                    
+                                    if is_sub:
+                                        sc1, sc2, sc3 = st.columns(3)
+                                        sub_name = sc1.text_input("Subordinate Name", value=sub_name or '', key=f"e_sn_{cid}_{detail_sel}")
+                                        sub_desig = sc2.text_input("Subordinate Designation", value=sub_desig or '', key=f"e_sd_{cid}_{detail_sel}")
+                                        sub_phone = sc3.text_input("Subordinate Phone", value=sub_phone or '', key=f"e_sp_{cid}_{detail_sel}")
+                                        
+                                    e_detailed_attendance_payload.append({
+                                        "contact_id": cid,
+                                        "official_name": contact['name'],
+                                        "official_designation": contact['designation'],
+                                        "official_phone": contact['phone'],
+                                        "official_email": contact['email'],
+                                        "attended_by_subordinate": is_sub,
+                                        "subordinate_name": sub_name if is_sub else None,
+                                        "subordinate_designation": sub_desig if is_sub else None,
+                                        "subordinate_phone": sub_phone if is_sub else None
+                                    })
+                        
+                        if st.button("💾 Save Updates to Meeting", type="primary", key=f"btn_save_{detail_sel}"):
+                            update_payload = {
+                                "financial_year": e_fy,
+                                "chairperson": e_chair,
+                                "venue": e_venue,
+                                "objective": e_obj,
+                                "decisions": e_dec,
+                                "attendees": e_attendees,
+                                "detailed_attendance": e_detailed_attendance_payload
+                            }
+                            
+                            try:
+                                supabase.table("meetings").update(update_payload).eq("id", detail_sel).execute()
+                                log_action(user, "UPDATE", "meetings", detail_sel, details=update_payload)
+                                st.success("✅ Meeting updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error updating meeting: {e}")
+
         else:
             st.info("No meetings found for your assigned jurisdiction.")
 
@@ -402,7 +494,6 @@ def show():
             end_date = col_dt2.date_input("End Date", value=date.today())
             
             if not df_meetings.empty:
-                # Filter meetings by date range
                 mask = (pd.to_datetime(df_meetings['meeting_date']).dt.date >= start_date) & (pd.to_datetime(df_meetings['meeting_date']).dt.date <= end_date)
                 filtered_meetings = df_meetings.loc[mask]
                 
@@ -410,7 +501,6 @@ def show():
                     meeting_ids = filtered_meetings['id'].tolist()
                     m_map = {m['id']: m for m in filtered_meetings.to_dict('records')}
                     
-                    # Fetch resolutions for these meeting IDs
                     date_ap_query = supabase.table("meeting_action_points").select("*").in_("meeting_id", meeting_ids).execute().data
                     if date_ap_query:
                         df_date_ap = pd.DataFrame(date_ap_query)
@@ -421,7 +511,6 @@ def show():
                         disp_cols = ['Meeting Date', 'Meeting Level', 'Department', 'action_point', 'target', 'status']
                         st.dataframe(df_date_ap[disp_cols].sort_values(['Meeting Date', 'Department']), use_container_width=True, hide_index=True)
                         
-                        # Generate Date-Wise Print HTML
                         print_df = df_date_ap[disp_cols].copy()
                         print_df.columns = ['Date', 'Level', 'Department', 'Resolution / Commitment', 'Target', 'Status']
                         html_table = print_df.to_html(index=False, classes="print-table")
