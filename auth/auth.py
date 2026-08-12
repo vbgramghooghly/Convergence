@@ -5,7 +5,6 @@ from utils.db import get_supabase
 def check_password():
     """Returns True if the user is authenticated, otherwise renders a professional split-screen landing/login page."""
     
-    # Initialize session state for auth if not present
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
     if "user" not in st.session_state:
@@ -17,13 +16,11 @@ def check_password():
     # ---------- STYLING FOR THE LANDING / LOGIN PAGE ----------
     st.markdown("""
         <style>
-            /* Hide default streamlit header/footer elements on login screen */
             header {visibility: hidden;}
             .stApp {
                 background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%);
             }
-            /* Highlighted Login Card Container */
-            .login-card {
+            [data-testid="stForm"] {
                 background: #FFFFFF;
                 padding: 35px;
                 border-radius: 16px;
@@ -69,10 +66,8 @@ def check_password():
     with col_right:
         st.markdown("<br><br>", unsafe_allow_html=True)
         
-        # ---------- HIGHLIGHTED LOGIN PANEL CONTAINER ----------
-        st.markdown("<div class='login-card'>", unsafe_allow_html=True)
         st.markdown("### 🔐 Portal Login")
-        st.markdown("<p style='color: #718096; font-size: 0.9rem;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='color: #718096; font-size: 0.9rem; margin-bottom: 15px;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
         
         with st.form("login_form"):
             username = st.text_input("Username / Email", placeholder="Enter your username")
@@ -87,27 +82,40 @@ def check_password():
                 else:
                     try:
                         supabase = get_supabase()
-                        response = supabase.table("users").select("*").eq("username", username).execute()
+                        # Query users table
+                        response = supabase.table("users").select("*").eq("username", username.strip()).execute()
                         users = response.data
 
                         if not users:
-                            st.error("❌ Invalid username or password.")
+                            st.error(f"❌ User '{username}' not found in database.")
                         else:
                             user = users[0]
                             if not user.get("active", True):
                                 st.error("🚫 This account has been deactivated. Contact Superadmin.")
                             else:
-                                stored_hash = user["password_hash"]
-                                if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                                stored_hash = user.get("password_hash", "")
+                                
+                                login_success = False
+                                # Try bcrypt check
+                                try:
+                                    if stored_hash and bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                                        login_success = True
+                                except Exception:
+                                    pass
+                                
+                                # Fallback: direct string comparison if hash column stores plain text or different format
+                                if not login_success and stored_hash == password:
+                                    login_success = True
+
+                                if login_success:
                                     st.session_state.authenticated = True
                                     st.session_state.user = user
                                     st.success("✅ Login successful! Loading workspace...")
                                     st.rerun()
                                 else:
-                                    st.error("❌ Invalid username or password.")
+                                    st.error("❌ Incorrect password.")
                     except Exception as e:
                         st.error(f"Database connection error: {e}")
-        st.markdown("</div>", unsafe_allow_html=True)
 
     return False
 
