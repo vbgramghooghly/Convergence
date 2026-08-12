@@ -168,7 +168,8 @@ def show():
                         }
                         try:
                             supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                            log_action(user, "UPDATE", "convergence_register", selected_edit_id, new_vals=update_payload)
+                            # FIXED: Removed 'new_vals' argument
+                            log_action(user, "UPDATE", "convergence_register", selected_edit_id)
                             st.success("Activity updated successfully!")
                             st.rerun()
                         except Exception as e:
@@ -283,7 +284,8 @@ def show():
                 
                 try:
                     res = supabase.table("convergence_register").insert(insert_data).execute()
-                    log_action(user, "CREATE", "convergence_register", res.data[0]['id'], new_vals=insert_data)
+                    # FIXED: Removed 'new_vals' argument
+                    log_action(user, "CREATE", "convergence_register", res.data[0]['id'])
                     st.success("Activity recorded successfully!")
                     st.rerun()
                 except Exception as e:
