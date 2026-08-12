@@ -1,6 +1,5 @@
 import streamlit as st
 from auth.auth import check_password, logout, get_current_user
-import importlib
 import os
 
 # ---------- PAGE CONFIG ----------
@@ -18,8 +17,19 @@ if not check_password():
 user = get_current_user()
 role = user['role']
 
+# ---------- IMPORT ALL MODULES (avoids dynamic loading issues) ----------
+from modules.dashboard import show as show_dashboard
+from modules.convergence_register import show as show_convergence
+from modules.department_targets import show as show_targets
+from modules.implementation import show as show_implementation
+from modules.meetings import show as show_meetings
+from modules.reports import show as show_reports
+from modules.excel_import import show as show_import
+from modules.master_data import show as show_masterdata
+from modules.users import show as show_users
+from modules.audit import show as show_audit
+
 # ---------- SIDEBAR HEADER ----------
-# Safe logo loading – only if the file exists
 logo_path = "assets/logo.png"
 if os.path.exists(logo_path):
     st.sidebar.image(logo_path, width=200)
@@ -30,16 +40,16 @@ st.sidebar.divider()
 
 # ---------- NAVIGATION MENU ----------
 menu = {
-    "Dashboard":                   "modules.dashboard",
-    "Convergence Register":        "modules.convergence_register",
-    "Department Targets":          "modules.department_targets",
-    "Implementation Monitoring":   "modules.implementation",
-    "Meetings":                    "modules.meetings",
-    "Reports & Excel":             "modules.reports",
-    "Excel Import":                "modules.excel_import",
-    "Master Data":                 "modules.master_data",
-    "User Management":             "modules.users",
-    "Audit Log":                   "modules.audit",
+    "Dashboard":                   show_dashboard,
+    "Convergence Register":        show_convergence,
+    "Department Targets":          show_targets,
+    "Implementation Monitoring":   show_implementation,
+    "Meetings":                    show_meetings,
+    "Reports & Excel":             show_reports,
+    "Excel Import":                show_import,
+    "Master Data":                 show_masterdata,
+    "User Management":             show_users,
+    "Audit Log":                   show_audit,
 }
 
 # ---------- ROLE‑BASED ACCESS CONTROL ----------
@@ -69,8 +79,6 @@ role_pages = {
 }
 
 allowed_pages = role_pages.get(role, [])
-
-# Safety: if role is invalid, force logout
 if not allowed_pages:
     st.error("Your user role is not configured correctly. Please contact the administrator.")
     logout()
@@ -82,18 +90,8 @@ if st.sidebar.button("🔒 Logout"):
 # ---------- NAVIGATION RADIO ----------
 selection = st.sidebar.radio("Navigation", allowed_pages)
 
-# ---------- DYNAMIC MODULE LOADING ----------
+# ---------- CALL THE SELECTED PAGE ----------
 if selection in menu:
-    module_path = menu[selection]
-    try:
-        module = importlib.import_module(module_path)
-        if hasattr(module, 'show'):
-            module.show()
-        else:
-            st.error(f"Module '{selection}' is missing the 'show()' function.")
-    except Exception as e:
-        st.error(f"Could not load module {selection}: {e}")
+    menu[selection]()   # Call the show function directly
 else:
-    # Fallback to dashboard
-    from modules.dashboard import show
-    show()
+    show_dashboard()
