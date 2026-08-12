@@ -179,8 +179,7 @@ def show():
                     st.markdown("##### Financials & MIS Registration")
                     col_p3, col_p4 = st.columns(2)
                     
-                    # NEW: MIS CODE INPUT
-                    mis_code_val = col_p3.text_input("MIS Code (e.g. 3206011003/RS/YD/3210020...)", value=selected_activity.get('mis_code', '') or '')
+                    mis_code_val = col_p3.text_input("MIS Code (e.g. 3206011003/RS...)", value=selected_activity.get('mis_code', '') or '')
                     fin_ach = col_p4.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_activity.get('financial_achievement', 0.0) or 0.0))
                     
                     persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_activity.get('persondays_generated', 0) or 0))
@@ -195,7 +194,6 @@ def show():
                     submitted_prog = st.form_submit_button("Save Progress", type="primary", use_container_width=True)
                     
                     if submitted_prog:
-                        # MANDATORY MIS CODE VALIDATION FOR IMPLEMENTATION
                         if new_status in ["Under Implementation", "Completed"] and not mis_code_val.strip():
                             st.error("⚠️ **Validation Error:** MIS Code is strictly mandatory when moving a scheme to 'Under Implementation' or 'Completed'. Please enter the valid MIS Code from the central portal to proceed.")
                         else:
@@ -230,7 +228,6 @@ def show():
                             except Exception as e:
                                 st.error(f"Error saving progress: {e}")
 
-                # History Viewer
                 st.markdown("#### Progress History Timeline")
                 try:
                     history_query = supabase.table("progress_updates").select("*").eq("convergence_id", selected_act_id).order("created_at", desc=True).execute()
@@ -248,14 +245,14 @@ def show():
     # =====================================================================
     with tab3:
         st.subheader("🤝 Departmental Meeting Commitments")
-        st.caption("Fulfill the Action Points promised in District & Block Convergence Meetings.")
+        st.caption("View and fulfill the Action Points assigned to your department across all District and Block meetings.")
 
-        # Fetch resolutions relevant to this user
         ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, priority, linkage_type, action_point, target, deadline, status, remarks").execute().data
         
         if ap_query:
             df_ap = pd.DataFrame(ap_query)
             
+            # Filter based on department role
             if role == 'department':
                 df_ap = df_ap[df_ap['department_id'] == user.get('department_id')]
 
@@ -265,35 +262,42 @@ def show():
                 meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type").execute().data
                 m_map = {m['id']: m for m in meetings_data}
                 
-                df_ap['Meeting Date'] = df_ap['meeting_id'].map(lambda x: m_map.get(x, {}).get('meeting_date', 'Unknown'))
-                df_ap['Level'] = df_ap['meeting_id'].map(lambda x: m_map.get(x, {}).get('meeting_type', 'Unknown'))
+                # Create a clear Origin/Meeting context column
+                df_ap['Meeting Context'] = df_ap['meeting_id'].map(lambda x: f"{m_map.get(x, {}).get('meeting_type', 'Unknown')} Level ({m_map.get(x, {}).get('meeting_date', 'Unknown')})")
                 
                 pending_ap = df_ap[~df_ap['status'].isin(['Completed', 'Dropped'])].copy()
                 
                 if not pending_ap.empty:
                     pending_ap['deadline'] = pd.to_datetime(pending_ap['deadline'])
                     pending_ap['Days Left'] = (pending_ap['deadline'] - pd.to_datetime(date.today())).dt.days
-                    
-                    # Provide visual context to the linkage type
                     pending_ap['Linkage'] = pending_ap.get('linkage_type', 'Normative / Routine')
                     
-                    st.markdown("#### Pending Actions & Origination")
-                    disp_cols = ['Level', 'Meeting Date', 'Department', 'action_point', 'target', 'Linkage', 'Days Left', 'status']
+                    st.markdown("#### Pending Actions & Meeting Origins")
+                    disp_cols = ['Meeting Context', 'Department', 'action_point', 'target', 'Linkage', 'Days Left', 'status']
                     st.dataframe(pending_ap[disp_cols].sort_values('Days Left'), use_container_width=True, hide_index=True)
                     
                     st.markdown("#### Update Commitment Status")
                     with st.form("sync_atr_form"):
                         col_s1, col_s2 = st.columns(2)
-                        sync_id = col_s1.selectbox("Select Resolution ID", pending_ap['id'].tolist(), format_func=lambda x: f"[{pending_ap[pending_ap['id']==x]['Level'].values[0]}] {pending_ap[pending_ap['id']==x]['action_point'].values[0][:40]}...")
-                        sync_status = col_s2.selectbox("New Status", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Dropped'])
-                        sync_remarks = st.text_area("Implementation Outcome / Remarks (Updates the Meeting ATR directly)")
                         
-                        if st.form_submit_button("Sync Progress to Meeting Tracker"):
-                            payload = {"status": sync_status, "remarks": sync_remarks}
-                            supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
-                            log_action(user, "UPDATE", "meeting_action_points", sync_id, details=payload)
-                            st.success("✅ Meeting ATR Updated Successfully!")
-                            st.rerun()
+                        # Show meeting context in the dropdown so they know exactly which meeting they are updating
+                        sync_id = col_s1.selectbox("Select Resolution ID", pending_ap['id'].tolist(), format_func=lambda x: f"[{pending_ap[pending_ap['id']==x]['Meeting Context'].values[0]}] {pending_ap[pending_ap['id']==x]['action_point'].values[0][:40]}...")
+                        
+                        # ADDED 'Not Feasible' option to seamlessly loop back to the meeting agenda
+                        sync_status = col_s2.selectbox("New Status", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'])
+                        sync_remarks = st.text_area("Implementation Outcome / Remarks (If Not Feasible, state the reason clearly)")
+                        
+                        submitted_sync = st.form_submit_button("Sync Progress to Meeting Tracker")
+                        
+                        if submitted_sync:
+                            if sync_status == 'Not Feasible (Requires Review)' and not sync_remarks.strip():
+                                st.error("⚠️ **Validation Error:** You must provide a clear reason in 'Remarks' when flagging an activity as Not Feasible so the Chairperson can review it.")
+                            else:
+                                payload = {"status": sync_status, "remarks": sync_remarks}
+                                supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
+                                log_action(user, "UPDATE", "meeting_action_points", sync_id, details=payload)
+                                st.success("✅ Meeting ATR Updated! If flagged as Not Feasible, it has been added to the next meeting's agenda.")
+                                st.rerun()
                 else:
                     st.success("🎉 All meeting commitments have been completed or closed!")
             else:
