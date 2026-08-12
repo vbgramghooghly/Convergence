@@ -40,7 +40,6 @@ def show():
         st.subheader("Department Targets – FY 2026-27")
         st.caption("Set and view annual physical and financial targets.")
         
-        # Define allowed scopes based on role
         if role == 'department':
             allowed_dept = user.get('department_id')
             allowed_district = user.get('district_id')
@@ -50,7 +49,7 @@ def show():
             allowed_district = user.get('district_id')
             t_depts = departments
             t_dists = [d for d in districts if d['id'] == allowed_district]
-        else: # Superadmin / Block (Block can view district targets)
+        else: 
             t_depts = departments
             t_dists = districts if role == 'superadmin' else [d for d in districts if d['id'] == user.get('district_id')]
 
@@ -61,7 +60,6 @@ def show():
         
         with col_t2:
             st.markdown("#### Add / Update Target")
-            # Blocks usually execute, not set district department targets, so we restrict form access
             if role == 'block':
                 st.info("Target setting is managed at the District/Department level. You can view targets on the left.")
             else:
@@ -107,7 +105,6 @@ def show():
                             "created_by": user['id']
                         }
 
-                        # Check if target already exists for this dept+district+fy+activity
                         existing = supabase.table("department_targets").select("id").eq("department_id", dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity).execute().data
                         if existing:
                             supabase.table("department_targets").update(target_record).eq("id", existing[0]['id']).execute()
@@ -134,7 +131,6 @@ def show():
                 disp_cols = ['Department', 'activity', 'desired_target', 'department_fund', 'vbgramg_fund', 'expected_persondays']
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
                 
-                # Excel Download
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_t[disp_cols].to_excel(writer, index=False, sheet_name='Targets')
@@ -147,7 +143,7 @@ def show():
     # =====================================================================
     with tab2:
         st.subheader("Physical & Financial Progress Updates")
-        st.caption("Update the on-ground reality of specific schemes from the Convergence Register.")
+        st.caption("Update the on-ground reality of specific schemes. MIS Code is mandatory for implementation tracking.")
         
         query_reg = supabase.table("convergence_register").select("*")
         if role == 'district':
@@ -168,7 +164,7 @@ def show():
             selected_activity = next((a for a in activities if a['id'] == selected_act_id), None)
 
             if selected_activity:
-                st.markdown(f"**Current Status:** `<span style='color: #E67E22;'>{selected_activity.get('current_status', 'Planned')}</span>`", unsafe_allow_html=True)
+                st.markdown(f"**Current Status:** `<span style='color: #E67E22;'>{selected_activity.get('current_status', 'Planned')}</span>` | **Source:** `{selected_activity.get('origin_source', 'Normative / Routine')}`", unsafe_allow_html=True)
                 
                 with st.form("update_progress_form"):
                     col_p1, col_p2 = st.columns([1, 2])
@@ -176,13 +172,18 @@ def show():
                     status_options = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed", "Dropped"]
                     current_status = selected_activity.get('current_status', 'Planned')
                     status_idx = status_options.index(current_status) if current_status in status_options else 0
-                    new_status = col_p1.selectbox("New Status", status_options, index=status_idx)
                     
+                    new_status = col_p1.selectbox("New Status", status_options, index=status_idx)
                     phys_ach = col_p2.slider("Physical Achievement (%)", min_value=0, max_value=100, value=int(float(selected_activity.get('physical_achievement', 0.0) or 0.0)))
                     
+                    st.markdown("##### Financials & MIS Registration")
                     col_p3, col_p4 = st.columns(2)
-                    fin_ach = col_p3.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_activity.get('financial_achievement', 0.0) or 0.0))
-                    persondays_gen = col_p4.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_activity.get('persondays_generated', 0) or 0))
+                    
+                    # NEW: MIS CODE INPUT
+                    mis_code_val = col_p3.text_input("MIS Code (e.g. 3206011003/RS/YD/3210020...)", value=selected_activity.get('mis_code', '') or '')
+                    fin_ach = col_p4.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_activity.get('financial_achievement', 0.0) or 0.0))
+                    
+                    persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_activity.get('persondays_generated', 0) or 0))
 
                     col_p5, col_p6, col_p7 = st.columns(3)
                     start_date = col_p5.date_input("Actual Start Date", value=date.today())
@@ -194,37 +195,40 @@ def show():
                     submitted_prog = st.form_submit_button("Save Progress", type="primary", use_container_width=True)
                     
                     if submitted_prog:
-                        update_data = {
-                            "current_status": new_status,
-                            "physical_achievement": phys_ach,
-                            "financial_achievement": fin_ach,
-                            "persondays_generated": persondays_gen,
-                            "actual_start_date": str(start_date) if start_date else None,
-                            "expected_completion_date": str(exp_date) if exp_date else None,
-                            "actual_completion_date": str(act_date) if act_date else None,
-                            "remarks": remarks
-                        }
-                        
-                        try:
-                            # Update main register
-                            supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
-                            
-                            # Log progress history entry
-                            history_payload = {
-                                "convergence_id": selected_act_id,
-                                "status": new_status,
+                        # MANDATORY MIS CODE VALIDATION FOR IMPLEMENTATION
+                        if new_status in ["Under Implementation", "Completed"] and not mis_code_val.strip():
+                            st.error("⚠️ **Validation Error:** MIS Code is strictly mandatory when moving a scheme to 'Under Implementation' or 'Completed'. Please enter the valid MIS Code from the central portal to proceed.")
+                        else:
+                            update_data = {
+                                "current_status": new_status,
+                                "mis_code": mis_code_val.strip() if mis_code_val else None,
                                 "physical_achievement": phys_ach,
                                 "financial_achievement": fin_ach,
                                 "persondays_generated": persondays_gen,
+                                "actual_start_date": str(start_date) if start_date else None,
+                                "expected_completion_date": str(exp_date) if exp_date else None,
+                                "actual_completion_date": str(act_date) if act_date else None,
                                 "remarks": remarks
                             }
-                            supabase.table("progress_updates").insert(history_payload).execute()
-                            log_action(user, "UPDATE", "convergence_register", selected_act_id, details=update_data)
                             
-                            st.success("✅ Progress updated successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error saving progress: {e}")
+                            try:
+                                supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
+                                
+                                history_payload = {
+                                    "convergence_id": selected_act_id,
+                                    "status": new_status,
+                                    "physical_achievement": phys_ach,
+                                    "financial_achievement": fin_ach,
+                                    "persondays_generated": persondays_gen,
+                                    "remarks": f"MIS Code: {mis_code_val} | {remarks}"
+                                }
+                                supabase.table("progress_updates").insert(history_payload).execute()
+                                log_action(user, "UPDATE", "convergence_register", selected_act_id, details=update_data)
+                                
+                                st.success("✅ Progress and MIS mapping updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving progress: {e}")
 
                 # History Viewer
                 st.markdown("#### Progress History Timeline")
@@ -247,35 +251,34 @@ def show():
         st.caption("Fulfill the Action Points promised in District & Block Convergence Meetings.")
 
         # Fetch resolutions relevant to this user
-        ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, priority, action_point, target, deadline, status, remarks").execute().data
+        ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, priority, linkage_type, action_point, target, deadline, status, remarks").execute().data
         
         if ap_query:
             df_ap = pd.DataFrame(ap_query)
             
-            # Filter based on role
             if role == 'department':
                 df_ap = df_ap[df_ap['department_id'] == user.get('department_id')]
-            # (District & Superadmin see all. Block sees all, though usually meetings are filtered by block_id which we'd need a join for. For simplicity, we show relevant dept commitments).
 
             if not df_ap.empty:
                 df_ap['Department'] = df_ap['department_id'].map(dept_map)
                 
-                # Fetch meeting details to attach dates
                 meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type").execute().data
                 m_map = {m['id']: m for m in meetings_data}
                 
                 df_ap['Meeting Date'] = df_ap['meeting_id'].map(lambda x: m_map.get(x, {}).get('meeting_date', 'Unknown'))
                 df_ap['Level'] = df_ap['meeting_id'].map(lambda x: m_map.get(x, {}).get('meeting_type', 'Unknown'))
                 
-                # Exclude Dropped/Completed from main view by default to focus on pending implementation
                 pending_ap = df_ap[~df_ap['status'].isin(['Completed', 'Dropped'])].copy()
                 
                 if not pending_ap.empty:
                     pending_ap['deadline'] = pd.to_datetime(pending_ap['deadline'])
                     pending_ap['Days Left'] = (pending_ap['deadline'] - pd.to_datetime(date.today())).dt.days
                     
-                    st.markdown("#### Pending Actions")
-                    disp_cols = ['Level', 'Meeting Date', 'Department', 'action_point', 'target', 'Days Left', 'status']
+                    # Provide visual context to the linkage type
+                    pending_ap['Linkage'] = pending_ap.get('linkage_type', 'Normative / Routine')
+                    
+                    st.markdown("#### Pending Actions & Origination")
+                    disp_cols = ['Level', 'Meeting Date', 'Department', 'action_point', 'target', 'Linkage', 'Days Left', 'status']
                     st.dataframe(pending_ap[disp_cols].sort_values('Days Left'), use_container_width=True, hide_index=True)
                     
                     st.markdown("#### Update Commitment Status")
