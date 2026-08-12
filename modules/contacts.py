@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import base64
+import io
 from utils.db import get_supabase
 from auth.auth import get_current_user
 
@@ -47,15 +48,31 @@ def show():
         # Export & Print Buttons
         col_dl, col_pr, _ = st.columns([1.5, 1.5, 7])
         
-        # Download button (CSV)
-        csv = display_df.to_csv(index=False).encode('utf-8')
-        col_dl.download_button(
-            label="📥 Download CSV",
-            data=csv,
-            file_name="official_contact_directory.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+        # Download button (Excel)
+        buffer = io.BytesIO()
+        try:
+            # Requires openpyxl or xlsxwriter installed in your environment
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                display_df.to_excel(writer, index=False, sheet_name='Contacts')
+            excel_data = buffer.getvalue()
+            
+            col_dl.download_button(
+                label="📥 Download Excel",
+                data=excel_data,
+                file_name="official_contact_directory.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        except Exception:
+            # Safe Fallback to CSV if openpyxl engine is missing from requirements
+            csv = display_df.to_csv(index=False).encode('utf-8')
+            col_dl.download_button(
+                label="📥 Download CSV (Excel Add-on missing)",
+                data=csv,
+                file_name="official_contact_directory.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
         
         # Print button (Generates a clean HTML page for printing)
         html_table = display_df.to_html(index=False)
@@ -95,22 +112,41 @@ def show():
         st.markdown("<br>", unsafe_allow_html=True)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No contact records found. Please update your profile information below.")
+        st.info("No contact records found. Please update profile information below.")
 
-    # 4. Update Profile Form
+    # 4. Update Profile Form (Role-Based Editing)
     st.markdown("---")
-    st.subheader("✏️ Update My Contact Information")
+    
+    # Superadmin gets to select who to edit. Everyone else only edits themselves.
+    if user['role'] == 'superadmin':
+        st.subheader("🛠️ Manage Any Contact (Superadmin)")
+        all_users = supabase.table("users").select("id, full_name, district_id, block_id, role").execute().data
+        
+        # Create a dropdown for Superadmin to pick a user
+        user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in all_users}
+        target_user_id = st.selectbox("Select User to Edit", options=list(user_options.keys()), format_func=lambda x: user_options[x])
+        
+        target_user_info = next((u for u in all_users if u['id'] == target_user_id), {})
+        target_district_id = target_user_info.get('district_id')
+        target_block_id = target_user_info.get('block_id')
+        target_default_name = target_user_info.get('full_name', '')
+    else:
+        st.subheader("✏️ Update My Contact Information")
+        target_user_id = user['id']
+        target_district_id = user.get('district_id')
+        target_block_id = user.get('block_id')
+        target_default_name = user.get('full_name', '')
 
-    # Check if logged-in user already has a contact record
-    user_contact = supabase.table("contacts").select("*").eq("user_id", user['id']).execute().data
+    # Check if target user already has a contact record
+    user_contact = supabase.table("contacts").select("*").eq("user_id", target_user_id).execute().data
     existing_record = user_contact[0] if user_contact else {}
 
     with st.form("update_contact_form"):
         col1, col2 = st.columns(2)
         
-        name = col1.text_input("Full Name", value=existing_record.get('full_name', user.get('full_name', '')))
+        name = col1.text_input("Full Name", value=existing_record.get('full_name', target_default_name))
         
-        # Designation dropdown controlled by Superadmin master data
+        # Designation dropdown controlled by Master data
         curr_desig_id = existing_record.get('designation_id')
         curr_desig_name = next((k for k, v in desig_dict.items() if v == curr_desig_id), list(desig_dict.keys())[0] if desig_dict else "")
         desig_idx = list(desig_dict.keys()).index(curr_desig_name) if curr_desig_name in desig_dict else 0
@@ -122,22 +158,18 @@ def show():
         whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number', ''))
         email = col5.text_input("Email ID", value=existing_record.get('email_id', ''))
 
-        # Auto-assign district and block based on user profile context
-        assigned_district_id = user.get('district_id')
-        assigned_block_id = user.get('block_id')
-
         submitted = st.form_submit_button("Save / Update Contact Details", type="primary")
 
         if submitted:
             payload = {
-                "user_id": user['id'],
+                "user_id": target_user_id,
                 "full_name": name,
                 "designation_id": desig_dict.get(sel_desig) if desig_dict else None,
                 "contact_number": contact_no,
                 "whatsapp_number": whatsapp_no,
                 "email_id": email,
-                "district_id": assigned_district_id,
-                "block_id": assigned_block_id,
+                "district_id": target_district_id,
+                "block_id": target_block_id,
                 "active": True
             }
 
@@ -145,7 +177,7 @@ def show():
                 # Update existing record
                 supabase.table("contacts").update(payload).eq("id", existing_record['id']).execute()
             else:
-                # Insert new record for this user login
+                # Insert new record for this user
                 supabase.table("contacts").insert(payload).execute()
 
             st.success("✅ Contact information updated successfully!")
