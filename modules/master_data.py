@@ -59,6 +59,13 @@ def show():
 
     supabase = get_supabase()
 
+    # Pre-fetch all master data tables globally for clean cross-tab usage & ordering safety
+    dist_data = supabase.table("districts").select("*").order("district_name").execute().data
+    dept_data = supabase.table("departments").select("*").order("department_name").execute().data
+    theme_data = supabase.table("themes").select("*").order("theme_name").execute().data
+    fy_data = supabase.table("financial_years").select("*").order("year_name").execute().data
+    desig_data = supabase.table("designations").select("*").order("designation_name").execute().data
+
     # Added Emojis to all tabs for a modern look
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "🗺️ Districts", 
@@ -74,7 +81,6 @@ def show():
     # ======================== TAB 1: DISTRICTS ========================
     with tab1:
         st.subheader("Manage Districts")
-        dist_data = supabase.table("districts").select("*").order("district_name").execute().data
         if dist_data:
             st.dataframe(pd.DataFrame(dist_data)[['id', 'district_name', 'active']], use_container_width=True, hide_index=True)
             
@@ -106,7 +112,6 @@ def show():
     # ======================== TAB 3: DEPARTMENTS ========================
     with tab3:
         st.subheader("Manage Departments")
-        dept_data = supabase.table("departments").select("*").order("department_name").execute().data
         if dept_data:
             st.dataframe(pd.DataFrame(dept_data)[['id', 'department_name', 'department_code', 'active']], use_container_width=True, hide_index=True)
             
@@ -144,7 +149,6 @@ def show():
     # ======================== TAB 5: THEMES ========================
     with tab5:
         st.subheader("Manage Themes")
-        theme_data = supabase.table("themes").select("*").order("theme_name").execute().data
         if theme_data:
             st.dataframe(pd.DataFrame(theme_data)[['id', 'theme_name', 'active']], use_container_width=True, hide_index=True)
             
@@ -158,25 +162,38 @@ def show():
     # ======================== TAB 6: ACTIVITIES ========================
     with tab6:
         st.subheader("Manage Activities")
-        act_data = supabase.table("activities").select("*, themes(theme_name)").order("activity_name").execute().data
+        
+        # Fetch activities with joined department and theme names
+        act_data = supabase.table("activities").select("*, themes(theme_name), departments(department_name)").order("activity_name").execute().data
         if act_data:
             df_a = pd.DataFrame(act_data)
+            df_a['Department'] = df_a['departments'].apply(lambda x: x['department_name'] if isinstance(x, dict) else '')
             df_a['Theme'] = df_a['themes'].apply(lambda x: x['theme_name'] if isinstance(x, dict) else '')
-            st.dataframe(df_a[['id', 'Theme', 'activity_name', 'active']], use_container_width=True, hide_index=True)
+            st.dataframe(df_a[['id', 'Department', 'Theme', 'activity_name', 'active']], use_container_width=True, hide_index=True)
             
+        dept_dict_act = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
         theme_dict = {t['theme_name']: t['id'] for t in theme_data} if theme_data else {}
+        
         with st.form("activity_form"):
-            sel_theme = st.selectbox("Parent Theme", list(theme_dict.keys()) if theme_dict else ["None"])
+            col_a1, col_a2 = st.columns(2)
+            sel_dept = col_a1.selectbox("Parent Department", list(dept_dict_act.keys()) if dept_dict_act else ["None"])
+            sel_theme = col_a2.selectbox("Parent Theme", list(theme_dict.keys()) if theme_dict else ["None"])
             act_name = st.text_input("Activity Name")
+            
             if st.form_submit_button("Save Activity", type="primary"):
-                supabase.table("activities").insert({"theme_id": theme_dict[sel_theme], "activity_name": act_name, "active": True}).execute()
+                payload = {
+                    "department_id": dept_dict_act.get(sel_dept),
+                    "theme_id": theme_dict.get(sel_theme),
+                    "activity_name": act_name,
+                    "active": True
+                }
+                supabase.table("activities").insert(payload).execute()
                 st.success("Activity added!")
                 st.rerun()
 
     # ======================== TAB 7: FINANCIAL YEARS ========================
     with tab7:
         st.subheader("Manage Financial Years")
-        fy_data = supabase.table("financial_years").select("*").order("year_name").execute().data
         if fy_data:
             st.dataframe(pd.DataFrame(fy_data)[['id', 'year_name', 'active']], use_container_width=True, hide_index=True)
             
@@ -192,7 +209,6 @@ def show():
         st.subheader("🎓 Manage Designations & Statutory Committee Roles")
         st.caption("Designations flagged as statutory members will automatically be pre-selected when scheduling a District or Block meeting.")
         
-        desig_data = supabase.table("designations").select("*").order("designation_name").execute().data
         if desig_data:
             df_desig = pd.DataFrame(desig_data)
             st.dataframe(df_desig[['id', 'designation_name', 'is_committee_member', 'committee_level', 'active']], use_container_width=True, hide_index=True)
