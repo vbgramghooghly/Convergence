@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 import io
+import json
 from utils.db import get_supabase
 from auth.auth import get_current_user
 
@@ -90,16 +91,25 @@ def show():
             df['Wing / Scheme'] = df['department_wings'].apply(format_wing)
             
             def format_comm_blocks(block_ids):
+                if not block_ids: return "N/A"
+                if isinstance(block_ids, str):
+                    try:
+                        block_ids = json.loads(block_ids)
+                    except:
+                        return "N/A"
                 if not isinstance(block_ids, list) or not block_ids: return "N/A"
-                names = [b_name for b_name, b_id in block_dict.items() if b_id in block_ids]
-                return ", ".join(names)
+                
+                # Compare as strings to prevent UUID vs INT type mismatch
+                str_block_ids = [str(x) for x in block_ids]
+                names = [b_name for b_name, b_id in block_dict.items() if str(b_id) in str_block_ids]
+                return ", ".join(names) if names else "N/A"
 
-            # Safely handle new columns if data is empty or missing
-            for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'committee_blocks']:
+            # Safely handle columns if data is empty or missing
+            for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'tagged_blocks']:
                 if col not in df.columns:
                     df[col] = None
             
-            df['Tagged Comm. Blocks'] = df['committee_blocks'].apply(format_comm_blocks)
+            df['Tagged Comm. Blocks'] = df['tagged_blocks'].apply(format_comm_blocks)
             df['Dist. Role'] = df['district_committee_role'].fillna('None')
             df['Block Role'] = df['block_committee_role'].fillna('None')
             
@@ -214,9 +224,9 @@ def show():
             office = col6.text_input("Office Name / Address", value=existing_record.get('office', ''))
             sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office', ''))
 
-            # --- NEW: STATUTORY COMMITTEE ROLES ---
+            # --- STATUTORY COMMITTEE ROLES & MULTI-TAGGING ---
             st.markdown("#### 4. Statutory Committee Memberships")
-            st.caption("Link this profile to specific statutory committees. If a sub-divisional officer is a member of multiple blocks, tag them below.")
+            st.caption("Link this profile to specific statutory committees. If an officer handles additional charge of multiple blocks, tag them below.")
             
             col_c1, col_c2 = st.columns(2)
             
@@ -228,8 +238,18 @@ def show():
             block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if curr_block_role in COMMITTEE_ROLES else 0
             sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx)
             
-            curr_comm_blocks = existing_record.get('committee_blocks') or []
-            default_blocks = [b for b in list(block_dict.keys()) if block_dict[b] in curr_comm_blocks]
+            # Robust parsing for JSON/String arrays from Supabase
+            curr_comm_blocks = existing_record.get('tagged_blocks') or []
+            if isinstance(curr_comm_blocks, str):
+                try:
+                    curr_comm_blocks = json.loads(curr_comm_blocks)
+                except:
+                    curr_comm_blocks = []
+            
+            # Ensure safe string mapping against dict values
+            curr_comm_blocks = [str(x) for x in curr_comm_blocks]
+            default_blocks = [b for b in list(block_dict.keys()) if str(block_dict[b]) in curr_comm_blocks]
+            
             sel_comm_blocks = st.multiselect("Tagged Blocks for Committee Membership (Select multiple if applicable)", options=list(block_dict.keys()), default=default_blocks)
 
             if st.form_submit_button("Save Details / Complete Handover", type="primary"):
@@ -253,7 +273,7 @@ def show():
                         "sub_office": sub_office if sub_office.strip() else None,
                         "district_committee_role": sel_dist_role if sel_dist_role != "None" else None,
                         "block_committee_role": sel_block_role if sel_block_role != "None" else None,
-                        "committee_blocks": comm_block_ids,
+                        "tagged_blocks": comm_block_ids, # Aligned exactly with meetings.py payload mapping
                         "district_id": target_district_id,
                         "block_id": target_block_id,
                         "active": True
