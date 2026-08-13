@@ -58,7 +58,7 @@ def check_password():
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 🌟 Key Portal Highlights")
         st.markdown("<div class='feature-item'>📈 <b>Real-Time Progress Tracking:</b> Monitor physical & financial achievements instantly.</div>", unsafe_allow_html=True)
-        st.markdown("<div class='feature-item'>🏛️ <b>Multi-Tier Governance:</b> Role-based access for Superadmins, Districts, Blocks, and Departments.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='feature-item'>🏛️ <b>Multi-Tier Governance:</b> Role-based access for Districts, Blocks, and Departments.</div>", unsafe_allow_html=True)
         st.markdown("<div class='feature-item'>📊 <b>Dynamic Visualizations:</b> Automated analytics, dashboards, and instant Excel/PDF reporting.</div>", unsafe_allow_html=True)
         st.markdown("<div class='feature-item'>🔒 <b>Secure & Transparent:</b> Complete audit logging and streamlined activity registers.</div>", unsafe_allow_html=True)
 
