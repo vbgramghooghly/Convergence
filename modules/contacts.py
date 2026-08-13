@@ -62,20 +62,27 @@ def show():
     OFFICE_LEVELS = ["State / Department", "District", "Sub Division", "Block", "Gram Panchayat"]
     COMMITTEE_ROLES = ["None", "Chairperson", "Co-Chairperson", "Member-Convener", "Member"]
 
-    # 2. Fetch ALL Contacts with Hierarchical Joins
-    query = supabase.table("contacts").select("*, designations(designation_name), districts(district_name), blocks(block_name), departments(department_name), department_wings(wing_name, entity_type)")
+    # 2. Fetch Contacts Scoped by District Visibility
+    query = supabase.table("contacts").select(
+        "*, designations(designation_name), districts(district_name), blocks(block_name), departments(department_name), department_wings(wing_name, entity_type)"
+    )
+    
+    # Filter directory to only show contacts within the user's District (all roles except Superadmin)
+    if user['role'] in ['district', 'block', 'department'] and user.get('district_id'):
+        query = query.eq("district_id", user['district_id'])
+        
     contacts_data = query.execute().data
     df = pd.DataFrame(contacts_data)
 
-    # 3. Tabbed Interface for Cleaner UX
+    # 3. Tabbed Interface
     tab1, tab2 = st.tabs(["📋 View Directory List", "🔄 Profile Update & Transfer Module"])
 
     # ==============================================================
-    # TAB 1: DIRECTORY LIST & EXPORT
+    # TAB 1: DIRECTORY LIST & EXPORT (Visible to All within District)
     # ==============================================================
     with tab1:
-        st.subheader("Official Directory & Statutory Roles")
-        st.caption("Comprehensive list of all statutory officers, committee members, nodal points, and department heads.")
+        st.subheader("Official District Directory & Statutory Roles")
+        st.caption("Comprehensive list of all departmental officers, statutory members, and nodal points within your jurisdiction.")
         
         if not df.empty:
             df['Designation'] = df['designations'].apply(lambda x: x.get('designation_name', 'Unassigned') if isinstance(x, dict) else 'Unassigned')
@@ -99,12 +106,10 @@ def show():
                         return "N/A"
                 if not isinstance(block_ids, list) or not block_ids: return "N/A"
                 
-                # Compare as strings to prevent UUID vs INT type mismatch
                 str_block_ids = [str(x) for x in block_ids]
                 names = [b_name for b_name, b_id in block_dict.items() if str(b_id) in str_block_ids]
                 return ", ".join(names) if names else "N/A"
 
-            # Safely handle columns if data is empty or missing
             for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'tagged_blocks']:
                 if col not in df.columns:
                     df[col] = None
@@ -135,12 +140,14 @@ def show():
             st.markdown("<br>", unsafe_allow_html=True)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
-            st.info("No contact records found. Please update profile information in the next tab.")
+            st.info("No contact records found for your district jurisdiction.")
 
     # ==============================================================
-    # TAB 2: UPDATE & TRANSFER MODULE
+    # TAB 2: UPDATE & PROFILE HANDOVER MODULE
     # ==============================================================
     with tab2:
+        can_map_committee_roles = user['role'] in ['superadmin', 'district', 'block']
+
         if user['role'] == 'superadmin':
             st.subheader("🛠️ User Management & Handover (Superadmin)")
             all_users = supabase.table("users").select("id, full_name, district_id, block_id, role").execute().data
@@ -153,7 +160,7 @@ def show():
             target_default_name = target_user_info.get('full_name', '')
             
         elif user['role'] == 'district':
-            st.subheader("🛠️ Manage District Contacts (District Admin)")
+            st.subheader("🛠️ Manage District Contacts & Statutory Roles (District Admin)")
             dist_users = supabase.table("users").select("id, full_name, district_id, block_id, role").eq("district_id", user['district_id']).execute().data
             user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in dist_users}
             target_user_id = st.selectbox("Select User Profile to Manage", options=list(user_options.keys()), format_func=lambda x: user_options[x])
@@ -162,10 +169,21 @@ def show():
             target_district_id = target_user_info.get('district_id')
             target_block_id = target_user_info.get('block_id')
             target_default_name = target_user_info.get('full_name', '')
+
+        elif user['role'] == 'block':
+            st.subheader("🛠️ Manage Block Contacts & Statutory Roles (Block Admin)")
+            block_users = supabase.table("users").select("id, full_name, district_id, block_id, role").eq("block_id", user['block_id']).execute().data
+            user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in block_users}
+            target_user_id = st.selectbox("Select User Profile to Manage", options=list(user_options.keys()), format_func=lambda x: user_options[x])
             
-        else:
-            st.subheader("🔄 Update Profile / Officer Handover")
-            st.caption("If an officer is transferred, simply update the Name and Phone Number below to hand over this login profile to the new incumbent. The statutory roles remain permanently linked to the profile.")
+            target_user_info = next((u for u in block_users if u['id'] == target_user_id), {})
+            target_district_id = target_user_info.get('district_id')
+            target_block_id = target_user_info.get('block_id')
+            target_default_name = target_user_info.get('full_name', '')
+            
+        else: # Department Role
+            st.subheader("🔄 Department Official Profile Update")
+            st.caption("Update your personal contact details, office location, and designation. Statutory committee roles are managed directly by District or Block administrators.")
             target_user_id = user['id']
             target_district_id = user.get('district_id')
             target_block_id = user.get('block_id')
@@ -224,19 +242,27 @@ def show():
             office = col6.text_input("Office Name / Address", value=existing_record.get('office', ''))
             sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office', ''))
 
-            # --- STATUTORY COMMITTEE ROLES & MULTI-TAGGING ---
+            # --- STATUTORY COMMITTEE ROLES ---
             st.markdown("#### 4. Statutory Committee Memberships")
-            st.caption("Link this profile to specific statutory committees. If an officer handles additional charge of multiple blocks, tag them below.")
+            if not can_map_committee_roles:
+                st.caption("🔒 *Committee roles are managed exclusively by District & Block Administrations.*")
+            else:
+                st.caption("Link this official profile to statutory committees. District/Block Admins hold mapping authority.")
             
             col_c1, col_c2 = st.columns(2)
             
+            allow_dist = can_map_committee_roles and (sel_lvl in ["State / Department", "District", "Sub Division"])
+            allow_block = can_map_committee_roles and (sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"])
+
             curr_dist_role = existing_record.get('district_committee_role', 'None') or 'None'
-            dist_role_idx = COMMITTEE_ROLES.index(curr_dist_role) if curr_dist_role in COMMITTEE_ROLES else 0
-            sel_dist_role = col_c1.selectbox("District Committee Role", COMMITTEE_ROLES, index=dist_role_idx)
+            dist_role_idx = COMMITTEE_ROLES.index(curr_dist_role) if (curr_dist_role in COMMITTEE_ROLES and allow_dist) else 0
+            sel_dist_role = col_c1.selectbox("District Committee Role", COMMITTEE_ROLES, index=dist_role_idx, disabled=not allow_dist)
+            final_dist_role = sel_dist_role if allow_dist else curr_dist_role
 
             curr_block_role = existing_record.get('block_committee_role', 'None') or 'None'
-            block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if curr_block_role in COMMITTEE_ROLES else 0
-            sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx)
+            block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if (curr_block_role in COMMITTEE_ROLES and allow_block) else 0
+            sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx, disabled=not allow_block)
+            final_block_role = sel_block_role if allow_block else curr_block_role
             
             # Robust parsing for JSON/String arrays from Supabase
             curr_comm_blocks = existing_record.get('tagged_blocks') or []
@@ -246,17 +272,28 @@ def show():
                 except:
                     curr_comm_blocks = []
             
-            # Ensure safe string mapping against dict values
             curr_comm_blocks = [str(x) for x in curr_comm_blocks]
             default_blocks = [b for b in list(block_dict.keys()) if str(block_dict[b]) in curr_comm_blocks]
             
-            sel_comm_blocks = st.multiselect("Tagged Blocks for Committee Membership (Select multiple if applicable)", options=list(block_dict.keys()), default=default_blocks)
+            if not default_blocks and target_block_id and final_block_role != "None":
+                primary_block_name = next((b_name for b_name, b_id in block_dict.items() if b_id == target_block_id), None)
+                if primary_block_name:
+                    default_blocks = [primary_block_name]
+            
+            sel_comm_blocks = st.multiselect(
+                "Tagged Blocks for Committee Membership", 
+                options=list(block_dict.keys()), 
+                default=default_blocks if (can_map_committee_roles and final_block_role != "None") else default_blocks,
+                disabled=(not can_map_committee_roles or final_block_role == "None")
+            )
 
-            if st.form_submit_button("Save Details / Complete Handover", type="primary"):
+            if st.form_submit_button("Save Profile Details", type="primary"):
                 if sel_lvl == "Sub Division" and not sel_sub_div.strip():
                     st.error("⚠️ Sub Division Name is required when 'Sub Division' level is selected.")
+                elif can_map_committee_roles and final_block_role != "None" and not sel_comm_blocks:
+                    st.error("⚠️ Please tag at least one block for the assigned Block Committee Role.")
                 else:
-                    comm_block_ids = [block_dict[b] for b in sel_comm_blocks]
+                    comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if can_map_committee_roles else [block_dict[b] for b in default_blocks]
 
                     payload = {
                         "user_id": target_user_id,
@@ -271,9 +308,9 @@ def show():
                         "email_id": email,
                         "office": office if office.strip() else None,
                         "sub_office": sub_office if sub_office.strip() else None,
-                        "district_committee_role": sel_dist_role if sel_dist_role != "None" else None,
-                        "block_committee_role": sel_block_role if sel_block_role != "None" else None,
-                        "tagged_blocks": comm_block_ids, # Aligned exactly with meetings.py payload mapping
+                        "district_committee_role": final_dist_role if final_dist_role != "None" else None,
+                        "block_committee_role": final_block_role if final_block_role != "None" else None,
+                        "tagged_blocks": comm_block_ids,
                         "district_id": target_district_id,
                         "block_id": target_block_id,
                         "active": True
@@ -285,10 +322,10 @@ def show():
                         else:
                             supabase.table("contacts").insert(payload).execute()
                             
-                        # Automatically update the core 'users' table name to match the new incumbent
+                        # Automatically update core 'users' full_name
                         supabase.table("users").update({"full_name": name}).eq("id", target_user_id).execute()
 
-                        st.success("✅ Contact Record and Statutory Mapping updated successfully!")
+                        st.success("✅ Profile details updated successfully!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error saving contact details: {e}")
