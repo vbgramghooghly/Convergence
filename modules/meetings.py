@@ -23,12 +23,24 @@ def show():
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data
     block_dict_reverse = {b['id']: b['block_name'] for b in blocks_data}
 
-    # Fetch contacts including designation and location for committee filtering
-    contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designation_id, district_id, block_id, designations(designation_name)").execute().data
+    # Fetch contacts dynamically pulling all new fields (tagged_blocks, committee roles) and joined designation name
+    contacts_data = supabase.table("contacts").select("*, designations(designation_name)").execute().data
     contact_map = {}
+    
     for c in contacts_data:
         desig = c.get('designations', {})
         desig_name = desig.get('designation_name', 'No Designation') if isinstance(desig, dict) else 'No Designation'
+        
+        # Safely parse tagged blocks (in case it is stored as JSON string or native array)
+        t_blocks = c.get('tagged_blocks')
+        if not t_blocks:
+            t_blocks = []
+        elif isinstance(t_blocks, str):
+            try:
+                t_blocks = json.loads(t_blocks)
+            except:
+                t_blocks = [t_blocks]
+        
         contact_map[c['id']] = {
             "name": c.get('full_name', 'Unknown'),
             "designation": desig_name,
@@ -36,7 +48,10 @@ def show():
             "phone": c.get('contact_number', 'N/A'),
             "email": c.get('email_id', 'N/A'),
             "district_id": c.get('district_id'),
-            "block_id": c.get('block_id')
+            "block_id": c.get('block_id'),
+            "tagged_blocks": [str(x) for x in t_blocks],  # Array of Block IDs explicitly mapped to this officer
+            "district_committee_role": str(c.get('district_committee_role', '')),
+            "block_committee_role": str(c.get('block_committee_role', ''))
         }
 
     # Global Meeting Fetch
@@ -254,23 +269,47 @@ def show():
             statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
             statutory_desig_ids = [d['id'] for d in statutory_desigs]
             
-            # Target Jurisdiction Filtering
-            target_dist_id = dist_dict.get(dist_sel) if meeting_type == 'District' else (next(b for b in blocks_data if b['block_name'] == block_sel)['district_id'])
-            target_block_id = None if meeting_type == 'District' else (next(b for b in blocks_data if b['block_name'] == block_sel)['id'])
+            # Target Jurisdiction Filtering (Cast to Strings for robust comparison)
+            target_dist_id = str(dist_dict.get(dist_sel)) if meeting_type == 'District' else str(next(b for b in blocks_data if b['block_name'] == block_sel)['district_id'])
+            target_block_id = None if meeting_type == 'District' else str(next(b for b in blocks_data if b['block_name'] == block_sel)['id'])
 
             statutory_officials = {}
             other_officials = {}
 
+            # New comprehensive checking honoring tags, multiple blocks, and legacy assignments
             for cid, info in contact_map.items():
-                is_local = False
-                if meeting_type == 'District' and info.get('district_id') == target_dist_id and info.get('block_id') is None:
-                    is_local = True
-                elif meeting_type == 'Block' and info.get('block_id') == target_block_id:
-                    is_local = True
-                    
-                if is_local and info.get('designation_id') in statutory_desig_ids:
+                is_statutory = False
+                belongs_to_jurisdiction = False
+                
+                c_dist_id = str(info.get('district_id'))
+                c_block_id = str(info.get('block_id'))
+                tagged_blocks = info.get('tagged_blocks', [])
+                
+                has_explicit_dist_role = info['district_committee_role'] and info['district_committee_role'].lower() not in ['none', '', 'null']
+                has_explicit_blk_role = info['block_committee_role'] and info['block_committee_role'].lower() not in ['none', '', 'null']
+
+                if meeting_type == 'District':
+                    if c_dist_id == target_dist_id:
+                        belongs_to_jurisdiction = True
+                        legacy_statutory = (info.get('block_id') is None) and (info.get('designation_id') in statutory_desig_ids)
+                        
+                        if legacy_statutory or has_explicit_dist_role:
+                            is_statutory = True
+
+                elif meeting_type == 'Block':
+                    # Check if they belong via primary block posting OR multiple tagged blocks
+                    if c_block_id == target_block_id or (target_block_id in tagged_blocks):
+                        belongs_to_jurisdiction = True
+                        legacy_statutory = (info.get('designation_id') in statutory_desig_ids)
+                        
+                        if legacy_statutory or has_explicit_blk_role:
+                            is_statutory = True
+                
+                # Route official based on classification
+                if is_statutory:
                     statutory_officials[cid] = info
-                else:
+                elif belongs_to_jurisdiction or (c_dist_id == target_dist_id): 
+                    # If they are connected to the Block/District but not statutory, add them to optional invites
                     other_officials[cid] = info
                     
             selected_contact_ids = []
