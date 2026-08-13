@@ -146,8 +146,6 @@ def show():
     # TAB 2: UPDATE & PROFILE HANDOVER MODULE
     # ==============================================================
     with tab2:
-        can_map_committee_roles = user['role'] in ['superadmin', 'district', 'block']
-
         if user['role'] == 'superadmin':
             st.subheader("🛠️ User Management & Handover (Superadmin)")
             all_users = supabase.table("users").select("id, full_name, district_id, block_id, role").execute().data
@@ -196,7 +194,9 @@ def show():
         with st.form("update_contact_form"):
             st.markdown("#### 1. Official Details")
             col1, col2 = st.columns(2)
-            name = col1.text_input("Full Name of Incumbent Officer", value=existing_record.get('full_name', target_default_name))
+            
+            name_val = existing_record.get('full_name') or target_default_name
+            name = col1.text_input("Full Name of Incumbent Officer", value=name_val)
             
             curr_desig_id = existing_record.get('designation_id')
             curr_desig_name = next((k for k, v in desig_dict.items() if v == curr_desig_id), list(desig_dict.keys())[0] if desig_dict else "")
@@ -206,11 +206,12 @@ def show():
             st.markdown("#### 2. Department & Level Hierarchy")
             col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             
-            curr_lvl = existing_record.get('office_level', 'District')
+            curr_lvl = existing_record.get('office_level') or 'District'
             lvl_idx = OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
             sel_lvl = col_l1.selectbox("Posting Level", OFFICE_LEVELS, index=lvl_idx)
             
-            sub_div_val = existing_record.get('sub_division', '')
+            # SAFEGUARD: Provide fallback `or ''` so it's guaranteed to be a string
+            sub_div_val = existing_record.get('sub_division') or ''
             if sel_lvl == "Sub Division":
                 sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
             else:
@@ -234,33 +235,41 @@ def show():
 
             st.markdown("#### 3. Contact & Location Information")
             col3, col4, col5 = st.columns(3)
-            contact_no = col3.text_input("Mobile Number", value=existing_record.get('contact_number', ''))
-            whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number', ''))
-            email = col5.text_input("Official Email ID", value=existing_record.get('email_id', ''))
+            # SAFEGUARD: Convert None to ''
+            contact_no = col3.text_input("Mobile Number", value=existing_record.get('contact_number') or '')
+            whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number') or '')
+            email = col5.text_input("Official Email ID", value=existing_record.get('email_id') or '')
             
             col6, col7 = st.columns(2)
-            office = col6.text_input("Office Name / Address", value=existing_record.get('office', ''))
-            sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office', ''))
+            # SAFEGUARD: Convert None to ''
+            office = col6.text_input("Office Name / Address", value=existing_record.get('office') or '')
+            sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office') or '')
 
-            # --- STATUTORY COMMITTEE ROLES ---
+            # --- STATUTORY COMMITTEE ROLES (RESTRICTED MAPPING) ---
             st.markdown("#### 4. Statutory Committee Memberships")
-            if not can_map_committee_roles:
+            
+            if user['role'] == 'department':
                 st.caption("🔒 *Committee roles are managed exclusively by District & Block Administrations.*")
+            elif user['role'] == 'district':
+                st.caption("🔒 *As a District Admin, you can only map District Roles. Block Roles are managed by Block Admins.*")
+            elif user['role'] == 'block':
+                st.caption("🔒 *As a Block Admin, you can only map Block Roles. District Roles are managed by District Admins.*")
             else:
-                st.caption("Link this official profile to statutory committees. District/Block Admins hold mapping authority.")
+                st.caption("Link this official profile to statutory committees. District/Block roles enable targeted tracking.")
             
             col_c1, col_c2 = st.columns(2)
             
-            allow_dist = can_map_committee_roles and (sel_lvl in ["State / Department", "District", "Sub Division"])
-            allow_block = can_map_committee_roles and (sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"])
+            # Cross-Validation: Check User Authority vs Target Posting Level
+            allow_dist = (user['role'] in ['superadmin', 'district']) and (sel_lvl in ["State / Department", "District", "Sub Division"])
+            allow_block = (user['role'] in ['superadmin', 'block']) and (sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"])
 
-            curr_dist_role = existing_record.get('district_committee_role', 'None') or 'None'
-            dist_role_idx = COMMITTEE_ROLES.index(curr_dist_role) if (curr_dist_role in COMMITTEE_ROLES and allow_dist) else 0
+            curr_dist_role = existing_record.get('district_committee_role') or 'None'
+            dist_role_idx = COMMITTEE_ROLES.index(curr_dist_role) if curr_dist_role in COMMITTEE_ROLES else 0
             sel_dist_role = col_c1.selectbox("District Committee Role", COMMITTEE_ROLES, index=dist_role_idx, disabled=not allow_dist)
             final_dist_role = sel_dist_role if allow_dist else curr_dist_role
 
-            curr_block_role = existing_record.get('block_committee_role', 'None') or 'None'
-            block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if (curr_block_role in COMMITTEE_ROLES and allow_block) else 0
+            curr_block_role = existing_record.get('block_committee_role') or 'None'
+            block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if curr_block_role in COMMITTEE_ROLES else 0
             sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx, disabled=not allow_block)
             final_block_role = sel_block_role if allow_block else curr_block_role
             
@@ -283,17 +292,23 @@ def show():
             sel_comm_blocks = st.multiselect(
                 "Tagged Blocks for Committee Membership", 
                 options=list(block_dict.keys()), 
-                default=default_blocks if (can_map_committee_roles and final_block_role != "None") else default_blocks,
-                disabled=(not can_map_committee_roles or final_block_role == "None")
+                default=default_blocks,
+                disabled=not allow_block
             )
 
             if st.form_submit_button("Save Profile Details", type="primary"):
+                # Safe casting to avoid NoneType issues
+                sel_sub_div = sel_sub_div or ""
+                office = office or ""
+                sub_office = sub_office or ""
+                
                 if sel_lvl == "Sub Division" and not sel_sub_div.strip():
                     st.error("⚠️ Sub Division Name is required when 'Sub Division' level is selected.")
-                elif can_map_committee_roles and final_block_role != "None" and not sel_comm_blocks:
+                elif allow_block and final_block_role != "None" and not sel_comm_blocks:
                     st.error("⚠️ Please tag at least one block for the assigned Block Committee Role.")
                 else:
-                    comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if can_map_committee_roles else [block_dict[b] for b in default_blocks]
+                    # Safely retain existing block tags if the user does not have permission to alter block data
+                    comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if allow_block else [block_dict[b] for b in default_blocks]
 
                     payload = {
                         "user_id": target_user_id,
@@ -306,8 +321,8 @@ def show():
                         "contact_number": contact_no,
                         "whatsapp_number": whatsapp_no,
                         "email_id": email,
-                        "office": office if office.strip() else None,
-                        "sub_office": sub_office if sub_office.strip() else None,
+                        "office": office.strip() if office.strip() else None,
+                        "sub_office": sub_office.strip() if sub_office.strip() else None,
                         "district_committee_role": final_dist_role if final_dist_role != "None" else None,
                         "block_committee_role": final_block_role if final_block_role != "None" else None,
                         "tagged_blocks": comm_block_ids,
