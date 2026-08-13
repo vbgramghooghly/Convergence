@@ -110,11 +110,12 @@ def show():
                 names = [b_name for b_name, b_id in block_dict.items() if str(b_id) in str_block_ids]
                 return ", ".join(names) if names else "N/A"
 
-            for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'tagged_blocks']:
+            # Fixed: Check for 'committee_blocks' instead of 'tagged_blocks'
+            for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'committee_blocks']:
                 if col not in df.columns:
                     df[col] = None
             
-            df['Tagged Comm. Blocks'] = df['tagged_blocks'].apply(format_comm_blocks)
+            df['Tagged Comm. Blocks'] = df['committee_blocks'].apply(format_comm_blocks)
             df['Dist. Role'] = df['district_committee_role'].fillna('None')
             df['Block Role'] = df['block_committee_role'].fillna('None')
             
@@ -146,6 +147,8 @@ def show():
     # TAB 2: UPDATE & PROFILE HANDOVER MODULE
     # ==============================================================
     with tab2:
+        can_map_committee_roles = user['role'] in ['superadmin', 'district', 'block']
+
         if user['role'] == 'superadmin':
             st.subheader("🛠️ User Management & Handover (Superadmin)")
             all_users = supabase.table("users").select("id, full_name, district_id, block_id, role").execute().data
@@ -210,7 +213,6 @@ def show():
             lvl_idx = OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
             sel_lvl = col_l1.selectbox("Posting Level", OFFICE_LEVELS, index=lvl_idx)
             
-            # SAFEGUARD: Provide fallback `or ''` so it's guaranteed to be a string
             sub_div_val = existing_record.get('sub_division') or ''
             if sel_lvl == "Sub Division":
                 sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
@@ -235,13 +237,11 @@ def show():
 
             st.markdown("#### 3. Contact & Location Information")
             col3, col4, col5 = st.columns(3)
-            # SAFEGUARD: Convert None to ''
             contact_no = col3.text_input("Mobile Number", value=existing_record.get('contact_number') or '')
             whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number') or '')
             email = col5.text_input("Official Email ID", value=existing_record.get('email_id') or '')
             
             col6, col7 = st.columns(2)
-            # SAFEGUARD: Convert None to ''
             office = col6.text_input("Office Name / Address", value=existing_record.get('office') or '')
             sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office') or '')
 
@@ -259,7 +259,6 @@ def show():
             
             col_c1, col_c2 = st.columns(2)
             
-            # Cross-Validation: Check User Authority vs Target Posting Level
             allow_dist = (user['role'] in ['superadmin', 'district']) and (sel_lvl in ["State / Department", "District", "Sub Division"])
             allow_block = (user['role'] in ['superadmin', 'block']) and (sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"])
 
@@ -273,8 +272,8 @@ def show():
             sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx, disabled=not allow_block)
             final_block_role = sel_block_role if allow_block else curr_block_role
             
-            # Robust parsing for JSON/String arrays from Supabase
-            curr_comm_blocks = existing_record.get('tagged_blocks') or []
+            # Fixed: Fallback to 'committee_blocks' to match your schema
+            curr_comm_blocks = existing_record.get('committee_blocks') or []
             if isinstance(curr_comm_blocks, str):
                 try:
                     curr_comm_blocks = json.loads(curr_comm_blocks)
@@ -297,7 +296,6 @@ def show():
             )
 
             if st.form_submit_button("Save Profile Details", type="primary"):
-                # Safe casting to avoid NoneType issues
                 sel_sub_div = sel_sub_div or ""
                 office = office or ""
                 sub_office = sub_office or ""
@@ -307,7 +305,6 @@ def show():
                 elif allow_block and final_block_role != "None" and not sel_comm_blocks:
                     st.error("⚠️ Please tag at least one block for the assigned Block Committee Role.")
                 else:
-                    # Safely retain existing block tags if the user does not have permission to alter block data
                     comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if allow_block else [block_dict[b] for b in default_blocks]
 
                     payload = {
@@ -325,7 +322,7 @@ def show():
                         "sub_office": sub_office.strip() if sub_office.strip() else None,
                         "district_committee_role": final_dist_role if final_dist_role != "None" else None,
                         "block_committee_role": final_block_role if final_block_role != "None" else None,
-                        "tagged_blocks": comm_block_ids,
+                        "committee_blocks": comm_block_ids, # Fixed: Using the correct schema column name
                         "district_id": target_district_id,
                         "block_id": target_block_id,
                         "active": True
@@ -337,7 +334,6 @@ def show():
                         else:
                             supabase.table("contacts").insert(payload).execute()
                             
-                        # Automatically update core 'users' full_name
                         supabase.table("users").update({"full_name": name}).eq("id", target_user_id).execute()
 
                         st.success("✅ Profile details updated successfully!")
