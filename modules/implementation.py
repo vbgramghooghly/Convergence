@@ -107,12 +107,14 @@ def show():
 
                         existing = supabase.table("department_targets").select("id").eq("department_id", dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity).execute().data
                         if existing:
-                            supabase.table("department_targets").update(target_record).eq("id", existing[0]['id']).execute()
-                            log_action(user, "UPDATE", "department_targets", existing[0]['id'], details=target_record)
+                            target_id = existing[0]['id']
+                            supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
+                            log_action(user.get('id'), f"UPDATE department_targets {target_id}")
                             st.success("Target updated!")
                         else:
                             result = supabase.table("department_targets").insert(target_record).execute()
-                            log_action(user, "CREATE", "department_targets", result.data[0]['id'], details=target_record)
+                            new_target_id = result.data[0]['id']
+                            log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
                             st.success("Target added!")
                         st.rerun()
 
@@ -164,7 +166,8 @@ def show():
             selected_activity = next((a for a in activities if a['id'] == selected_act_id), None)
 
             if selected_activity:
-                st.markdown(f"**Current Status:** `<span style='color: #E67E22;'>{selected_activity.get('current_status', 'Planned')}</span>` | **Source:** `{selected_activity.get('origin_source', 'Normative / Routine')}`", unsafe_allow_html=True)
+                # Removed backticks around the span to render HTML properly
+                st.markdown(f"**Current Status:** <span style='color: #E67E22;'>{selected_activity.get('current_status', 'Planned')}</span> | **Source:** <code>{selected_activity.get('origin_source', 'Normative / Routine')}</code>", unsafe_allow_html=True)
                 
                 with st.form("update_progress_form"):
                     col_p1, col_p2 = st.columns([1, 2])
@@ -221,7 +224,9 @@ def show():
                                     "remarks": f"MIS Code: {mis_code_val} | {remarks}"
                                 }
                                 supabase.table("progress_updates").insert(history_payload).execute()
-                                log_action(user, "UPDATE", "convergence_register", selected_act_id, details=update_data)
+                                
+                                # Fixed log_action signature
+                                log_action(user.get('id'), f"UPDATE convergence_register {selected_act_id}")
                                 
                                 st.success("✅ Progress and MIS mapping updated successfully!")
                                 st.rerun()
@@ -295,7 +300,10 @@ def show():
                             else:
                                 payload = {"status": sync_status, "remarks": sync_remarks}
                                 supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
-                                log_action(user, "UPDATE", "meeting_action_points", sync_id, details=payload)
+                                
+                                # Fixed log_action signature
+                                log_action(user.get('id'), f"UPDATE meeting_action_points {sync_id}")
+                                
                                 st.success("✅ Meeting ATR Updated! If flagged as Not Feasible, it has been added to the next meeting's agenda.")
                                 st.rerun()
                 else:
