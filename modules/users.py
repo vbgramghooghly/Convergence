@@ -12,6 +12,39 @@ def show():
     supabase = get_supabase()
     user = get_current_user()
 
+    # ---------- FETCH MASTER DATA GLOBALLY ----------
+    districts = supabase.table("districts").select("id,district_name").execute().data or []
+    blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
+    depts = supabase.table("departments").select("id,department_name").execute().data or []
+    wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
+    
+    dist_map = {d['id']: d['district_name'] for d in districts}
+    block_map = {b['id']: b['block_name'] for b in blocks}
+    dept_map = {d['id']: d['department_name'] for d in depts}
+    wing_map = {w['id']: w for w in wings}
+
+    # Build a combined option list for Departments & Wings
+    dept_options = []
+    # 1. Add Parent Departments
+    for d in depts:
+        dept_options.append({
+            "label": d['department_name'],
+            "dept_id": d['id'],
+            "wing_id": None
+        })
+    # 2. Add Wings/Parastatals
+    for w in wings:
+        parent_name = dept_map.get(w['department_id'], "Unknown Department")
+        dept_options.append({
+            "label": f"{parent_name} ➔ {w['wing_name']} [{w['entity_type']}]",
+            "dept_id": w['department_id'],
+            "wing_id": w['id']
+        })
+    
+    # Sort alphabetically by label for easy finding
+    dept_options = sorted(dept_options, key=lambda x: x['label'])
+    dept_labels = [opt['label'] for opt in dept_options]
+
     # ---------- VIEW EXISTING USERS ----------
     st.subheader("👥 Current Users")
     users_data = supabase.table("users").select("*").execute().data
@@ -20,20 +53,22 @@ def show():
         return
 
     df = pd.DataFrame(users_data)
-    
-    # Fetch master data
-    districts = supabase.table("districts").select("id,district_name").execute().data
-    blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data
-    depts = supabase.table("departments").select("id,department_name").execute().data
-    
-    dist_map = {d['id']: d['district_name'] for d in districts}
-    block_map = {b['id']: b['block_name'] for b in blocks}
-    dept_map = {d['id']: d['department_name'] for d in depts}
-
     df_display = df.copy()
+    
     df_display['district_name'] = df_display['district_id'].map(dist_map)
     df_display['block_name'] = df_display['block_id'].map(block_map)
-    df_display['department_name'] = df_display['department_id'].map(dept_map)
+    
+    # Custom function to display "Department ➔ Wing" if applicable
+    def format_dept_display(row):
+        if pd.isna(row.get('department_id')):
+            return None
+        dept_name = dept_map.get(row['department_id'], 'Unknown')
+        wing_id = row.get('wing_id')
+        if pd.notna(wing_id) and wing_id in wing_map:
+            return f"{dept_name} ➔ {wing_map[wing_id]['wing_name']}"
+        return dept_name
+
+    df_display['department_name'] = df_display.apply(format_dept_display, axis=1)
     
     st.dataframe(
         df_display[['full_name', 'role', 'district_name', 'block_name', 'department_name', 'active']],
@@ -92,33 +127,45 @@ def show():
     else:
         new_block_id = None
 
-    # Department dropdown
+    # Department & Wing dropdown
+    new_dept_id = None
+    new_wing_id = None
+    
     if new_role == 'department':
-        dept_names = ["-- Select Department --"] + [d['department_name'] for d in depts]
+        dept_options_with_placeholder = ["-- Select Department or Wing --"] + dept_labels
         cur_dept_id = selected_user.get('department_id')
+        cur_wing_id = selected_user.get('wing_id')
+        
         dept_index = 0
         if cur_dept_id:
-            for i, d in enumerate(depts):
-                if d['id'] == cur_dept_id:
+            # Match against the combined options
+            for i, opt in enumerate(dept_options):
+                # We check equality for both dept and wing. 
+                # (e.g. if wing is None, we want the parent dept option)
+                if opt['dept_id'] == cur_dept_id and opt['wing_id'] == cur_wing_id:
                     dept_index = i + 1 
                     break
-        selected_dept_name = st.selectbox("Department", dept_names, index=dept_index)
-        new_dept_id = next((d['id'] for d in depts if d['department_name'] == selected_dept_name), None)
-    else:
-        new_dept_id = None
+                    
+        selected_dept_label = st.selectbox("Department / Wing", dept_options_with_placeholder, index=dept_index)
+        
+        if selected_dept_label != "-- Select Department or Wing --":
+            selected_opt = next(opt for opt in dept_options if opt['label'] == selected_dept_label)
+            new_dept_id = selected_opt['dept_id']
+            new_wing_id = selected_opt['wing_id']
 
     active = st.checkbox("Active Account", value=selected_user.get('active', True))
 
     if st.button("Update User Profile", type="primary"):
         if new_role == 'department' and not new_dept_id:
-            st.error("Please select a valid Department from the dropdown.")
+            st.error("Please select a valid Department or Wing from the dropdown.")
         else:
             updates = {
                 "role": new_role,
                 "active": active,
                 "district_id": new_dist_id,
                 "block_id": new_block_id if new_role == 'block' else None,
-                "department_id": new_dept_id if new_role == 'department' else None
+                "department_id": new_dept_id if new_role == 'department' else None,
+                "wing_id": new_wing_id if new_role == 'department' else None
             }
             try:
                 # 1. Update Database
@@ -175,7 +222,17 @@ def show():
             # Reverse maps for quick ID lookup by name
             name_to_dist = {d['district_name'].lower().strip(): d['id'] for d in districts}
             name_to_block = {b['block_name'].lower().strip(): b for b in blocks} 
-            name_to_dept = {d['department_name'].lower().strip(): d['id'] for d in depts}
+            
+            # Map combinations for wings/depts to handle flexible CSV uploads
+            name_to_dept_wing = {}
+            for opt in dept_options:
+                name_to_dept_wing[opt['label'].lower().strip()] = (opt['dept_id'], opt['wing_id'])
+                if opt['wing_id']:
+                    w_name = wing_map[opt['wing_id']]['wing_name'].lower().strip()
+                    name_to_dept_wing[w_name] = (opt['dept_id'], opt['wing_id'])
+                else:
+                    p_name = dept_map[opt['dept_id']].lower().strip()
+                    name_to_dept_wing[p_name] = (opt['dept_id'], opt['wing_id'])
             
             success_count = 0
             
@@ -195,6 +252,7 @@ def show():
                     dist_id = name_to_dist.get(bulk_dist_name.lower().strip())
                     block_id = None
                     dept_id = None
+                    wing_id = None
                     
                     if role == 'district':
                         lookup_name = admin_name.lower().replace(" district", "")
@@ -213,9 +271,11 @@ def show():
                             continue
                             
                     elif role == 'department':
-                        dept_id = name_to_dept.get(admin_name.lower())
-                        if not dept_id:
-                            st.error(f"Row {index+2}: Could not find department matching '{admin_name}' in Master Data.")
+                        mapped = name_to_dept_wing.get(admin_name.lower())
+                        if mapped:
+                            dept_id, wing_id = mapped
+                        else:
+                            st.error(f"Row {index+2}: Could not find department/wing matching '{admin_name}' in Master Data.")
                             continue
                             
                     try:
@@ -234,6 +294,7 @@ def show():
                             "district_id": dist_id,
                             "block_id": block_id,
                             "department_id": dept_id,
+                            "wing_id": wing_id,
                             "active": True
                         }
                         supabase.table("users").insert(user_record).execute()
@@ -250,7 +311,7 @@ def show():
     st.subheader("➕ Create Single User Manually")
     
     with st.form("create_user_form"):
-        new_fullname = st.text_input("Full Name")
+        new_fullname = st.text_input("Full Name (e.g. Nodal Officer WBSRDA)")
         new_email = st.text_input("Username (without @domain)")
         new_password = st.text_input("Password", type="password")
         new_user_role = st.selectbox("Initial Role", ['district', 'block', 'department'])
@@ -258,19 +319,20 @@ def show():
         district_list_form = [d['district_name'] for d in districts]
         new_dist_name = st.selectbox("District", district_list_form)
         
-        new_dept_name = None
+        new_dept_label = None
         if new_user_role == 'department':
-            dept_names_form = ["-- Select Department --"] + [d['department_name'] for d in depts]
-            new_dept_name = st.selectbox("Department", dept_names_form)
+            dept_names_form = ["-- Select Department or Wing --"] + dept_labels
+            new_dept_label = st.selectbox("Department / Wing", dept_names_form)
 
         submitted = st.form_submit_button("Create User")
+        
         if submitted:
             if not SERVICE_KEY:
                 st.error("Service key is not configured.")
                 st.stop()
                 
-            if new_user_role == 'department' and new_dept_name == "-- Select Department --":
-                st.error("You must select a specific department for a Department user.")
+            if new_user_role == 'department' and new_dept_label == "-- Select Department or Wing --":
+                st.error("You must select a specific department or wing for a Department user.")
                 st.stop()
                 
             if not new_email or not new_password or not new_fullname:
@@ -278,7 +340,13 @@ def show():
                 st.stop()
 
             new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
-            new_dept_id = next((d['id'] for d in depts if d['department_name'] == new_dept_name), None) if new_dept_name else None
+            
+            new_dept_id = None
+            new_wing_id = None
+            if new_user_role == 'department' and new_dept_label:
+                selected_opt = next(opt for opt in dept_options if opt['label'] == new_dept_label)
+                new_dept_id = selected_opt['dept_id']
+                new_wing_id = selected_opt['wing_id']
             
             formatted_email = f"{new_email.strip()}@hooghly.gov.in"
 
@@ -299,6 +367,7 @@ def show():
                     "district_id": new_dist_id,
                     "block_id": None,   
                     "department_id": new_dept_id,
+                    "wing_id": new_wing_id,
                     "active": True
                 }
                 supabase.table("users").insert(user_record).execute()
