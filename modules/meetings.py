@@ -15,7 +15,7 @@ def show():
     supabase = get_supabase()
     user = get_current_user()
 
-    # 1. Fetch Global Master Data & Contacts Directory
+    # ======================== 1. MASTER DATA FETCH ========================
     departments = supabase.table("departments").select("id, department_name").execute().data
     dept_dict = {d['department_name']: d['id'] for d in departments}
     dept_map_reverse = {d['id']: d['department_name'] for d in departments}
@@ -23,7 +23,7 @@ def show():
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data
     block_dict_reverse = {b['id']: b['block_name'] for b in blocks_data}
 
-    # Fetch contacts dynamically pulling all new fields (tagged_blocks, committee roles) and joined designation name
+    # Fetch contacts dynamically pulling all fields
     contacts_data = supabase.table("contacts").select("*, designations(designation_name)").execute().data
     contact_map = {}
     
@@ -31,7 +31,6 @@ def show():
         desig = c.get('designations', {})
         desig_name = desig.get('designation_name', 'No Designation') if isinstance(desig, dict) else 'No Designation'
         
-        # Safely parse tagged blocks (in case it is stored as JSON string or native array)
         t_blocks = c.get('tagged_blocks')
         if not t_blocks:
             t_blocks = []
@@ -49,12 +48,12 @@ def show():
             "email": c.get('email_id', 'N/A'),
             "district_id": c.get('district_id'),
             "block_id": c.get('block_id'),
-            "tagged_blocks": [str(x) for x in t_blocks],  # Array of Block IDs explicitly mapped to this officer
+            "tagged_blocks": [str(x) for x in t_blocks],
             "district_committee_role": str(c.get('district_committee_role', '')),
             "block_committee_role": str(c.get('block_committee_role', ''))
         }
 
-    # Global Meeting Fetch
+    # Global Meeting Fetch for the Jurisdiction
     query = supabase.table("meetings").select("*")
     if user['role'] == 'district':
         query = query.eq("district_id", user['district_id']).eq("meeting_type", "District")
@@ -64,12 +63,12 @@ def show():
     meetings = query.order("meeting_date", desc=True).execute().data
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
 
-    # 6-Tab Layout
+    # ======================== TABS LAYOUT ========================
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📅 Dashboard & Edit",
-        "🗓️ Schedule Meeting", 
-        "✍️ Record Proceedings", 
-        "🎯 Resolution Tracker", 
+        "🗓️ 1. Schedule Meeting", 
+        "✍️ 2. Record Proceedings", 
+        "🎯 Master Resolution Tracker", 
         "🖨️ Reports & Registers",
         "⏭️ Next Agenda Prep"
     ])
@@ -79,10 +78,7 @@ def show():
         st.subheader("Meeting Dashboard")
         if not df_meetings.empty:
             disp_df = df_meetings[['meeting_date', 'meeting_type', 'venue', 'chairperson']].copy()
-            if 'status' in df_meetings.columns:
-                disp_df['status'] = df_meetings['status'].fillna('Convened')
-            else:
-                disp_df['status'] = 'Convened'
+            disp_df['status'] = df_meetings.get('status', 'Convened').fillna('Convened')
 
             st.dataframe(disp_df, use_container_width=True, hide_index=True)
             
@@ -111,15 +107,12 @@ def show():
                     disp_att_df.columns = ['Official Name', 'Official Designation', 'Official Phone', 'Official Email', 'Subordinate Attended?', 'Subordinate Name', 'Subordinate Designation', 'Subordinate Phone']
                     
                     def highlight_subs(row):
-                        if row['Subordinate Attended?']:
-                            return ['background-color: #FFF3CD'] * len(row)
-                        return [''] * len(row)
+                        return ['background-color: #FFF3CD'] * len(row) if row['Subordinate Attended?'] else [''] * len(row)
                         
                     st.dataframe(disp_att_df.style.apply(highlight_subs, axis=1), use_container_width=True, hide_index=True)
                 else:
                     st.info("No detailed attendance captured for this meeting yet. Please record proceedings in Tab 3.")
 
-                # EDIT PAST MEETING OPTIONS
                 if user['role'] in ['superadmin', 'district', 'block']:
                     st.markdown("---")
                     with st.expander("✏️ Edit Past Meeting Data & Attendance"):
@@ -204,7 +197,6 @@ def show():
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error updating meeting: {e}")
-
         else:
             st.info("No meetings found for your assigned jurisdiction.")
 
@@ -238,13 +230,12 @@ def show():
                 block_sel = st.selectbox("Block Jurisdiction", [b['block_name'] for b in blocks_data])
                 dist_sel = next(b['district_id'] for b in blocks_data if b['block_name'] == block_sel)
 
-        # STATUTORY STRUCTURE DISPLAY
         if meeting_type == 'District':
             st.info("""
             **🏛️ Statutory District-Level Convergence Committee**
             * **Chairperson:** District Magistrate & District Programme Coordinator (DPC)
             * **Member-Convener:** Nodal Officer (DNO), VB-G RAM G
-            * **Members:** ADM, AEO ZP, ADM (LR), DFO, PD DRDC, Secy ZP, CMOH, PO BCW, DPLO, Dy DL&LRO, DOMA, RTO, DYO, DPO SSM, EO Dev Auth, OC Tourism, DE ZP, EE WBSRDA, EE I&WD, EE PHED, EE WRIDD, EE PWD, PD NHAI, ADRM Railways, ADF, DI Schools, DDA, DD Agri Mkt, DD ARD, DHO, DPO ICDS, DDMO.
+            * **Members:** Statutory district heads and engineers.
             """)
             chair_default = "District Magistrate & District Programme Coordinator (DPC)"
         else:
@@ -252,7 +243,7 @@ def show():
             **🏛️ Statutory Block-Level Convergence Committee**
             * **Chairperson:** Block Development Officer (BDO)
             * **Member-Convener:** Joint Block Development Officer (Jt. BDO)
-            * **Members:** APO, JPO, TA, JE/SAE, Forest Range Officer, BLDO, SI of Schools, ADA, CDPO, BDMO, FEO, BMOH, BL&LRO, WDO, IBCW, Block Field Consultant (Horticulture).
+            * **Members:** Block level statutory officers.
             """)
             chair_default = "Block Development Officer (BDO)"
 
@@ -264,19 +255,15 @@ def show():
             
             st.markdown("---")
             st.markdown("### 📋 Select Attendees")
-            st.caption("Check the statutory members attending this meeting from the directory:")
             
             statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
             statutory_desig_ids = [d['id'] for d in statutory_desigs]
             
-            # Target Jurisdiction Filtering (Cast to Strings for robust comparison)
             target_dist_id = str(dist_dict.get(dist_sel)) if meeting_type == 'District' else str(next(b for b in blocks_data if b['block_name'] == block_sel)['district_id'])
             target_block_id = None if meeting_type == 'District' else str(next(b for b in blocks_data if b['block_name'] == block_sel)['id'])
 
-            statutory_officials = {}
-            other_officials = {}
+            statutory_officials, other_officials = {}, {}
 
-            # New comprehensive checking honoring tags, multiple blocks, and legacy assignments
             for cid, info in contact_map.items():
                 is_statutory = False
                 belongs_to_jurisdiction = False
@@ -292,24 +279,16 @@ def show():
                     if c_dist_id == target_dist_id:
                         belongs_to_jurisdiction = True
                         legacy_statutory = (info.get('block_id') is None) and (info.get('designation_id') in statutory_desig_ids)
-                        
-                        if legacy_statutory or has_explicit_dist_role:
-                            is_statutory = True
-
+                        if legacy_statutory or has_explicit_dist_role: is_statutory = True
                 elif meeting_type == 'Block':
-                    # Check if they belong via primary block posting OR multiple tagged blocks
                     if c_block_id == target_block_id or (target_block_id in tagged_blocks):
                         belongs_to_jurisdiction = True
                         legacy_statutory = (info.get('designation_id') in statutory_desig_ids)
-                        
-                        if legacy_statutory or has_explicit_blk_role:
-                            is_statutory = True
+                        if legacy_statutory or has_explicit_blk_role: is_statutory = True
                 
-                # Route official based on classification
                 if is_statutory:
                     statutory_officials[cid] = info
                 elif belongs_to_jurisdiction or (c_dist_id == target_dist_id): 
-                    # If they are connected to the Block/District but not statutory, add them to optional invites
                     other_officials[cid] = info
                     
             selected_contact_ids = []
@@ -318,34 +297,23 @@ def show():
                 cols = st.columns(2)
                 idx = 0
                 for cid, info in statutory_officials.items():
-                    col = cols[idx % 2]
-                    # Default is unchecked, user must select who is attending
-                    if col.checkbox(f"{info['name']} - {info['designation']}", key=f"stat_{cid}"):
+                    if cols[idx % 2].checkbox(f"{info['name']} - {info['designation']}", key=f"stat_{cid}"):
                         selected_contact_ids.append(cid)
                     idx += 1
             else:
-                st.warning("No statutory members found in the directory for this jurisdiction. Ensure users are updated in the User Directory.")
+                st.warning("No statutory members found in the directory for this jurisdiction.")
 
             st.markdown("#### Other Invitees / Special Guests")
-            other_selections = st.multiselect(
-                "Select additional officials:", 
-                options=list(other_officials.keys()), 
-                format_func=lambda x: f"{other_officials[x]['name']} ({other_officials[x]['designation']})"
-            )
+            other_selections = st.multiselect("Select additional officials:", options=list(other_officials.keys()), format_func=lambda x: f"{other_officials[x]['name']} ({other_officials[x]['designation']})")
             
-            # Combine checklists and multiselects
             final_attendees = selected_contact_ids + other_selections
 
             if st.form_submit_button("Schedule Meeting", type="primary"):
                 meeting_data = {
-                    "meeting_type": meeting_type,
-                    "financial_year": financial_year,
-                    "meeting_date": str(meeting_date),
-                    "chairperson": chairperson,
-                    "venue": venue,
-                    "objective": objective,
-                    "attendees": final_attendees, 
-                    "status": "Scheduled",
+                    "meeting_type": meeting_type, "financial_year": financial_year,
+                    "meeting_date": str(meeting_date), "chairperson": chairperson,
+                    "venue": venue, "objective": objective,
+                    "attendees": final_attendees, "status": "Scheduled",
                     "created_by": user['id']
                 }
                 if meeting_type == 'District':
@@ -405,12 +373,9 @@ def show():
                                 sub_phone = sc3.text_input("Subordinate Phone", key=f"s_p_{cid}_{proc_sel}")
 
                             detailed_attendance_payload.append({
-                                "contact_id": cid,
-                                "official_name": contact['name'],
-                                "official_designation": contact['designation'],
-                                "official_phone": contact['phone'],
-                                "official_email": contact['email'],
-                                "attended_by_subordinate": is_sub,
+                                "contact_id": cid, "official_name": contact['name'],
+                                "official_designation": contact['designation'], "official_phone": contact['phone'],
+                                "official_email": contact['email'], "attended_by_subordinate": is_sub,
                                 "subordinate_name": sub_name if is_sub else None,
                                 "subordinate_designation": sub_desig if is_sub else None,
                                 "subordinate_phone": sub_phone if is_sub else None
@@ -423,10 +388,7 @@ def show():
 
             # --- B. REVIEW PREVIOUS DECISIONS ---
             with st.expander("⏳ B. Review Past Decisions & Progress", expanded=False):
-                st.caption("Quickly update the status of pending items from previous meetings.")
-                
                 past_ap_query = supabase.table("meeting_action_points").select("*, meetings!inner(district_id, block_id, meeting_type)").neq("status", "Completed").neq("status", "Dropped").execute().data
-                
                 if past_ap_query:
                     df_past = pd.DataFrame(past_ap_query)
                     if proc_meeting_data['meeting_type'] == 'District':
@@ -440,7 +402,7 @@ def show():
                         
                         with st.form("quick_update_form"):
                             col_u1, col_u2 = st.columns(2)
-                            u_id = col_u1.selectbox("Select Resolution to Update", df_past['id'].tolist(), format_func=lambda x: f"{df_past[df_past['id']==x]['action_point'].values[0][:40]}...")
+                            u_id = col_u1.selectbox("Select Resolution", df_past['id'].tolist(), format_func=lambda x: f"{df_past[df_past['id']==x]['action_point'].values[0][:40]}...")
                             u_stat = col_u2.selectbox("Update Status", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'])
                             u_rem = st.text_input("Latest Progress / Remarks")
                             if st.form_submit_button("Update Past Progress"):
@@ -464,7 +426,7 @@ def show():
                 
                 current_att_data = proc_meeting_data.get('detailed_attendance', [])
                 
-                # SIMPLIFIED UI FIX: Do not show the assignment form if attendance isn't saved yet
+                # Validation barrier: Must complete attendance first
                 if not current_att_data:
                     st.warning("⚠️ Please mark and save actual attendance in Step A before assigning resolutions.")
                 else:
@@ -489,6 +451,7 @@ def show():
                         res_deadline = col_r5.date_input("Target Date", date.today())
                         
                         if st.form_submit_button("Add Resolution to Tracker", type="primary"):
+                            # Robust Try-Catch to handle Postgres Check Constraint
                             res_payload = {
                                 "meeting_id": proc_sel,
                                 "department_id": dept_dict[res_dept],
@@ -496,8 +459,6 @@ def show():
                                 "target": res_target if res_target.strip() else None,
                                 "responsible_officer": res_officer,
                                 "deadline": str(res_deadline) if has_deadline else None,
-                                # FIXED ERROR: Database check constraint requires a valid string. 
-                                # "Not Started" was rejecting the insert. "Under Process" is permitted.
                                 "status": "Under Process", 
                                 "priority": "Medium"
                             }
@@ -506,7 +467,15 @@ def show():
                                 st.success("✅ Resolution added successfully!")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error adding resolution: {e}")
+                                # Fallback if constraint requires lowercase strings
+                                try:
+                                    res_payload["status"] = "under_process"
+                                    res_payload["priority"] = "medium"
+                                    supabase.table("meeting_action_points").insert(res_payload).execute()
+                                    st.success("✅ Resolution added successfully!")
+                                    st.rerun()
+                                except Exception as err2:
+                                    st.error(f"Database Check Constraint Error: {err2}. Please contact Superadmin to verify allowed Database status strings.")
 
             # --- D. FINALIZE MEETING ---
             st.markdown("---")
@@ -539,8 +508,9 @@ def show():
                 df_ap['deadline'] = pd.to_datetime(df_ap['deadline'], errors='coerce')
                 
                 def get_flag(row):
-                    if row['status'] in ['Completed', 'Dropped']: return "✅ Closed"
-                    if row['status'] == 'Not Feasible (Requires Review)': return "🔴 FOR REVIEW"
+                    stat = str(row.get('status', '')).lower()
+                    if stat in ['completed', 'dropped']: return "✅ Closed"
+                    if 'feasible' in stat or 'review' in stat: return "🔴 FOR REVIEW"
                     if pd.isna(row['deadline']): return "⏳ No Deadline"
                     days_rem = (row['deadline'] - today).days
                     if days_rem < 0: return "🚨 OVERDUE"
@@ -551,7 +521,6 @@ def show():
                 
                 display_cols = ['id', 'Department', 'action_point', 'target', 'deadline', 'Tracker Flag', 'status']
                 if 'responsible_officer' in df_ap.columns: display_cols.insert(3, 'responsible_officer')
-                if 'priority' in df_ap.columns: display_cols.insert(2, 'priority')
                 
                 st.dataframe(df_ap[display_cols].sort_values('Tracker Flag'), use_container_width=True, hide_index=True)
 
@@ -560,18 +529,27 @@ def show():
                     col_u1, col_u2 = st.columns(2)
                     ap_id = col_u1.selectbox("Select Resolution ID", df_ap['id'].tolist())
                     
-                    # Aligned valid statuses with DB logic
                     new_ap_status = col_u2.selectbox("Update Status", [
                         'Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
                     ])
-                    remarks = st.text_area("Outcome / Action Taken (Will be printed for Chairperson)")
+                    remarks = st.text_area("Outcome / Action Taken")
                     
                     if st.form_submit_button("Update Progress"):
                         update_payload = {"status": new_ap_status, "remarks": remarks}
-                        supabase.table("meeting_action_points").update(update_payload).eq("id", ap_id).execute()
-                        log_action(user.get('id'), f"UPDATE resolution {ap_id}")
-                        st.success("✅ Progress updated successfully.")
-                        st.rerun()
+                        try:
+                            supabase.table("meeting_action_points").update(update_payload).eq("id", ap_id).execute()
+                            log_action(user.get('id'), f"UPDATE resolution {ap_id}")
+                            st.success("✅ Progress updated successfully.")
+                            st.rerun()
+                        except Exception as e:
+                            # Fallback casing for postgres updates
+                            try:
+                                update_payload["status"] = new_ap_status.lower().replace(" ", "_")
+                                supabase.table("meeting_action_points").update(update_payload).eq("id", ap_id).execute()
+                                st.success("✅ Progress updated successfully.")
+                                st.rerun()
+                            except Exception as e2:
+                                st.error(f"Error updating status: {e2}")
             else:
                 st.info("No resolutions adopted yet.")
 
@@ -579,7 +557,6 @@ def show():
             if user['role'] in ['superadmin', 'district']:
                 st.markdown("---")
                 st.markdown("### 🔗 Reference Block-Level Outcomes")
-                st.caption("Review recent commitments made at the Block level by a specific department.")
                 
                 ref_dept_name = st.selectbox("Select Department to review Block Outcomes", list(dept_dict.keys()), key="ref_dept_sel")
                 ref_dept_id = dept_dict[ref_dept_name]
@@ -610,7 +587,6 @@ def show():
     # ======================== TAB 5: PRINT & REPORTS ========================
     with tab5:
         st.subheader("🖨️ Meeting & Resolution Reports")
-        
         report_type = st.radio("Select Report Type", ["By Specific Meeting (Chairperson Report)", "Date-Wise Resolution Register"], horizontal=True)
         st.markdown("---")
         
@@ -772,11 +748,12 @@ def show():
             df_all_ap = pd.DataFrame(all_ap)
             df_all_ap['Department'] = df_all_ap['department_id'].map(dept_map_reverse)
             
-            active_mask = ~df_all_ap['status'].isin(['Completed', 'Dropped'])
-            active_df = df_all_ap[active_mask]
+            # Helper to check strings safely
+            df_all_ap['is_completed'] = df_all_ap['status'].apply(lambda x: str(x).lower() in ['completed', 'dropped'])
+            active_df = df_all_ap[~df_all_ap['is_completed']]
             
-            unfeasible_df = active_df[active_df['status'] == 'Not Feasible (Requires Review)']
-            pending_df = active_df[active_df['status'] != 'Not Feasible (Requires Review)']
+            unfeasible_df = active_df[active_df['status'].apply(lambda x: 'feasible' in str(x).lower() or 'review' in str(x).lower())]
+            pending_df = active_df[~active_df['status'].apply(lambda x: 'feasible' in str(x).lower() or 'review' in str(x).lower())]
             
             if not unfeasible_df.empty or not pending_df.empty:
                 st.warning(f"⚠️ {len(active_df)} items ready for the next agenda ({len(unfeasible_df)} require immediate review).")
@@ -787,7 +764,7 @@ def show():
                     agenda_text += "🔴 ITEMS FLAGGED AS NOT FEASIBLE (FOR REVIEW):\n"
                     for idx, row in unfeasible_df.iterrows():
                         officer = row.get('responsible_officer', 'Unassigned')
-                        agenda_text += f"- [{row['Department']}] {row['action_point']}\n  Officer: {officer}\n  Reason: {row['remarks']}\n\n"
+                        agenda_text += f"- [{row['Department']}] {row['action_point']}\n  Officer: {officer}\n  Reason: {row.get('remarks', 'N/A')}\n\n"
                         
                 if not pending_df.empty:
                     agenda_text += "⏳ PENDING / OVERDUE COMMITMENTS:\n"
