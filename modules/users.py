@@ -4,7 +4,7 @@ from supabase import create_client
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
-from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY   
+from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY
 
 def show():
     require_role('superadmin')
@@ -25,6 +25,7 @@ def show():
 
     # Build a combined option list for Departments & Wings
     dept_options = []
+    
     # 1. Add Parent Departments
     for d in depts:
         dept_options.append({
@@ -32,6 +33,7 @@ def show():
             "dept_id": d['id'],
             "wing_id": None
         })
+        
     # 2. Add Wings/Parastatals
     for w in wings:
         parent_name = dept_map.get(w['department_id'], "Unknown Department")
@@ -48,6 +50,7 @@ def show():
     # ---------- VIEW EXISTING USERS ----------
     st.subheader("👥 Current Users")
     users_data = supabase.table("users").select("*").execute().data
+    
     if not users_data:
         st.info("No users found in the system.")
         return
@@ -182,7 +185,7 @@ def show():
     # --- ADMIN PASSWORD ALTERNATION ---
     with st.expander("🔑 Change / Alternate User Password"):
         st.warning("This will immediately overwrite the user's current password.")
-        new_pw = st.text_input("New Password", type="password")
+        new_pw = st.text_input("New Password", type="password", key="edit_pw_input")
         if st.button("Reset Password"):
             if not SERVICE_KEY:
                 st.error("Service key is required to alter passwords.")
@@ -203,69 +206,69 @@ def show():
     st.markdown("---")
     st.subheader("➕ Create Single User Manually")
     
-    with st.form("create_user_form"):
-        new_fullname = st.text_input("Full Name (e.g. Nodal Officer WBSRDA)")
-        new_email = st.text_input("Username (without @domain)")
-        new_password = st.text_input("Password", type="password")
-        new_user_role = st.selectbox("Initial Role", ['district', 'block', 'department'])
-        
-        district_list_form = [d['district_name'] for d in districts]
-        new_dist_name = st.selectbox("District", district_list_form)
-        
-        new_dept_label = None
-        if new_user_role == 'department':
-            dept_names_form = ["-- Select Department or Wing --"] + dept_labels
-            new_dept_label = st.selectbox("Department / Wing", dept_names_form)
+    # Removed st.form, added unique keys to prevent DuplicateWidgetID errors
+    new_fullname = st.text_input("Full Name (e.g. Nodal Officer WBSRDA)", key="create_fname")
+    new_email = st.text_input("Username (without @domain)", key="create_uname")
+    new_password = st.text_input("Password", type="password", key="create_pw")
+    new_user_role = st.selectbox("Initial Role", ['district', 'block', 'department'], key="create_role")
+    
+    district_list_form = [d['district_name'] for d in districts]
+    new_dist_name = st.selectbox("District", district_list_form, key="create_dist")
+    
+    new_dept_label = None
+    if new_user_role == 'department':
+        dept_names_form = ["-- Select Department or Wing --"] + dept_labels
+        new_dept_label = st.selectbox("Department / Wing", dept_names_form, key="create_dept")
 
-        submitted = st.form_submit_button("Create User")
-        
-        if submitted:
-            if not SERVICE_KEY:
-                st.error("Service key is not configured.")
-                st.stop()
-                
-            if new_user_role == 'department' and new_dept_label == "-- Select Department or Wing --":
-                st.error("You must select a specific department or wing for a Department user.")
-                st.stop()
-                
-            if not new_email or not new_password or not new_fullname:
-                st.error("Name, Username, and Password are required.")
-                st.stop()
-
-            new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
+    submitted = st.button("Create User", type="primary")
+    
+    if submitted:
+        if not SERVICE_KEY:
+            st.error("Service key is not configured.")
+            st.stop()
             
-            new_dept_id = None
-            new_wing_id = None
-            if new_user_role == 'department' and new_dept_label:
-                selected_opt = next(opt for opt in dept_options if opt['label'] == new_dept_label)
-                new_dept_id = selected_opt['dept_id']
-                new_wing_id = selected_opt['wing_id']
+        if new_user_role == 'department' and new_dept_label == "-- Select Department or Wing --":
+            st.error("You must select a specific department or wing for a Department user.")
+            st.stop()
             
-            formatted_email = f"{new_email.strip()}@hooghly.gov.in"
+        if not new_email or not new_password or not new_fullname:
+            st.error("Name, Username, and Password are required.")
+            st.stop()
 
-            try:
-                admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
-                auth_response = admin_supabase.auth.admin.create_user({
-                    "email": formatted_email,
-                    "password": new_password,
-                    "email_confirm": True,
-                    "user_metadata": {"full_name": new_fullname}
-                })
-                
-                new_uuid = auth_response.user.id
-                user_record = {
-                    "id": new_uuid,
-                    "full_name": new_fullname,
-                    "role": new_user_role,
-                    "district_id": new_dist_id,
-                    "block_id": None,   
-                    "department_id": new_dept_id,
-                    "wing_id": new_wing_id,
-                    "active": True
-                }
-                supabase.table("users").insert(user_record).execute()
-                log_action(user, "CREATE", "users", new_uuid, new_vals=user_record)
-                st.success(f"User {new_fullname} created successfully!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error creating user: {e}")
+        new_dist_id = next((d['id'] for d in districts if d['district_name'] == new_dist_name), None)
+        
+        new_dept_id = None
+        new_wing_id = None
+        if new_user_role == 'department' and new_dept_label:
+            selected_opt = next(opt for opt in dept_options if opt['label'] == new_dept_label)
+            new_dept_id = selected_opt['dept_id']
+            new_wing_id = selected_opt['wing_id']
+        
+        formatted_email = f"{new_email.strip()}@hooghly.gov.in"
+
+        try:
+            admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
+            auth_response = admin_supabase.auth.admin.create_user({
+                "email": formatted_email,
+                "password": new_password,
+                "email_confirm": True,
+                "user_metadata": {"full_name": new_fullname}
+            })
+            
+            new_uuid = auth_response.user.id
+            user_record = {
+                "id": new_uuid,
+                "full_name": new_fullname,
+                "role": new_user_role,
+                "district_id": new_dist_id,
+                "block_id": None,   
+                "department_id": new_dept_id,
+                "wing_id": new_wing_id,
+                "active": True
+            }
+            supabase.table("users").insert(user_record).execute()
+            log_action(user, "CREATE", "users", new_uuid, new_vals=user_record)
+            st.success(f"User {new_fullname} created successfully!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error creating user: {e}")
