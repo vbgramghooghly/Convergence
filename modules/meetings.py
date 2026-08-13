@@ -23,8 +23,8 @@ def show():
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data
     block_dict_reverse = {b['id']: b['block_name'] for b in blocks_data}
 
-    # Fetch contacts including the designation_id for committee filtering
-    contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designation_id, designations(designation_name)").execute().data
+    # Fetch contacts including designation and location for committee filtering
+    contacts_data = supabase.table("contacts").select("id, full_name, contact_number, email_id, designation_id, district_id, block_id, designations(designation_name)").execute().data
     contact_map = {}
     for c in contacts_data:
         desig = c.get('designations', {})
@@ -34,7 +34,9 @@ def show():
             "designation": desig_name,
             "designation_id": c.get('designation_id'),
             "phone": c.get('contact_number', 'N/A'),
-            "email": c.get('email_id', 'N/A')
+            "email": c.get('email_id', 'N/A'),
+            "district_id": c.get('district_id'),
+            "block_id": c.get('block_id')
         }
 
     # Global Meeting Fetch
@@ -47,7 +49,7 @@ def show():
     meetings = query.order("meeting_date", desc=True).execute().data
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
 
-    # 6-Tab Layout to preserve all old functionality while adding the new workflow
+    # 6-Tab Layout
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📅 Dashboard & Edit",
         "🗓️ 1. Schedule Meeting", 
@@ -61,7 +63,6 @@ def show():
     with tab1:
         st.subheader("Meeting Dashboard")
         if not df_meetings.empty:
-            # Add Status to the display dataframe safely
             disp_df = df_meetings[['meeting_date', 'meeting_type', 'venue', 'chairperson']].copy()
             if 'status' in df_meetings.columns:
                 disp_df['status'] = df_meetings['status'].fillna('Convened')
@@ -103,7 +104,7 @@ def show():
                 else:
                     st.info("No detailed attendance captured for this meeting yet. Please record proceedings in Tab 3.")
 
-                # EDIT PAST MEETING OPTIONS (Preserved Legacy System)
+                # EDIT PAST MEETING OPTIONS
                 if user['role'] in ['superadmin', 'district', 'block']:
                     st.markdown("---")
                     with st.expander("✏️ Edit Past Meeting Data & Attendance"):
@@ -183,7 +184,7 @@ def show():
                             }
                             try:
                                 supabase.table("meetings").update(update_payload).eq("id", detail_sel).execute()
-                                log_action(user, "UPDATE", "meetings", detail_sel, details=update_payload)
+                                log_action(user.get('id'), f"UPDATE meeting {detail_sel}")
                                 st.success("✅ Meeting updated successfully!")
                                 st.rerun()
                             except Exception as e:
@@ -222,51 +223,104 @@ def show():
                 block_sel = st.selectbox("Block Jurisdiction", [b['block_name'] for b in blocks_data])
                 dist_sel = next(b['district_id'] for b in blocks_data if b['block_name'] == block_sel)
 
-        col_a1, col_a2 = st.columns(2)
-        chairperson = col_a1.text_input("Chairperson (Name & Designation)")
-        venue = col_a2.text_input("Venue / Platform")
-        
-        objective = st.text_input("Meeting Objective / Schematic Discussion")
-        
-        st.markdown("---")
-        st.markdown("### 📩 Select Invitees")
-        
-        # AUTO-FETCH STATUTORY COMMITTEE MEMBERS FOR PRE-SELECTION
-        statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
-        statutory_desig_ids = [d['id'] for d in statutory_desigs]
-        default_attendees = [cid for cid, info in contact_map.items() if info.get('designation_id') in statutory_desig_ids]
-        
-        selected_contact_ids = st.multiselect(
-            "Select Invited Officials (Statutory Members are pre-selected automatically)", 
-            options=list(contact_map.keys()), 
-            default=default_attendees,
-            format_func=lambda x: f"{contact_map[x]['name']} ({contact_map[x]['designation']})"
-        )
+        # STATUTORY STRUCTURE DISPLAY
+        if meeting_type == 'District':
+            st.info("""
+            **🏛️ Statutory District-Level Convergence Committee**
+            * **Chairperson:** District Magistrate & District Programme Coordinator (DPC)
+            * **Member-Convener:** Nodal Officer (DNO), VB-G RAM G
+            * **Members:** ADM, AEO ZP, ADM (LR), DFO, PD DRDC, Secy ZP, CMOH, PO BCW, DPLO, Dy DL&LRO, DOMA, RTO, DYO, DPO SSM, EO Dev Auth, OC Tourism, DE ZP, EE WBSRDA, EE I&WD, EE PHED, EE WRIDD, EE PWD, PD NHAI, ADRM Railways, ADF, DI Schools, DDA, DD Agri Mkt, DD ARD, DHO, DPO ICDS, DDMO.
+            """)
+            chair_default = "District Magistrate & District Programme Coordinator (DPC)"
+        else:
+            st.info("""
+            **🏛️ Statutory Block-Level Convergence Committee**
+            * **Chairperson:** Block Development Officer (BDO)
+            * **Member-Convener:** Joint Block Development Officer (Jt. BDO)
+            * **Members:** APO, JPO, TA, JE/SAE, Forest Range Officer, BLDO, SI of Schools, ADA, CDPO, BDMO, FEO, BMOH, BL&LRO, WDO, IBCW, Block Field Consultant (Horticulture).
+            """)
+            chair_default = "Block Development Officer (BDO)"
 
-        if st.button("Schedule Meeting", type="primary"):
-            meeting_data = {
-                "meeting_type": meeting_type,
-                "financial_year": financial_year,
-                "meeting_date": str(meeting_date),
-                "chairperson": chairperson,
-                "venue": venue,
-                "objective": objective,
-                "attendees": selected_contact_ids, 
-                "status": "Scheduled",
-                "created_by": user['id']
-            }
-            if meeting_type == 'District':
-                meeting_data["district_id"] = dist_dict[dist_sel] if user['role'] != 'district' else user['district_id']
+        with st.form("schedule_meeting_form"):
+            col_a1, col_a2 = st.columns(2)
+            chairperson = col_a1.text_input("Chairperson (Name & Designation)", value=chair_default)
+            venue = col_a2.text_input("Venue / Platform")
+            objective = st.text_input("Meeting Objective / Schematic Discussion")
+            
+            st.markdown("---")
+            st.markdown("### 📋 Select Attendees")
+            st.caption("Check the statutory members attending this meeting from the directory:")
+            
+            statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
+            statutory_desig_ids = [d['id'] for d in statutory_desigs]
+            
+            # Target Jurisdiction Filtering
+            target_dist_id = dist_dict.get(dist_sel) if meeting_type == 'District' else (next(b for b in blocks_data if b['block_name'] == block_sel)['district_id'])
+            target_block_id = None if meeting_type == 'District' else (next(b for b in blocks_data if b['block_name'] == block_sel)['id'])
+
+            statutory_officials = {}
+            other_officials = {}
+
+            for cid, info in contact_map.items():
+                is_local = False
+                if meeting_type == 'District' and info.get('district_id') == target_dist_id and info.get('block_id') is None:
+                    is_local = True
+                elif meeting_type == 'Block' and info.get('block_id') == target_block_id:
+                    is_local = True
+                    
+                if is_local and info.get('designation_id') in statutory_desig_ids:
+                    statutory_officials[cid] = info
+                else:
+                    other_officials[cid] = info
+                    
+            selected_contact_ids = []
+            
+            if statutory_officials:
+                cols = st.columns(2)
+                idx = 0
+                for cid, info in statutory_officials.items():
+                    col = cols[idx % 2]
+                    # Default is unchecked, user must select who is attending
+                    if col.checkbox(f"{info['name']} - {info['designation']}", key=f"stat_{cid}"):
+                        selected_contact_ids.append(cid)
+                    idx += 1
             else:
-                block_obj = next(b for b in blocks_data if b['block_name'] == block_sel)
-                meeting_data["block_id"] = block_obj['id']
-                meeting_data["district_id"] = block_obj['district_id']
+                st.warning("No statutory members found in the directory for this jurisdiction. Ensure users are updated in the User Directory.")
 
-            result = supabase.table("meetings").insert(meeting_data).execute()
-            if result.data:
-                st.success("✅ Meeting Scheduled successfully! Proceed to Tab 3 after convening.")
-                log_action(user, "CREATE", "meetings", result.data[0]['id'], details=meeting_data)
-                st.rerun()
+            st.markdown("#### Other Invitees / Special Guests")
+            other_selections = st.multiselect(
+                "Select additional officials:", 
+                options=list(other_officials.keys()), 
+                format_func=lambda x: f"{other_officials[x]['name']} ({other_officials[x]['designation']})"
+            )
+            
+            # Combine checklists and multiselects
+            final_attendees = selected_contact_ids + other_selections
+
+            if st.form_submit_button("Schedule Meeting", type="primary"):
+                meeting_data = {
+                    "meeting_type": meeting_type,
+                    "financial_year": financial_year,
+                    "meeting_date": str(meeting_date),
+                    "chairperson": chairperson,
+                    "venue": venue,
+                    "objective": objective,
+                    "attendees": final_attendees, 
+                    "status": "Scheduled",
+                    "created_by": user['id']
+                }
+                if meeting_type == 'District':
+                    meeting_data["district_id"] = dist_dict[dist_sel] if user['role'] != 'district' else user['district_id']
+                else:
+                    block_obj = next(b for b in blocks_data if b['block_name'] == block_sel)
+                    meeting_data["block_id"] = block_obj['id']
+                    meeting_data["district_id"] = block_obj['district_id']
+
+                result = supabase.table("meetings").insert(meeting_data).execute()
+                if result.data:
+                    st.success("✅ Meeting Scheduled successfully! Proceed to Tab 3 after convening.")
+                    log_action(user.get('id'), f"CREATE meeting {result.data[0]['id']}")
+                    st.rerun()
 
     # ======================== TAB 3: RECORD PROCEEDINGS ========================
     with tab3:
@@ -419,13 +473,12 @@ def show():
                     st.success("Meeting locked and Convened! Resolutions synced to Department Dashboards.")
                     st.rerun()
 
-    # ======================== TAB 4: RESOLUTION TRACKER & CROSS-REFERENCE ========================
+    # ======================== TAB 4: RESOLUTION TRACKER ========================
     with tab4:
         st.subheader("🎯 Master Resolution Tracker")
         if df_meetings.empty:
             st.info("No meetings found. Please schedule a meeting first.")
         else:
-            # Filter meetings drop down
             tr_meeting_sel = st.selectbox("Select Meeting to Track", ["All"] + df_meetings['id'].tolist(),
                                        format_func=lambda x: "All Meetings" if x == "All" else f"{df_meetings[df_meetings['id']==x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id']==x]['objective'].values[0]}")
             
@@ -453,7 +506,6 @@ def show():
 
                 df_ap['Tracker Flag'] = df_ap.apply(get_flag, axis=1)
                 
-                # Show only columns that exist
                 display_cols = ['id', 'Department', 'action_point', 'target', 'deadline', 'Tracker Flag', 'status']
                 if 'responsible_officer' in df_ap.columns: display_cols.insert(3, 'responsible_officer')
                 if 'priority' in df_ap.columns: display_cols.insert(2, 'priority')
@@ -461,7 +513,7 @@ def show():
                 st.dataframe(df_ap[display_cols].sort_values('Tracker Flag'), use_container_width=True, hide_index=True)
 
                 st.markdown("### ✏️ Update Progress / Action Taken Report")
-                with st.form("update_atr"):
+                with st.form("global_update_atr"):
                     col_u1, col_u2 = st.columns(2)
                     ap_id = col_u1.selectbox("Select Resolution ID", df_ap['id'].tolist())
                     new_ap_status = col_u2.selectbox("Update Status", [
@@ -473,12 +525,13 @@ def show():
                     if st.form_submit_button("Update Progress"):
                         update_payload = {"status": new_ap_status, "remarks": remarks}
                         supabase.table("meeting_action_points").update(update_payload).eq("id", ap_id).execute()
+                        log_action(user.get('id'), f"UPDATE resolution {ap_id}")
                         st.success("✅ Progress updated successfully.")
                         st.rerun()
             else:
                 st.info("No resolutions adopted yet.")
 
-            # CROSS-REFERENCE (Block Outcomes for District) - Preserved Legacy Feature
+            # CROSS-REFERENCE (Block Outcomes for District)
             if user['role'] in ['superadmin', 'district']:
                 st.markdown("---")
                 st.markdown("### 🔗 Reference Block-Level Outcomes")
