@@ -75,7 +75,7 @@ def show():
     df = pd.DataFrame(contacts_data)
 
     # 3. Tabbed Interface
-    tab1, tab2 = st.tabs(["📋 View Directory List", "🔄 Profile Update & Transfer Module"])
+    tab1, tab2 = st.tabs(["📋 View Directory List", "🔄 Manage Official Directory"])
 
     # ==============================================================
     # TAB 1: DIRECTORY LIST & EXPORT (Visible to All within District)
@@ -110,7 +110,6 @@ def show():
                 names = [b_name for b_name, b_id in block_dict.items() if str(b_id) in str_block_ids]
                 return ", ".join(names) if names else "N/A"
 
-            # Fixed: Check for 'committee_blocks' instead of 'tagged_blocks'
             for col in ['office_level', 'sub_division', 'office', 'sub_office', 'district_committee_role', 'block_committee_role', 'committee_blocks']:
                 if col not in df.columns:
                     df[col] = None
@@ -144,74 +143,62 @@ def show():
             st.info("No contact records found for your district jurisdiction.")
 
     # ==============================================================
-    # TAB 2: UPDATE & PROFILE HANDOVER MODULE
+    # TAB 2: MULTI-OFFICER DIRECTORY MANAGER
     # ==============================================================
     with tab2:
-        can_map_committee_roles = user['role'] in ['superadmin', 'district', 'block']
-
-        if user['role'] == 'superadmin':
-            st.subheader("🛠️ User Management & Handover (Superadmin)")
-            all_users = supabase.table("users").select("id, full_name, district_id, block_id, role").execute().data
-            user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in all_users}
-            target_user_id = st.selectbox("Select User Profile to Manage", options=list(user_options.keys()), format_func=lambda x: user_options[x])
+        if user['role'] in ['superadmin', 'district', 'block']:
+            st.subheader("🛠️ Manage Official Directory")
+            st.caption("As an Administrator, you can add multiple officials to the directory or update existing profiles and map statutory roles.")
             
-            target_user_info = next((u for u in all_users if u['id'] == target_user_id), {})
-            target_district_id = target_user_info.get('district_id')
-            target_block_id = target_user_info.get('block_id')
-            target_default_name = target_user_info.get('full_name', '')
+            action = st.radio("Action", ["➕ Add New Official", "✏️ Edit Existing Official"], horizontal=True)
             
-        elif user['role'] == 'district':
-            st.subheader("🛠️ Manage District Contacts & Statutory Roles (District Admin)")
-            dist_users = supabase.table("users").select("id, full_name, district_id, block_id, role").eq("district_id", user['district_id']).execute().data
-            user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in dist_users}
-            target_user_id = st.selectbox("Select User Profile to Manage", options=list(user_options.keys()), format_func=lambda x: user_options[x])
+            existing_record = {}
+            target_contact_id = None
             
-            target_user_info = next((u for u in dist_users if u['id'] == target_user_id), {})
-            target_district_id = target_user_info.get('district_id')
-            target_block_id = target_user_info.get('block_id')
-            target_default_name = target_user_info.get('full_name', '')
-
-        elif user['role'] == 'block':
-            st.subheader("🛠️ Manage Block Contacts & Statutory Roles (Block Admin)")
-            block_users = supabase.table("users").select("id, full_name, district_id, block_id, role").eq("block_id", user['block_id']).execute().data
-            user_options = {u['id']: f"{u['full_name']} ({u['role'].upper()})" for u in block_users}
-            target_user_id = st.selectbox("Select User Profile to Manage", options=list(user_options.keys()), format_func=lambda x: user_options[x])
-            
-            target_user_info = next((u for u in block_users if u['id'] == target_user_id), {})
-            target_district_id = target_user_info.get('district_id')
-            target_block_id = target_user_info.get('block_id')
-            target_default_name = target_user_info.get('full_name', '')
-            
-        else: # Department Role
+            if action == "✏️ Edit Existing Official":
+                # Fetch contacts based on role jurisdiction
+                query = supabase.table("contacts").select("*, designations(designation_name)")
+                if user['role'] == 'district':
+                    query = query.eq("district_id", user['district_id'])
+                elif user['role'] == 'block':
+                    query = query.eq("block_id", user['block_id'])
+                
+                contact_list = query.execute().data
+                
+                if contact_list:
+                    contact_opts = {c['id']: f"{c['full_name']} - {c.get('designations', {}).get('designation_name', 'Unknown')}" for c in contact_list}
+                    target_contact_id = st.selectbox("Select Official to Edit", options=list(contact_opts.keys()), format_func=lambda x: contact_opts[x])
+                    existing_record = next((c for c in contact_list if c['id'] == target_contact_id), {})
+                else:
+                    st.warning("No officials found in your jurisdiction.")
+        else:
+            # Department Role - Edits their own tied profile
             st.subheader("🔄 Department Official Profile Update")
-            st.caption("Update your personal contact details, office location, and designation. Statutory committee roles are managed directly by District or Block administrators.")
+            st.caption("Update your personal contact details. Statutory committee roles are managed directly by District or Block administrators.")
+            
             target_user_id = user['id']
-            target_district_id = user.get('district_id')
-            target_block_id = user.get('block_id')
-            target_default_name = user.get('full_name', '')
-
-        # Fetch existing record for the targeted user login
-        user_contact = supabase.table("contacts").select("*").eq("user_id", target_user_id).execute().data
-        existing_record = user_contact[0] if user_contact else {}
+            user_contact = supabase.table("contacts").select("*").eq("user_id", target_user_id).execute().data
+            existing_record = user_contact[0] if user_contact else {}
+            target_contact_id = existing_record.get('id')
 
         with st.form("update_contact_form"):
             st.markdown("#### 1. Official Details")
             col1, col2 = st.columns(2)
             
-            name_val = existing_record.get('full_name') or target_default_name
-            name = col1.text_input("Full Name of Incumbent Officer", value=name_val)
+            name_val = existing_record.get('full_name', '')
+            name = col1.text_input("Full Name of Official*", value=name_val)
             
             curr_desig_id = existing_record.get('designation_id')
             curr_desig_name = next((k for k, v in desig_dict.items() if v == curr_desig_id), list(desig_dict.keys())[0] if desig_dict else "")
             desig_idx = list(desig_dict.keys()).index(curr_desig_name) if curr_desig_name in desig_dict else 0
-            sel_desig = col2.selectbox("Designation", options=list(desig_dict.keys()) if desig_dict else ["None"], index=desig_idx)
+            sel_desig = col2.selectbox("Designation*", options=list(desig_dict.keys()) if desig_dict else ["None"], index=desig_idx)
 
             st.markdown("#### 2. Department & Level Hierarchy")
             col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             
             curr_lvl = existing_record.get('office_level') or 'District'
             lvl_idx = OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
-            sel_lvl = col_l1.selectbox("Posting Level", OFFICE_LEVELS, index=lvl_idx)
+            sel_lvl = col_l1.selectbox("Posting Level*", OFFICE_LEVELS, index=lvl_idx)
             
             sub_div_val = existing_record.get('sub_division') or ''
             if sel_lvl == "Sub Division":
@@ -222,7 +209,7 @@ def show():
             curr_dept_id = existing_record.get('department_id')
             curr_dept_name = next((k for k, v in dept_dict.items() if v == curr_dept_id), list(dept_dict.keys())[0] if dept_dict else "")
             dept_idx = list(dept_dict.keys()).index(curr_dept_name) if curr_dept_name in dept_dict else 0
-            sel_parent_dept = col_l3.selectbox("Parent Department", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
+            sel_parent_dept = col_l3.selectbox("Parent Department*", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
             selected_parent_id = dept_dict.get(sel_parent_dept)
             
             valid_wings = [w for w in wings if w['department_id'] == selected_parent_id]
@@ -235,7 +222,45 @@ def show():
             wing_idx = list(wing_options.keys()).index(curr_wing_name) if curr_wing_name in wing_options else 0
             sel_wing = st.selectbox("Specific Wing / Scheme / Parastatal", options=list(wing_options.keys()), index=wing_idx)
 
-            st.markdown("#### 3. Contact & Location Information")
+            # JURISDICTION FOR MULTI-OFFICER ARCHITECTURE
+            st.markdown("#### 3. Primary Jurisdiction Mapping")
+            col_j1, col_j2 = st.columns(2)
+            
+            # District Scoping
+            curr_dist = existing_record.get('district_id') or user.get('district_id')
+            if user['role'] == 'superadmin':
+                dist_names = list(dist_dict.keys())
+                idx = 0
+                if curr_dist:
+                    curr_dist_name = next((k for k,v in dist_dict.items() if v == curr_dist), dist_names[0])
+                    idx = dist_names.index(curr_dist_name) if curr_dist_name in dist_names else 0
+                sel_dist = col_j1.selectbox("Primary District*", dist_names, index=idx)
+                target_district_id = dist_dict[sel_dist]
+            else:
+                curr_dist_name = next((k for k,v in dist_dict.items() if v == user.get('district_id')), "Unknown")
+                col_j1.text_input("Primary District", value=curr_dist_name, disabled=True)
+                target_district_id = user.get('district_id')
+                
+            # Block Scoping
+            if sel_lvl in ["Block", "Gram Panchayat"]:
+                if user['role'] == 'block':
+                    curr_block_name = next((k for k,v in block_dict.items() if v == user.get('block_id')), "Unknown")
+                    col_j2.text_input("Primary Block", value=curr_block_name, disabled=True)
+                    target_block_id = user.get('block_id')
+                else:
+                    valid_blocks = [b['block_name'] for b in blocks if b['district_id'] == target_district_id]
+                    curr_block = existing_record.get('block_id')
+                    idx = 0
+                    if curr_block:
+                        curr_block_name = next((k for k,v in block_dict.items() if v == curr_block), valid_blocks[0] if valid_blocks else "")
+                        idx = valid_blocks.index(curr_block_name) if curr_block_name in valid_blocks else 0
+                    sel_block = col_j2.selectbox("Primary Block*", valid_blocks if valid_blocks else ["None"], index=idx)
+                    target_block_id = block_dict.get(sel_block) if sel_block != "None" else None
+            else:
+                target_block_id = None
+                col_j2.info("Block selection not applicable for this Posting Level.")
+
+            st.markdown("#### 4. Contact & Location Information")
             col3, col4, col5 = st.columns(3)
             contact_no = col3.text_input("Mobile Number", value=existing_record.get('contact_number') or '')
             whatsapp_no = col4.text_input("WhatsApp Number", value=existing_record.get('whatsapp_number') or '')
@@ -245,8 +270,8 @@ def show():
             office = col6.text_input("Office Name / Address", value=existing_record.get('office') or '')
             sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get('sub_office') or '')
 
-            # --- STATUTORY COMMITTEE ROLES (RESTRICTED MAPPING) ---
-            st.markdown("#### 4. Statutory Committee Memberships")
+            # --- STATUTORY COMMITTEE ROLES ---
+            st.markdown("#### 5. Statutory Committee Memberships")
             
             if user['role'] == 'department':
                 st.caption("🔒 *Committee roles are managed exclusively by District & Block Administrations.*")
@@ -254,25 +279,26 @@ def show():
                 st.caption("🔒 *As a District Admin, you can only map District Roles. Block Roles are managed by Block Admins.*")
             elif user['role'] == 'block':
                 st.caption("🔒 *As a Block Admin, you can only map Block Roles. District Roles are managed by District Admins.*")
-            else:
-                st.caption("Link this official profile to statutory committees. District/Block roles enable targeted tracking.")
             
             col_c1, col_c2 = st.columns(2)
             
+            # STRICT ROLE LOGIC
             allow_dist = (user['role'] in ['superadmin', 'district']) and (sel_lvl in ["State / Department", "District", "Sub Division"])
             allow_block = (user['role'] in ['superadmin', 'block']) and (sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"])
 
+            # District Role Setup
             curr_dist_role = existing_record.get('district_committee_role') or 'None'
             dist_role_idx = COMMITTEE_ROLES.index(curr_dist_role) if curr_dist_role in COMMITTEE_ROLES else 0
             sel_dist_role = col_c1.selectbox("District Committee Role", COMMITTEE_ROLES, index=dist_role_idx, disabled=not allow_dist)
-            final_dist_role = sel_dist_role if allow_dist else curr_dist_role
+            final_dist_role = sel_dist_role if allow_dist else curr_dist_role # Preserve existing if disabled
 
+            # Block Role Setup
             curr_block_role = existing_record.get('block_committee_role') or 'None'
             block_role_idx = COMMITTEE_ROLES.index(curr_block_role) if curr_block_role in COMMITTEE_ROLES else 0
             sel_block_role = col_c2.selectbox("Block Committee Role", COMMITTEE_ROLES, index=block_role_idx, disabled=not allow_block)
-            final_block_role = sel_block_role if allow_block else curr_block_role
+            final_block_role = sel_block_role if allow_block else curr_block_role # Preserve existing if disabled
             
-            # Fixed: Fallback to 'committee_blocks' to match your schema
+            # Tagged Blocks Array Setup
             curr_comm_blocks = existing_record.get('committee_blocks') or []
             if isinstance(curr_comm_blocks, str):
                 try:
@@ -296,19 +322,22 @@ def show():
             )
 
             if st.form_submit_button("Save Profile Details", type="primary"):
+                # Safe casting to avoid NoneType String strip issues
                 sel_sub_div = sel_sub_div or ""
                 office = office or ""
                 sub_office = sub_office or ""
                 
-                if sel_lvl == "Sub Division" and not sel_sub_div.strip():
+                if not name.strip():
+                    st.error("⚠️ Full Name is mandatory.")
+                elif sel_lvl == "Sub Division" and not sel_sub_div.strip():
                     st.error("⚠️ Sub Division Name is required when 'Sub Division' level is selected.")
                 elif allow_block and final_block_role != "None" and not sel_comm_blocks:
                     st.error("⚠️ Please tag at least one block for the assigned Block Committee Role.")
                 else:
+                    # Preserve existing tags if the user is a District admin (who can't edit block tags)
                     comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if allow_block else [block_dict[b] for b in default_blocks]
 
                     payload = {
-                        "user_id": target_user_id,
                         "full_name": name,
                         "designation_id": desig_dict.get(sel_desig),
                         "department_id": selected_parent_id,
@@ -322,21 +351,27 @@ def show():
                         "sub_office": sub_office.strip() if sub_office.strip() else None,
                         "district_committee_role": final_dist_role if final_dist_role != "None" else None,
                         "block_committee_role": final_block_role if final_block_role != "None" else None,
-                        "committee_blocks": comm_block_ids, # Fixed: Using the correct schema column name
+                        "committee_blocks": comm_block_ids,
                         "district_id": target_district_id,
                         "block_id": target_block_id,
                         "active": True
                     }
 
+                    # Departments edit their own 1:1 linked profile
+                    if user['role'] == 'department':
+                        payload['user_id'] = user['id']
+
                     try:
-                        if existing_record:
-                            supabase.table("contacts").update(payload).eq("id", existing_record['id']).execute()
+                        if target_contact_id:
+                            supabase.table("contacts").update(payload).eq("id", target_contact_id).execute()
                         else:
                             supabase.table("contacts").insert(payload).execute()
                             
-                        supabase.table("users").update({"full_name": name}).eq("id", target_user_id).execute()
+                        # If a department user edited their own profile, sync the core auth table full_name
+                        if user['role'] == 'department':
+                            supabase.table("users").update({"full_name": name}).eq("id", user['id']).execute()
 
-                        st.success("✅ Profile details updated successfully!")
+                        st.success("✅ Profile details updated successfully in the Official Directory!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error saving contact details: {e}")
