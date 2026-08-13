@@ -42,9 +42,9 @@ def show():
 
     # ======================== TABS LAYOUT ========================
     tab1, tab2, tab3 = st.tabs([
-        "🎯 1. Department Targets (Planning)", 
-        "🏗️ 2. Implementation Progress (Execution)", 
-        "🤝 3. Meeting Commitments (Sync)"
+        "🎯 Department Targets (Planning)", 
+        "🏗️ Implementation Progress (Execution)", 
+        "🤝 Meeting Commitments (Sync)"
     ])
 
     # =====================================================================
