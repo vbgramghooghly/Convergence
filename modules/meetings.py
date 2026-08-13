@@ -47,19 +47,28 @@ def show():
     meetings = query.order("meeting_date", desc=True).execute().data
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📅 Meeting Dashboard",
-        "📝 Schedule & Mark Attendance", 
-        "🎯 Resolution Tracker", 
-        "🖨️ Print & Reports",
-        "⏭️ Next Meeting Prep"
+    # 6-Tab Layout to preserve all old functionality while adding the new workflow
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📅 Dashboard & Edit",
+        "🗓️ 1. Schedule Meeting", 
+        "✍️ 2. Record Proceedings", 
+        "🎯 Master Resolution Tracker", 
+        "🖨️ Reports & Registers",
+        "⏭️ Next Agenda Prep"
     ])
 
     # ======================== TAB 1: MEETING DASHBOARD ========================
     with tab1:
         st.subheader("Meeting Dashboard")
         if not df_meetings.empty:
-            st.dataframe(df_meetings[['meeting_date', 'meeting_type', 'venue', 'chairperson', 'objective']], use_container_width=True, hide_index=True)
+            # Add Status to the display dataframe safely
+            disp_df = df_meetings[['meeting_date', 'meeting_type', 'venue', 'chairperson']].copy()
+            if 'status' in df_meetings.columns:
+                disp_df['status'] = df_meetings['status'].fillna('Convened')
+            else:
+                disp_df['status'] = 'Convened'
+
+            st.dataframe(disp_df, use_container_width=True, hide_index=True)
             
             st.markdown("### 🔍 View Detailed Proceedings & Attendance")
             detail_sel = st.selectbox("Select Meeting Date to view details", df_meetings['id'].tolist(),
@@ -92,9 +101,9 @@ def show():
                         
                     st.dataframe(disp_att_df.style.apply(highlight_subs, axis=1), use_container_width=True, hide_index=True)
                 else:
-                    st.info("No detailed attendance captured for this meeting.")
+                    st.info("No detailed attendance captured for this meeting yet. Please record proceedings in Tab 3.")
 
-                # EDIT PAST MEETING OPTIONS
+                # EDIT PAST MEETING OPTIONS (Preserved Legacy System)
                 if user['role'] in ['superadmin', 'district', 'block']:
                     st.markdown("---")
                     with st.expander("✏️ Edit Past Meeting Data & Attendance"):
@@ -183,9 +192,10 @@ def show():
         else:
             st.info("No meetings found for your assigned jurisdiction.")
 
-    # ======================== TAB 2: SCHEDULE & ATTENDANCE BUILDER ========================
+    # ======================== TAB 2: SCHEDULE MEETING ========================
     with tab2:
-        st.subheader("Schedule New Convergence Meeting")
+        st.subheader("Step 1: Schedule New Convergence Meeting")
+        st.caption("Plan the meeting details and select invitees. Proceedings will be recorded after convening.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         if user['role'] in ['superadmin', 'district']:
@@ -217,18 +227,13 @@ def show():
         venue = col_a2.text_input("Venue / Platform")
         
         objective = st.text_input("Meeting Objective / Schematic Discussion")
-        decisions = st.text_area("Initial Decisions / Minutes (General)")
         
         st.markdown("---")
-        st.markdown("### 👥 Dynamic Attendance Register")
+        st.markdown("### 📩 Select Invitees")
         
-        # -------------------------------------------------------------
         # AUTO-FETCH STATUTORY COMMITTEE MEMBERS FOR PRE-SELECTION
-        # -------------------------------------------------------------
         statutory_desigs = supabase.table("designations").select("id").eq("is_committee_member", True).eq("committee_level", meeting_type).execute().data
         statutory_desig_ids = [d['id'] for d in statutory_desigs]
-        
-        # Find contact IDs that hold these statutory designations
         default_attendees = [cid for cid, info in contact_map.items() if info.get('designation_id') in statutory_desig_ids]
         
         selected_contact_ids = st.multiselect(
@@ -238,36 +243,7 @@ def show():
             format_func=lambda x: f"{contact_map[x]['name']} ({contact_map[x]['designation']})"
         )
 
-        detailed_attendance_payload = []
-        
-        if selected_contact_ids:
-            st.markdown("#### Verify Attendance & Representatives")
-            for cid in selected_contact_ids:
-                contact = contact_map[cid]
-                with st.container(border=True):
-                    st.markdown(f"**{contact['name']}** | {contact['designation']} | {contact['phone']} | {contact['email']}")
-                    is_sub = st.checkbox(f"Attended by Subordinate/Representative instead of {contact['name']}?", key=f"chk_{cid}")
-                    
-                    sub_name, sub_desig, sub_phone = "", "", ""
-                    if is_sub:
-                        sc1, sc2, sc3 = st.columns(3)
-                        sub_name = sc1.text_input("Subordinate Name", key=f"s_name_{cid}")
-                        sub_desig = sc2.text_input("Subordinate Designation", key=f"s_desig_{cid}")
-                        sub_phone = sc3.text_input("Subordinate Phone", key=f"s_phone_{cid}")
-
-                    detailed_attendance_payload.append({
-                        "contact_id": cid,
-                        "official_name": contact['name'],
-                        "official_designation": contact['designation'],
-                        "official_phone": contact['phone'],
-                        "official_email": contact['email'],
-                        "attended_by_subordinate": is_sub,
-                        "subordinate_name": sub_name if is_sub else None,
-                        "subordinate_designation": sub_desig if is_sub else None,
-                        "subordinate_phone": sub_phone if is_sub else None
-                    })
-
-        if st.button("Save Meeting & Attendance Record", type="primary"):
+        if st.button("Schedule Meeting", type="primary"):
             meeting_data = {
                 "meeting_type": meeting_type,
                 "financial_year": financial_year,
@@ -275,9 +251,8 @@ def show():
                 "chairperson": chairperson,
                 "venue": venue,
                 "objective": objective,
-                "decisions": decisions,
                 "attendees": selected_contact_ids, 
-                "detailed_attendance": detailed_attendance_payload, 
+                "status": "Scheduled",
                 "created_by": user['id']
             }
             if meeting_type == 'District':
@@ -289,75 +264,201 @@ def show():
 
             result = supabase.table("meetings").insert(meeting_data).execute()
             if result.data:
-                st.success("✅ Meeting and Detailed Attendance recorded successfully.")
+                st.success("✅ Meeting Scheduled successfully! Proceed to Tab 3 after convening.")
                 log_action(user, "CREATE", "meetings", result.data[0]['id'], details=meeting_data)
                 st.rerun()
 
-    # ======================== TAB 3: RESOLUTION TRACKER & CROSS-REFERENCE ========================
+    # ======================== TAB 3: RECORD PROCEEDINGS ========================
     with tab3:
-        st.subheader("🎯 Department-wise Progress & Commitments")
+        st.subheader("Step 2: Record Meeting Proceedings")
+        st.caption("Mark actual attendance, review past progress, add minutes, and assign new resolutions.")
+        
+        if df_meetings.empty:
+            st.info("No meetings available to record.")
+        else:
+            if 'status' not in df_meetings.columns:
+                df_meetings['status'] = 'Convened'
+            
+            sched_meetings = df_meetings[df_meetings['status'] == 'Scheduled']
+            
+            if sched_meetings.empty:
+                st.info("No active 'Scheduled' meetings. Showing all meetings for retroactive recording.")
+                proc_sel = st.selectbox("Select Meeting to Record", df_meetings['id'].tolist(), format_func=lambda x: f"{df_meetings[df_meetings['id']==x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id']==x]['objective'].values[0]} ({df_meetings[df_meetings['id']==x]['status'].values[0]})")
+            else:
+                proc_sel = st.selectbox("Select Scheduled Meeting to Convene", sched_meetings['id'].tolist(), format_func=lambda x: f"{sched_meetings[sched_meetings['id']==x]['meeting_date'].values[0]} | {sched_meetings[sched_meetings['id']==x]['objective'].values[0]}")
+            
+            proc_meeting_data = df_meetings[df_meetings['id'] == proc_sel].iloc[0]
+
+            # --- A. MARK ACTUAL ATTENDANCE ---
+            with st.expander("👥 A. Mark Actual Attendance", expanded=True):
+                curr_att = proc_meeting_data.get('attendees') or []
+                if not isinstance(curr_att, list): curr_att = []
+                
+                with st.form("actual_attendance_form"):
+                    actual_attendees = st.multiselect("Confirm Attending Officials", options=list(contact_map.keys()), default=curr_att, format_func=lambda x: f"{contact_map[x]['name']} ({contact_map[x]['designation']})")
+                    
+                    st.markdown("##### Subordinate Representation Check")
+                    detailed_attendance_payload = []
+                    
+                    if actual_attendees:
+                        for cid in actual_attendees:
+                            contact = contact_map[cid]
+                            is_sub = st.checkbox(f"Did a subordinate attend instead of {contact['name']}?", key=f"sub_{cid}_{proc_sel}")
+                            sub_name, sub_desig, sub_phone = "", "", ""
+                            if is_sub:
+                                sc1, sc2, sc3 = st.columns(3)
+                                sub_name = sc1.text_input("Subordinate Name", key=f"s_n_{cid}_{proc_sel}")
+                                sub_desig = sc2.text_input("Subordinate Designation", key=f"s_d_{cid}_{proc_sel}")
+                                sub_phone = sc3.text_input("Subordinate Phone", key=f"s_p_{cid}_{proc_sel}")
+
+                            detailed_attendance_payload.append({
+                                "contact_id": cid,
+                                "official_name": contact['name'],
+                                "official_designation": contact['designation'],
+                                "official_phone": contact['phone'],
+                                "official_email": contact['email'],
+                                "attended_by_subordinate": is_sub,
+                                "subordinate_name": sub_name if is_sub else None,
+                                "subordinate_designation": sub_desig if is_sub else None,
+                                "subordinate_phone": sub_phone if is_sub else None
+                            })
+                    
+                    if st.form_submit_button("Save Attendance Register"):
+                        supabase.table("meetings").update({"detailed_attendance": detailed_attendance_payload, "attendees": actual_attendees}).eq("id", proc_sel).execute()
+                        st.success("✅ Attendance saved.")
+                        st.rerun()
+
+            # --- B. REVIEW PREVIOUS DECISIONS ---
+            with st.expander("⏳ B. Review Past Decisions & Progress", expanded=False):
+                st.caption("Quickly update the status of pending items from previous meetings.")
+                
+                past_ap_query = supabase.table("meeting_action_points").select("*, meetings!inner(district_id, block_id, meeting_type)").neq("status", "Completed").neq("status", "Dropped").execute().data
+                
+                if past_ap_query:
+                    df_past = pd.DataFrame(past_ap_query)
+                    if proc_meeting_data['meeting_type'] == 'District':
+                        df_past = df_past[df_past['meetings'].apply(lambda x: x.get('district_id') == proc_meeting_data['district_id'])]
+                    else:
+                        df_past = df_past[df_past['meetings'].apply(lambda x: x.get('block_id') == proc_meeting_data['block_id'])]
+                        
+                    if not df_past.empty:
+                        df_past['Department'] = df_past['department_id'].map(dept_map_reverse)
+                        st.dataframe(df_past[['Department', 'action_point', 'responsible_officer', 'status', 'remarks']], use_container_width=True, hide_index=True)
+                        
+                        with st.form("quick_update_form"):
+                            col_u1, col_u2 = st.columns(2)
+                            u_id = col_u1.selectbox("Select Resolution to Update", df_past['id'].tolist(), format_func=lambda x: f"{df_past[df_past['id']==x]['action_point'].values[0][:40]}...")
+                            u_stat = col_u2.selectbox("Update Status", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'])
+                            u_rem = st.text_input("Latest Progress / Remarks")
+                            if st.form_submit_button("Update Past Progress"):
+                                supabase.table("meeting_action_points").update({"status": u_stat, "remarks": u_rem}).eq("id", u_id).execute()
+                                st.success("Updated successfully.")
+                                st.rerun()
+                    else:
+                        st.info("No pending resolutions for this jurisdiction.")
+                else:
+                    st.info("No past action points found.")
+
+            # --- C. GENERAL MINUTES & NEW RESOLUTIONS ---
+            with st.expander("📝 C. General Minutes & New Resolutions", expanded=True):
+                general_minutes = st.text_area("General Discussion / Meeting Minutes", value=proc_meeting_data.get('decisions', '') or '', height=100)
+                if st.button("Save General Minutes"):
+                    supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
+                    st.success("Minutes saved.")
+                
+                st.markdown("---")
+                st.markdown("#### Assign New Resolutions")
+                
+                current_att_data = proc_meeting_data.get('detailed_attendance', [])
+                if isinstance(current_att_data, list) and len(current_att_data) > 0:
+                    att_options = []
+                    for att in current_att_data:
+                        if att.get('attended_by_subordinate'):
+                            name_str = f"{att.get('subordinate_name', 'Subordinate')} (Rep. for {att.get('official_name')})"
+                        else:
+                            name_str = f"{att.get('official_name')} ({att.get('official_designation')})"
+                        att_options.append(name_str)
+                else:
+                    att_options = ["Please mark attendance in Step A first"]
+
+                with st.form("add_new_resolution"):
+                    col_r1, col_r2 = st.columns([1, 1])
+                    res_dept = col_r1.selectbox("Converging Department", list(dept_dict.keys()))
+                    res_officer = col_r2.selectbox("Responsible Attending Officer", att_options)
+                    
+                    res_action = st.text_area("Resolution / Action Point")
+                    
+                    col_r3, col_r4, col_r5 = st.columns([1, 1, 1])
+                    res_target = col_r3.text_input("Desired Target (Optional)")
+                    has_deadline = col_r4.checkbox("Set Target Date?", value=True)
+                    res_deadline = col_r5.date_input("Target Date", date.today())
+                    
+                    if st.form_submit_button("Add Resolution to Tracker", type="primary"):
+                        if res_officer == "Please mark attendance in Step A first":
+                            st.error("You must mark attendance before assigning resolutions.")
+                        else:
+                            res_payload = {
+                                "meeting_id": proc_sel,
+                                "department_id": dept_dict[res_dept],
+                                "action_point": res_action,
+                                "target": res_target if res_target.strip() else None,
+                                "responsible_officer": res_officer,
+                                "deadline": str(res_deadline) if has_deadline else None,
+                                "status": "Not Started",
+                                "priority": "MEDIUM"
+                            }
+                            supabase.table("meeting_action_points").insert(res_payload).execute()
+                            st.success("✅ Resolution added successfully!")
+                            st.rerun()
+
+            # --- D. FINALIZE MEETING ---
+            st.markdown("---")
+            if proc_meeting_data.get('status') == 'Scheduled':
+                if st.button("🔒 Complete Proceedings & Mark as Convened", type="primary", use_container_width=True):
+                    supabase.table("meetings").update({"status": "Convened"}).eq("id", proc_sel).execute()
+                    st.success("Meeting locked and Convened! Resolutions synced to Department Dashboards.")
+                    st.rerun()
+
+    # ======================== TAB 4: RESOLUTION TRACKER & CROSS-REFERENCE ========================
+    with tab4:
+        st.subheader("🎯 Master Resolution Tracker")
         if df_meetings.empty:
             st.info("No meetings found. Please schedule a meeting first.")
         else:
-            meeting_sel = st.selectbox("Select Meeting to Track", df_meetings['id'].tolist(),
-                                       format_func=lambda x: f"{df_meetings[df_meetings['id']==x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id']==x]['objective'].values[0]}")
+            # Filter meetings drop down
+            tr_meeting_sel = st.selectbox("Select Meeting to Track", ["All"] + df_meetings['id'].tolist(),
+                                       format_func=lambda x: "All Meetings" if x == "All" else f"{df_meetings[df_meetings['id']==x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id']==x]['objective'].values[0]}")
             
-            sel_meeting_type = df_meetings[df_meetings['id'] == meeting_sel].iloc[0]['meeting_type']
+            ap_query = supabase.table("meeting_action_points").select("*")
+            if tr_meeting_sel != "All":
+                ap_query = ap_query.eq("meeting_id", tr_meeting_sel)
+                
+            ap_data = ap_query.execute().data
             
-            with st.expander("➕ Add New Departmental Commitment / Resolution", expanded=False):
-                with st.form("add_resolution"):
-                    col_r1, col_r2 = st.columns([1, 2])
-                    assigned_dept = col_r1.selectbox("Converging Department", list(dept_dict.keys()))
-                    priority = col_r2.selectbox("Priority Level", ["HIGH", "MEDIUM", "LOW"])
-                    
-                    action_text = st.text_area("Resolution / New Plan (Must be specific)")
-                    
-                    col_r3, col_r4 = st.columns(2)
-                    target = col_r3.text_input("Desired Target / Measurable Capacity")
-                    responsible = col_r4.text_input("Responsible Officer")
-                    
-                    col_r5, col_r6 = st.columns(2)
-                    deadline = col_r5.date_input("Deadline", date.today())
-                    status = col_r6.selectbox("Current Status", [
-                        'Not Started', 'Under Process', 'Departmental Action Pending', 
-                        'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
-                    ])
-
-                    if st.form_submit_button("Adopt Resolution", type="primary"):
-                        res_data = {
-                            "meeting_id": meeting_sel,
-                            "department_id": dept_dict[assigned_dept],
-                            "action_point": action_text,
-                            "priority": priority,
-                            "target": target,
-                            "responsible_officer": responsible,
-                            "deadline": str(deadline),
-                            "status": status
-                        }
-                        supabase.table("meeting_action_points").insert(res_data).execute()
-                        st.success("✅ Resolution added to tracker.")
-                        st.rerun()
-
-            ap_query = supabase.table("meeting_action_points").select("*").eq("meeting_id", meeting_sel).execute().data
-            
-            if ap_query:
-                df_ap = pd.DataFrame(ap_query)
+            if ap_data:
+                df_ap = pd.DataFrame(ap_data)
                 df_ap['Department'] = df_ap['department_id'].map(dept_map_reverse)
                 
                 today = pd.to_datetime(date.today())
-                df_ap['deadline'] = pd.to_datetime(df_ap['deadline'])
-                df_ap['Days Remaining'] = (df_ap['deadline'] - today).dt.days
+                df_ap['deadline'] = pd.to_datetime(df_ap['deadline'], errors='coerce')
                 
                 def get_flag(row):
                     if row['status'] in ['Completed', 'Dropped']: return "✅ Closed"
                     if row['status'] == 'Not Feasible (Requires Review)': return "🔴 FOR REVIEW"
-                    if row['Days Remaining'] < 0: return "🚨 OVERDUE"
-                    if row['Days Remaining'] == 0: return "⚠️ Due Today"
+                    if pd.isna(row['deadline']): return "⏳ No Deadline"
+                    days_rem = (row['deadline'] - today).days
+                    if days_rem < 0: return "🚨 OVERDUE"
+                    if days_rem == 0: return "⚠️ Due Today"
                     return "⏳ On Track"
 
                 df_ap['Tracker Flag'] = df_ap.apply(get_flag, axis=1)
-                display_cols = ['id', 'Department', 'priority', 'action_point', 'target', 'deadline', 'Tracker Flag', 'status']
-                st.dataframe(df_ap[display_cols].sort_values('deadline'), use_container_width=True, hide_index=True)
+                
+                # Show only columns that exist
+                display_cols = ['id', 'Department', 'action_point', 'target', 'deadline', 'Tracker Flag', 'status']
+                if 'responsible_officer' in df_ap.columns: display_cols.insert(3, 'responsible_officer')
+                if 'priority' in df_ap.columns: display_cols.insert(2, 'priority')
+                
+                st.dataframe(df_ap[display_cols].sort_values('Tracker Flag'), use_container_width=True, hide_index=True)
 
                 st.markdown("### ✏️ Update Progress / Action Taken Report")
                 with st.form("update_atr"):
@@ -375,10 +476,10 @@ def show():
                         st.success("✅ Progress updated successfully.")
                         st.rerun()
             else:
-                st.info("No resolutions adopted for this meeting yet.")
+                st.info("No resolutions adopted yet.")
 
-            # CROSS-REFERENCE (Block Outcomes for District)
-            if sel_meeting_type == 'District' and user['role'] in ['superadmin', 'district']:
+            # CROSS-REFERENCE (Block Outcomes for District) - Preserved Legacy Feature
+            if user['role'] in ['superadmin', 'district']:
                 st.markdown("---")
                 st.markdown("### 🔗 Reference Block-Level Outcomes")
                 st.caption("Review recent commitments made at the Block level by a specific department.")
@@ -409,16 +510,17 @@ def show():
                 else:
                     st.info("No Block meetings recorded in this district yet.")
 
-    # ======================== TAB 4: PRINT & REPORTS ========================
-    with tab4:
+    # ======================== TAB 5: PRINT & REPORTS ========================
+    with tab5:
         st.subheader("🖨️ Meeting & Resolution Reports")
         
         report_type = st.radio("Select Report Type", ["By Specific Meeting (Chairperson Report)", "Date-Wise Resolution Register"], horizontal=True)
         st.markdown("---")
         
         if report_type == "By Specific Meeting (Chairperson Report)":
-            if not df_meetings.empty and 'meeting_sel' in locals() and 'ap_query' in locals() and ap_query:
-                sel_meeting_data = df_meetings[df_meetings['id'] == meeting_sel].iloc[0]
+            if not df_meetings.empty:
+                rep_mtg_sel = st.selectbox("Select Meeting for Report", df_meetings['id'].tolist(), format_func=lambda x: f"{df_meetings[df_meetings['id']==x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id']==x]['objective'].values[0]}")
+                sel_meeting_data = df_meetings[df_meetings['id'] == rep_mtg_sel].iloc[0]
                 
                 att_data = sel_meeting_data.get('detailed_attendance')
                 attendance_html = ""
@@ -440,9 +542,15 @@ def show():
                 else:
                     attendance_html = "<p>No detailed attendance recorded.</p>"
                 
-                print_df = df_ap[['Department', 'action_point', 'target', 'status', 'remarks']].copy()
-                print_df.columns = ['Department', 'Resolution / Commitment', 'Target', 'Status', 'Outcome / Remarks']
-                html_table = print_df.to_html(index=False, classes="print-table")
+                mtg_ap = supabase.table("meeting_action_points").select("*").eq("meeting_id", rep_mtg_sel).execute().data
+                if mtg_ap:
+                    df_rep_ap = pd.DataFrame(mtg_ap)
+                    df_rep_ap['Department'] = df_rep_ap['department_id'].map(dept_map_reverse)
+                    print_df = df_rep_ap[['Department', 'action_point', 'target', 'status', 'remarks']].copy()
+                    print_df.columns = ['Department', 'Resolution / Commitment', 'Target', 'Status', 'Outcome / Remarks']
+                    html_table = print_df.to_html(index=False, classes="print-table")
+                else:
+                    html_table = "<p>No resolutions recorded.</p>"
                 
                 printable_html = f"""<!DOCTYPE html>
                 <html>
@@ -485,7 +593,7 @@ def show():
                     </div></a>'''
                 st.markdown(print_href, unsafe_allow_html=True)
             else:
-                st.warning("Please select a meeting in Tab 3 with active resolutions to generate a report.")
+                st.warning("Please schedule a meeting first.")
                 
         elif report_type == "Date-Wise Resolution Register":
             st.markdown("#### Select Date Range for Resolutions")
@@ -558,32 +666,40 @@ def show():
             else:
                 st.info("No meeting data available.")
 
-    # ======================== TAB 5: NEXT MEETING AGENDA PREP ========================
-    with tab5:
+    # ======================== TAB 6: NEXT MEETING AGENDA PREP ========================
+    with tab6:
         st.subheader("⏭️ Next Meeting Agenda Preparation")
         
-        if not df_meetings.empty and 'meeting_sel' in locals() and 'ap_query' in locals() and ap_query:
-            active_mask = ~df_ap['status'].isin(['Completed', 'Dropped'])
-            active_df = df_ap[active_mask]
+        all_ap = supabase.table("meeting_action_points").select("*").execute().data
+        if all_ap:
+            df_all_ap = pd.DataFrame(all_ap)
+            df_all_ap['Department'] = df_all_ap['department_id'].map(dept_map_reverse)
+            
+            active_mask = ~df_all_ap['status'].isin(['Completed', 'Dropped'])
+            active_df = df_all_ap[active_mask]
             
             unfeasible_df = active_df[active_df['status'] == 'Not Feasible (Requires Review)']
             pending_df = active_df[active_df['status'] != 'Not Feasible (Requires Review)']
             
             if not unfeasible_df.empty or not pending_df.empty:
-                st.warning(f"⚠️ There are {len(active_df)} items (including {len(unfeasible_df)} flagged as Not Feasible) for the next agenda.")
+                st.warning(f"⚠️ {len(active_df)} items ready for the next agenda ({len(unfeasible_df)} require immediate review).")
                 
-                agenda_text = "AGENDA ITEMS FOR NEXT MEETING (Auto-Generated):\n\n"
+                agenda_text = "AGENDA FOR UPCOMING MEETING:\n\n"
                 
                 if not unfeasible_df.empty:
-                    agenda_text += "🔴 ITEMS FLAGGED AS NOT FEASIBLE (FOR IMMEDIATE REVIEW):\n"
+                    agenda_text += "🔴 ITEMS FLAGGED AS NOT FEASIBLE (FOR REVIEW):\n"
                     for idx, row in unfeasible_df.iterrows():
-                        agenda_text += f"- [{row['Department']}] {row['action_point']}\n  Reason: {row['remarks']}\n\n"
+                        officer = row.get('responsible_officer', 'Unassigned')
+                        agenda_text += f"- [{row['Department']}] {row['action_point']}\n  Officer: {officer}\n  Reason: {row['remarks']}\n\n"
                         
                 if not pending_df.empty:
                     agenda_text += "⏳ PENDING / OVERDUE COMMITMENTS:\n"
                     for idx, row in pending_df.iterrows():
-                        agenda_text += f"- [{row['Department']}] {row['action_point']} (Status: {row['Tracker Flag']})\n"
+                        officer = row.get('responsible_officer', 'Unassigned')
+                        agenda_text += f"- [{row['Department']}] {row['action_point']} (Officer: {officer})\n"
                 
-                st.text_area("Copy this text to paste into the 'Agenda' field of your next Meeting:", value=agenda_text, height=300)
+                st.text_area("Copy Agenda Text:", value=agenda_text, height=300)
             else:
-                st.success("🎉 All resolutions for this meeting are Complete! No baggage for the next meeting.")
+                st.success("🎉 No pending items for the next meeting!")
+        else:
+            st.info("No action points in the system.")
