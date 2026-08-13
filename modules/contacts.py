@@ -5,7 +5,41 @@ import io
 from utils.db import get_supabase
 from auth.auth import get_current_user
 
+def inject_tab_css():
+    """Injects modern, trendy CSS to elevate the UI of Streamlit tabs."""
+    st.markdown("""
+        <style>
+        div[data-testid="stTabs"] button[role="tab"] {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 30px; 
+            padding: 8px 20px;
+            margin-right: 10px;
+            font-weight: 600;
+            color: #4B5563;
+            transition: all 0.25s ease-in-out;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        div[data-testid="stTabs"] button[role="tab"]:hover {
+            background-color: #F3F4F6;
+            border-color: #D1D5DB;
+            color: #111827;
+            transform: translateY(-1px);
+        }
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+            background-color: #1F77B4 !important;
+            color: white !important;
+            border-color: #1F77B4 !important;
+            box-shadow: 0 4px 10px -2px rgba(31, 119, 180, 0.4) !important;
+        }
+        div[data-testid="stTabs"] [data-baseweb="tab-highlight"] { display: none; }
+        div[data-testid="stTabs"] [data-baseweb="tab-panel"] { padding-top: 25px; }
+        </style>
+    """, unsafe_allow_html=True)
+
+
 def show():
+    inject_tab_css()
     st.markdown("<h1 style='color: #1F77B4;'>📇 Official Contact Directory</h1>", unsafe_allow_html=True)
     st.markdown("---")
 
