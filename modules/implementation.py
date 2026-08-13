@@ -1,10 +1,24 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import io
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
+
+def safe_parse_date(date_val):
+    """
+    Safely parses dates from the database. 
+    Returns the exact date if it exists, otherwise returns None to prevent accidental overwrites.
+    """
+    if pd.isna(date_val) or not date_val:
+        return None
+    try:
+        if isinstance(date_val, str):
+            return pd.to_datetime(date_val).date()
+        return date_val
+    except Exception:
+        return None
 
 def show():
     # Allow all execution and planning roles
@@ -166,7 +180,7 @@ def show():
             selected_activity = next((a for a in activities if a['id'] == selected_act_id), None)
 
             if selected_activity:
-                # Removed backticks around the span to render HTML properly
+                # Proper HTML rendering with unsafe_allow_html=True
                 st.markdown(f"**Current Status:** <span style='color: #E67E22;'>{selected_activity.get('current_status', 'Planned')}</span> | **Source:** <code>{selected_activity.get('origin_source', 'Normative / Routine')}</code>", unsafe_allow_html=True)
                 
                 with st.form("update_progress_form"):
@@ -188,9 +202,15 @@ def show():
                     persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_activity.get('persondays_generated', 0) or 0))
 
                     col_p5, col_p6, col_p7 = st.columns(3)
-                    start_date = col_p5.date_input("Actual Start Date", value=date.today())
-                    exp_date = col_p6.date_input("Expected Completion", value=date.today())
-                    act_date = col_p7.date_input("Actual Completion (If done)", value=None)
+                    
+                    # Implementation of safe_parse_date ensuring dates don't overwrite blindly
+                    db_start = safe_parse_date(selected_activity.get('actual_start_date'))
+                    db_exp = safe_parse_date(selected_activity.get('expected_completion_date'))
+                    db_act = safe_parse_date(selected_activity.get('actual_completion_date'))
+
+                    start_date = col_p5.date_input("Actual Start Date", value=db_start)
+                    exp_date = col_p6.date_input("Expected Completion", value=db_exp)
+                    act_date = col_p7.date_input("Actual Completion (If done)", value=db_act)
 
                     remarks = st.text_area("Remarks / Blockages", value=selected_activity.get('remarks', '') or '')
 
