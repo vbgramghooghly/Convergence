@@ -65,10 +65,10 @@ def show():
 
     # ======================== TABS LAYOUT ========================
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📅 Dashboard & Edit",
-        "🗓️ 1. Schedule Meeting", 
-        "✍️ 2. Record Proceedings", 
-        "🎯 Master Resolution Tracker", 
+        "📅 Dashboard",
+        "🗓️ Schedule Meeting", 
+        "✍️ Record Proceedings", 
+        "🎯 Resolution Tracker", 
         "🖨️ Reports & Registers",
         "⏭️ Next Agenda Prep"
     ])
