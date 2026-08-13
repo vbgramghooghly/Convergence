@@ -463,7 +463,11 @@ def show():
                 st.markdown("#### Assign New Resolutions")
                 
                 current_att_data = proc_meeting_data.get('detailed_attendance', [])
-                if isinstance(current_att_data, list) and len(current_att_data) > 0:
+                
+                # SIMPLIFIED UI FIX: Do not show the assignment form if attendance isn't saved yet
+                if not current_att_data:
+                    st.warning("⚠️ Please mark and save actual attendance in Step A before assigning resolutions.")
+                else:
                     att_options = []
                     for att in current_att_data:
                         if att.get('attended_by_subordinate'):
@@ -471,25 +475,20 @@ def show():
                         else:
                             name_str = f"{att.get('official_name')} ({att.get('official_designation')})"
                         att_options.append(name_str)
-                else:
-                    att_options = ["Please mark attendance in Step A first"]
 
-                with st.form("add_new_resolution"):
-                    col_r1, col_r2 = st.columns([1, 1])
-                    res_dept = col_r1.selectbox("Converging Department", list(dept_dict.keys()))
-                    res_officer = col_r2.selectbox("Responsible Attending Officer", att_options)
-                    
-                    res_action = st.text_area("Resolution / Action Point")
-                    
-                    col_r3, col_r4, col_r5 = st.columns([1, 1, 1])
-                    res_target = col_r3.text_input("Desired Target (Optional)")
-                    has_deadline = col_r4.checkbox("Set Target Date?", value=True)
-                    res_deadline = col_r5.date_input("Target Date", date.today())
-                    
-                    if st.form_submit_button("Add Resolution to Tracker", type="primary"):
-                        if res_officer == "Please mark attendance in Step A first":
-                            st.error("You must mark attendance before assigning resolutions.")
-                        else:
+                    with st.form("add_new_resolution"):
+                        col_r1, col_r2 = st.columns([1, 1])
+                        res_dept = col_r1.selectbox("Converging Department", list(dept_dict.keys()))
+                        res_officer = col_r2.selectbox("Responsible Attending Officer", att_options)
+                        
+                        res_action = st.text_area("Resolution / Action Point")
+                        
+                        col_r3, col_r4, col_r5 = st.columns([1, 1, 1])
+                        res_target = col_r3.text_input("Desired Target (Optional)")
+                        has_deadline = col_r4.checkbox("Set Target Date?", value=True)
+                        res_deadline = col_r5.date_input("Target Date", date.today())
+                        
+                        if st.form_submit_button("Add Resolution to Tracker", type="primary"):
                             res_payload = {
                                 "meeting_id": proc_sel,
                                 "department_id": dept_dict[res_dept],
@@ -497,12 +496,17 @@ def show():
                                 "target": res_target if res_target.strip() else None,
                                 "responsible_officer": res_officer,
                                 "deadline": str(res_deadline) if has_deadline else None,
-                                "status": "Not Started",
-                                "priority": "MEDIUM"
+                                # FIXED ERROR: Database check constraint requires a valid string. 
+                                # "Not Started" was rejecting the insert. "Under Process" is permitted.
+                                "status": "Under Process", 
+                                "priority": "Medium"
                             }
-                            supabase.table("meeting_action_points").insert(res_payload).execute()
-                            st.success("✅ Resolution added successfully!")
-                            st.rerun()
+                            try:
+                                supabase.table("meeting_action_points").insert(res_payload).execute()
+                                st.success("✅ Resolution added successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error adding resolution: {e}")
 
             # --- D. FINALIZE MEETING ---
             st.markdown("---")
@@ -555,9 +559,10 @@ def show():
                 with st.form("global_update_atr"):
                     col_u1, col_u2 = st.columns(2)
                     ap_id = col_u1.selectbox("Select Resolution ID", df_ap['id'].tolist())
+                    
+                    # Aligned valid statuses with DB logic
                     new_ap_status = col_u2.selectbox("Update Status", [
-                        'Not Started', 'Under Process', 'Departmental Action Pending', 
-                        'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
+                        'Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'
                     ])
                     remarks = st.text_area("Outcome / Action Taken (Will be printed for Chairperson)")
                     
