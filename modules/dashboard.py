@@ -45,11 +45,11 @@ def show():
     block_map = {b['id']: b['block_name'] for b in blocks}
     act_map = {a['id']: a['activity_name'] for a in activities}
 
-    # ======================== 2. FETCH REGISTERS & TARGETS (SAFE PANDAS FILTERING) ========================
+    # ======================== 2. FETCH REGISTERS & TARGETS (FILTERED BY FY) ========================
     q_targets = supabase.table("department_targets").select("*")
     q_reg = supabase.table("convergence_register").select("*")
 
-    # Role-based Database Filtering (avoiding schema mismatches on FY columns)
+    # Role-based Database Filtering
     if role == 'district':
         q_targets = q_targets.eq("district_id", user['district_id'])
         q_reg = q_reg.eq("district_id", user['district_id'])
@@ -76,7 +76,13 @@ def show():
         elif 'financial_year_id' in df_reg.columns:
             df_reg = df_reg[df_reg['financial_year_id'].astype(str) == str(active_fy)]
 
-    # ======================== 3. ADVANCED KPIS & METRICS ========================
+    # ======================== 3. CONDITIONAL CHECK FOR NO DATA ========================
+    if df_targets.empty and df_reg.empty:
+        st.markdown("---")
+        st.warning(f"⚠️ **No data available for Financial Year {active_fy}.** No targets or convergence register entries have been entered against this FY yet. Please switch back to **2026-27** or add records via the *Implementation & Targets* module.")
+        return
+
+    # ======================== 4. ADVANCED KPIS & METRICS ========================
     total_depts_wings = len(departments) + len(wings)
     
     district_officials_count = len([u for u in users_data if u.get('role') in ['district', 'department'] and u.get('block_id') is None])
@@ -98,7 +104,7 @@ def show():
         activity_dept_counts[act_id] = activity_dept_counts.get(act_id, 0) + 1
     multi_dept_activities_count = len([act_id for act_id, count in activity_dept_counts.items() if count > 1])
 
-    # ======================== 4. TABS LAYOUT ========================
+    # ======================== 5. TABS LAYOUT ========================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Master Dashboard & Health", 
         "🏢 Department Onboarding Matrix", 
