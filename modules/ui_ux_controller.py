@@ -95,10 +95,10 @@ def show():
         
         with st.expander("🎨 1. Quick Presets", expanded=True):
             c1, c2 = st.columns(2)
-            if c1.button("🏛️ Gov Navy", use_container_width=True): apply_preset('#0F4C81', '#F4F6F9', 4, "'Inter', sans-serif")
+            if c1.button("🏛️ Gov Navy", use_container_width=True): apply_preset('#0F4C81', '#F4F6F9', 4, "'Segoe UI', sans-serif")
             if c2.button("🌲 Eco Green", use_container_width=True): apply_preset('#166534', '#F0FDF4', 8, "'Segoe UI', sans-serif")
             if c1.button("🏢 Corp Slate", use_container_width=True): apply_preset('#334155', '#F8FAFC', 0, "Arial, sans-serif")
-            if c2.button("🔮 Modern Purp", use_container_width=True): apply_preset('#6366F1', '#FAFAFA', 12, "'Inter', sans-serif")
+            if c2.button("🔮 Modern Purp", use_container_width=True): apply_preset('#6366F1', '#FAFAFA', 12, "'Segoe UI', sans-serif")
             
         with st.expander("🖌️ 2. Custom Colors & Identity"):
             state['app_name'] = st.text_input("Portal Name", value=state['app_name'])
@@ -117,7 +117,7 @@ def show():
             state['tab_size'] = st.select_slider("Tab Bulkiness", options=tab_opts, value=state['tab_size'])
 
         with st.expander("🔤 4. Typography"):
-            font_opts = ["'Inter', sans-serif", "'Segoe UI', sans-serif", "Arial, sans-serif", "Georgia, serif", "monospace"]
+            font_opts = ["'Segoe UI', sans-serif", "Arial, sans-serif", "Georgia, serif", "monospace"]
             cur_font = state['font_family'] if state['font_family'] in font_opts else font_opts[0]
             state['font_family'] = st.selectbox("Global Font Family", font_opts, index=font_opts.index(cur_font))
             
@@ -191,4 +191,6 @@ def show():
             </div>
         </div>
         """
+        
+        # CRITICAL FIX: Ensure unsafe_allow_html=True is set here!
         st.markdown(preview_html, unsafe_allow_html=True)
