@@ -104,7 +104,7 @@ def show():
                         dept_sel = st.selectbox("Department*", list(t_dept_dict.keys()) if t_dept_dict else ["None"])
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
 
-                    # Project Head Dropdown
+                    # Editable Project Head Logic
                     project_head_options = [
                         "AWC (Anganwadi Center)",
                         "Plantation",
@@ -112,9 +112,14 @@ def show():
                         "Solid/Liquid Waste Management",
                         "Rural Infrastructure",
                         "Livelihood & Agriculture",
-                        "Other"
+                        "Other (Specify Custom)"
                     ]
-                    project_head = st.selectbox("Convergence Project Head*", project_head_options)
+                    ph_sel = st.selectbox("Convergence Project Head*", project_head_options)
+                    
+                    if ph_sel == "Other (Specify Custom)":
+                        project_head = st.text_input("Type Custom Project Head Name*")
+                    else:
+                        project_head = ph_sel
 
                     # Dynamic Activity Dropdown based on Department Selection
                     active_dept_id = t_dept_dict.get(dept_sel) if dept_sel != "None" else None
@@ -146,6 +151,8 @@ def show():
                     if submitted_target:
                         if dept_sel == "None" or dist_sel == "None":
                             st.error("Invalid Department or District.")
+                        elif not project_head or not project_head.strip():
+                            st.error("Project Head name cannot be empty.")
                         elif activity == "No activities available":
                             st.error("Cannot save target without a valid approved activity.")
                         elif expected_persondays <= 0:
@@ -158,7 +165,7 @@ def show():
                                 "department_id": dept_id,
                                 "district_id": dist_id,
                                 "financial_year": "2026-27",
-                                "project_head": project_head,
+                                "project_head": project_head.strip(),
                                 "activity": activity,
                                 "asset_count": asset_count,
                                 "annual_plan_scope": annual_plan_scope,
@@ -183,10 +190,7 @@ def show():
                                     st.success("Target added successfully!")
                                 st.rerun()
                             except Exception as e:
-                                if "project_head" in str(e):
-                                    st.error("🚨 Database Error: The `project_head` column is missing from your `department_targets` table in Supabase. Please add it as type `text` to proceed.")
-                                else:
-                                    st.error(f"Error saving target: {e}")
+                                st.error(f"Error saving target: {e}")
 
         with col_t1:
             st.markdown("#### Existing Targets Dashboard")
