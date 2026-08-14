@@ -24,6 +24,14 @@ def inject_custom_css():
         unsafe_allow_html=True,
     )
 
+def safe_int(val):
+    """Safely converts floats/strings to integers to prevent Postgres 22P02 casting errors."""
+    if pd.isna(val) or val is None or val == '':
+        return None
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return None
 
 def show():
     require_role("superadmin", "district", "block", "department")
@@ -46,11 +54,10 @@ def show():
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
     
-    # Explicitly fetch activities and mapping to ensure the dropdown filters correctly
     activities_data = supabase.table("activities").select("id, activity_name").eq("active", True).execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("activity_id, department_id").execute().data or []
 
-    # Fetch User Directory for Attendance & Statutory Display (Removed 'email' to prevent DB error)
+    # Fetch User Directory - removed role restrictions to ensure anyone attached to a dept shows up
     users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
     user_dict = {u["id"]: u for u in users_data}
 
@@ -160,7 +167,6 @@ def show():
         if df_ap.empty:
             st.info("No resolution data available for your jurisdiction.")
         else:
-            # Key Metrics
             total_res = len(df_ap)
             closed = len(df_ap[df_ap["Tracker Flag"] == "🟢 CLOSED"])
             on_track = len(df_ap[df_ap["Tracker Flag"] == "🔵 ON TRACK"])
@@ -217,19 +223,15 @@ def show():
                 dist_sel = next((name for name, id in dist_dict.items() if id == user.get("district_id")), list(dist_dict.keys())[0])
                 block_sel = None
                 chair_default = "District Magistrate & District Programme Coordinator (DPC)"
-                
-                # Fetch Statutory District Users
                 stat_users = [u for u in users_data if u['role'] == 'district' and str(u.get('district_id')) == str(dist_dict[dist_sel])]
             else:
                 block_sel = block_dict_reverse.get(user["block_id"], "Unknown Block") if role == "block" else st.selectbox("Block Jurisdiction", [b["block_name"] for b in blocks_data])
                 dist_sel = next(b["district_id"] for b in blocks_data if b["block_name"] == block_sel) if role != "block" else user["district_id"]
                 chair_default = "Block Development Officer (BDO)"
                 block_id_sel = next(b["id"] for b in blocks_data if b["block_name"] == block_sel)
-                
-                # Fetch Statutory Block Users
                 stat_users = [u for u in users_data if u['role'] == 'block' and str(u.get('block_id')) == str(block_id_sel)]
 
-            st.markdown(f"#### 🏛️ Statutory Officials for {meeting_type} Jurisdiction (From User Directory)")
+            st.markdown(f"#### 🏛️ Statutory Officials for {meeting_type} Jurisdiction")
             if stat_users:
                 st.info(", ".join([f"{u['full_name']}" for u in stat_users]))
             else:
@@ -287,11 +289,11 @@ def show():
 
             proc_mtg = df_meetings[df_meetings["id"] == proc_sel].iloc[0]
             is_locked = proc_mtg.get("status") == "Convened"
+            safe_proc_sel = safe_int(proc_sel)
 
             # --- PRINT / DOWNLOAD PROCEEDINGS BUTTON ---
             st.markdown("---")
             
-            # Fetch Attendance HTML formatting for print
             att_data = proc_mtg.get("detailed_attendance") or []
             attendance_html = "<table class='print-table'><tr><th>Department / Wing</th><th>Registered Officials Attended</th><th>Other / Subordinate Attendees</th></tr>"
             if att_data and isinstance(att_data, list):
@@ -304,7 +306,6 @@ def show():
             else:
                 attendance_html = "<p>No detailed attendance recorded.</p>"
 
-            # Fetch Resolutions HTML formatting for print
             mtg_ap = df_ap[df_ap['meeting_id'] == proc_sel] if not df_ap.empty else pd.DataFrame()
             if not mtg_ap.empty:
                 print_df = mtg_ap[["Department / Wing", "action_point", "target", "status", "remarks"]].copy()
@@ -367,19 +368,17 @@ def show():
                             st.dataframe(adf[["label", "Registered Officials", "subordinate_text"]], hide_index=True)
                     else:
                         detailed_attendance_payload = []
-                        
-                        # Pre-load existing attendance states
                         existing_att_map = {a['uid']: a for a in (proc_mtg.get("detailed_attendance") or [])}
 
                         with st.container():
                             for uid in invited_uids:
                                 label = unified_uid_to_label.get(uid, "Unknown")
                                 parts = str(uid).split("_")
-                                d_id = int(parts[0]) if parts[0].isdigit() else None
-                                w_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+                                d_id = safe_int(parts[0])
+                                w_id = safe_int(parts[1]) if len(parts) > 1 else None
                                 
-                                # Filter users mapping to this department/wing
-                                dept_users = [u for u in users_data if u['role'] == 'department' and u['department_id'] == d_id and u.get('wing_id') == w_id]
+                                # Fetch any user linked to this Dept/Wing, regardless of their 'role' (District Admin, Dept User, etc)
+                                dept_users = [u for u in users_data if safe_int(u.get('department_id')) == d_id and safe_int(u.get('wing_id')) == w_id]
                                 user_options = {u['id']: f"{u['full_name']}" for u in dept_users}
 
                                 st.markdown(f"**🏛️ {label}**")
@@ -406,7 +405,7 @@ def show():
                                 st.markdown("<hr style='margin: 10px 0; opacity: 0.2;'>", unsafe_allow_html=True)
                                     
                             if st.button("💾 Save Draft Attendance", type="primary"):
-                                supabase.table("meetings").update({"detailed_attendance": detailed_attendance_payload}).eq("id", proc_sel).execute()
+                                supabase.table("meetings").update({"detailed_attendance": detailed_attendance_payload}).eq("id", safe_proc_sel).execute()
                                 st.success("✅ Attendance saved successfully.")
                                 st.rerun()
 
@@ -424,10 +423,13 @@ def show():
 
             # --- C. REVIEW DEPARTMENT TARGETS & PROGRESS ---
             with st.expander("📊 C. Review Department Targets & Progress", expanded=False):
-                q_targets = supabase.table("department_targets").select("*").eq("district_id", proc_mtg["district_id"])
-                q_reg = supabase.table("convergence_register").select("department_id, activity_description, current_status").eq("district_id", proc_mtg["district_id"])
+                dist_id_val = safe_int(proc_mtg["district_id"])
+                q_targets = supabase.table("department_targets").select("*").eq("district_id", dist_id_val)
+                q_reg = supabase.table("convergence_register").select("department_id, activity_description, current_status").eq("district_id", dist_id_val)
+                
                 if proc_mtg["meeting_type"] == "Block":
-                    q_reg = q_reg.eq("block_id", proc_mtg["block_id"])
+                    block_id_val = safe_int(proc_mtg["block_id"])
+                    q_reg = q_reg.eq("block_id", block_id_val)
                     
                 t_data = q_targets.execute().data
                 r_data = q_reg.execute().data
@@ -476,7 +478,7 @@ def show():
                 
                 if not is_locked and role != "department":
                     if st.button("💾 Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
-                        supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
+                        supabase.table("meetings").update({"decisions": general_minutes}).eq("id", safe_proc_sel).execute()
                         st.success("Draft Minutes saved.")
 
                     st.markdown("---")
@@ -511,7 +513,7 @@ def show():
                                 packed_remarks = f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                 
                                 res_payload = {
-                                    "meeting_id": proc_sel,
+                                    "meeting_id": safe_proc_sel,
                                     "department_id": res_dept_id,
                                     "wing_id": res_wing_id,
                                     "action_point": packed_action_point,
@@ -543,11 +545,7 @@ def show():
             if not is_locked and role in ["superadmin", "district", "block"]:
                 st.markdown("---")
                 if st.button("🔒 Complete Proceedings & Mark as Convened", type="primary", use_container_width=True, key=f"btn_lock_{proc_sel}"):
-                    # Update both the status AND save the final minutes automatically to prevent data loss
-                    supabase.table("meetings").update({
-                        "status": "Convened", 
-                        "decisions": general_minutes
-                    }).eq("id", proc_sel).execute()
+                    supabase.table("meetings").update({"status": "Convened", "decisions": general_minutes}).eq("id", safe_proc_sel).execute()
                     st.success("Meeting locked and Convened! Proceedings are now read-only.")
                     st.rerun()
 
@@ -574,14 +572,16 @@ def show():
                 ap_id = c_u1.selectbox("Select Resolution ID to Update", filtered_df["id"].tolist())
                 new_ap_status = c_u2.selectbox("Update Status", ["Not Started", "On Track", "Completed", "Not Feasible (Requires Review)", "Dropped"])
                 atr_remarks = st.text_area("ATR / Latest Progress")
+                
+                safe_ap_id = safe_int(ap_id)
 
                 if st.form_submit_button("Submit ATR Update", type="primary"):
                     try:
-                        supabase.table("meeting_action_points").update({"status": new_ap_status, "remarks": atr_remarks}).eq("id", ap_id).execute()
+                        supabase.table("meeting_action_points").update({"status": new_ap_status, "remarks": atr_remarks}).eq("id", safe_ap_id).execute()
                         st.success("✅ ATR updated successfully.")
                         st.rerun()
                     except:
-                        supabase.table("meeting_action_points").update({"status": new_ap_status.lower().replace(" ", "_"), "remarks": atr_remarks}).eq("id", ap_id).execute()
+                        supabase.table("meeting_action_points").update({"status": new_ap_status.lower().replace(" ", "_"), "remarks": atr_remarks}).eq("id", safe_ap_id).execute()
                         st.success("✅ ATR updated successfully.")
                         st.rerun()
 
@@ -598,12 +598,14 @@ def show():
         
         agenda_text = "AGENDA FOR UPCOMING MEETING:\n\n"
         has_items = False
+        
+        user_dist_id = safe_int(user["district_id"])
 
-        q_targets = supabase.table("department_targets").select("*").eq("district_id", user["district_id"])
+        q_targets = supabase.table("department_targets").select("*").eq("district_id", user_dist_id)
         t_data = q_targets.execute().data
         if t_data:
             df_t = pd.DataFrame(t_data)
-            q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", user["district_id"])
+            q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", user_dist_id)
             df_r = pd.DataFrame(q_reg.execute().data) if q_reg.execute().data else pd.DataFrame()
             
             low_targets = ""
