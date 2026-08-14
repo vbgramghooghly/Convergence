@@ -5,26 +5,13 @@ from auth.auth import require_role, get_current_user
 from utils.theme import apply_global_theme
 
 def show():
-    # 1. Apply the global theme immediately
-    theme = apply_global_theme()
-    
-    # 2. Render Page Content
-    # Use the app_name from the global theme if needed
-    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
-def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar and format metric cards."""
-    st.markdown("""
-        <style>
-        .stAppToolbar { visibility: hidden !important; }
-        .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
-        </style>
-        """, unsafe_allow_html=True)
-
-def show():
-    # Allow all execution and planning roles
+    # 1. Role Authentication
     require_role('superadmin', 'district', 'block', 'department')
     
-    inject_custom_css()
+    # 2. Apply the Global Theme Engine
+    # This automatically injects the CSS for hiding the toolbar, formatting metrics, and fonts!
+    theme = apply_global_theme()
+    primary_color = theme.get("primary_color", "#0F4C81")
     
     user = get_current_user()
     role = user['role']
@@ -33,7 +20,7 @@ def show():
     # Retrieve the active Financial Year selected in the top-left sidebar
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
-    st.markdown("<h1 style='color: #1F77B4;'>Convergence Master Dashboard</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='color: {primary_color};'>Convergence Master Dashboard</h1>", unsafe_allow_html=True)
     st.caption(f"FY {active_fy} | Real-time Onboarding, Activity Linkage, Target Compliance & Convergence Health Metrics.")
 
     # ======================== 1. MASTER DATA FETCH ========================
@@ -44,6 +31,10 @@ def show():
     activities = supabase.table("activities").select("id, activity_name").execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
     
+    # Fetch Financial Years to create a proper mapping
+    fys_data = supabase.table("financial_years").select("id, fy_name").execute().data or []
+    fy_name_to_id = {f['fy_name']: f['id'] for f in fys_data}
+    
     # Fetch Users/Officials directory safely
     users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
     
@@ -53,7 +44,10 @@ def show():
     block_map = {b['id']: b['block_name'] for b in blocks}
     act_map = {a['id']: a['activity_name'] for a in activities}
 
-    # ======================== 2. FETCH REGISTERS & TARGETS (FILTERED BY FY) ========================
+    # Determine the actual DB ID for the selected Financial Year string
+    active_fy_id = fy_name_to_id.get(active_fy)
+
+    # ======================== 2. FETCH REGISTERS & TARGETS ========================
     q_targets = supabase.table("department_targets").select("*")
     q_reg = supabase.table("convergence_register").select("*")
 
@@ -74,23 +68,26 @@ def show():
     df_targets = pd.DataFrame(targets_data)
     df_reg = pd.DataFrame(reg_data)
 
-    # Filter by Active Financial Year safely using Pandas
-    if not df_targets.empty and 'financial_year' in df_targets.columns:
-        df_targets = df_targets[df_targets['financial_year'] == active_fy]
+    # ======================== 3. FY FILTERING (BUG FIX APPLIED) ========================
+    if not df_targets.empty:
+        if 'financial_year_id' in df_targets.columns and active_fy_id is not None:
+            df_targets = df_targets[df_targets['financial_year_id'] == active_fy_id]
+        elif 'financial_year' in df_targets.columns:
+            df_targets = df_targets[df_targets['financial_year'] == active_fy]
 
     if not df_reg.empty:
-        if 'financial_year' in df_reg.columns:
+        if 'financial_year_id' in df_reg.columns and active_fy_id is not None:
+            df_reg = df_reg[df_reg['financial_year_id'] == active_fy_id]
+        elif 'financial_year' in df_reg.columns:
             df_reg = df_reg[df_reg['financial_year'] == active_fy]
-        elif 'financial_year_id' in df_reg.columns:
-            df_reg = df_reg[df_reg['financial_year_id'].astype(str) == str(active_fy)]
 
-    # ======================== 3. CONDITIONAL CHECK FOR NO DATA ========================
+    # ======================== 4. CONDITIONAL CHECK FOR NO DATA ========================
     if df_targets.empty and df_reg.empty:
         st.markdown("---")
         st.warning(f"⚠️ **No data available for Financial Year {active_fy}.** No targets or convergence register entries have been entered against this FY yet. Please switch back to **2026-27** or add records via the *Implementation & Targets* module.")
         return
 
-    # ======================== 4. ADVANCED KPIS & METRICS ========================
+    # ======================== 5. ADVANCED KPIS & METRICS ========================
     total_depts_wings = len(departments) + len(wings)
     
     district_officials_count = len([u for u in users_data if u.get('role') in ['district', 'department'] and u.get('block_id') is None])
@@ -112,7 +109,7 @@ def show():
         activity_dept_counts[act_id] = activity_dept_counts.get(act_id, 0) + 1
     multi_dept_activities_count = len([act_id for act_id, count in activity_dept_counts.items() if count > 1])
 
-    # ======================== 5. TABS LAYOUT ========================
+    # ======================== 6. TABS LAYOUT ========================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Master Dashboard & Health", 
         "🏢 Department Onboarding Matrix", 
