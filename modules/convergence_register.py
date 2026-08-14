@@ -1,744 +1,653 @@
-from auth.auth import get_current_user, require_role
+import io
 import pandas as pd
 import streamlit as st
+from auth.auth import get_current_user, require_role
 from utils.audit import log_action
 from utils.db import get_supabase
 
 
 def inject_custom_css():
-  """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
-  st.markdown(
-      """
-    <style>
-    /* Hide Streamlit toolbar (Fork and GitHub buttons) */
-    .stAppToolbar {
-        visibility: hidden !important;
-    }
-    </style>
-    """,
-      unsafe_allow_html=True,
-  )
+    """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
+    st.markdown(
+        """
+        <style>
+        /* Hide Streamlit toolbar (Fork and GitHub buttons) */
+        .stAppToolbar {
+            visibility: hidden !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def show():
-  require_role("superadmin", "district", "block", "department")
+    require_role("superadmin", "district", "block", "department")
 
-  # Apply custom UI styling to hide top-right toolbar elements
-  inject_custom_css()
+    # Apply custom UI styling to hide top-right toolbar elements
+    inject_custom_css()
 
-  st.title("Convergence Register")
-  supabase = get_supabase()
-  user = get_current_user()
-  role = user["role"]
+    st.title("Convergence Register")
+    supabase = get_supabase()
+    user = get_current_user()
+    role = user["role"]
 
-  # ==========================================
-  # 1. FETCH MASTER DATA FOR LOOKUPS & MAPPING
-  # ==========================================
-  fys = (
-      supabase.table("financial_years")
-      .select("*")
-      .eq("active", True)
-      .execute()
-      .data
-  )
-  districts = (
-      supabase.table("districts").select("*").eq("active", True).execute().data
-  )
-  blocks = supabase.table("blocks").select("*").eq("active", True).execute().data
-  depts = (
-      supabase.table("departments").select("*").eq("active", True).execute().data
-  )
-  themes = supabase.table("themes").select("*").eq("active", True).execute().data
+    # ==========================================
+    # 1. FETCH MASTER DATA FOR LOOKUPS & MAPPING
+    # ==========================================
+    fys = supabase.table("financial_years").select("*").eq("active", True).execute().data
+    districts = supabase.table("districts").select("*").eq("active", True).execute().data
+    blocks = supabase.table("blocks").select("*").eq("active", True).execute().data
+    depts = supabase.table("departments").select("*").eq("active", True).execute().data
+    themes = supabase.table("themes").select("*").eq("active", True).execute().data
 
-  activities = (
-      supabase.table("activities").select("*").eq("active", True).execute().data
-  )
-  act_dept_mapping = (
-      supabase.table("activity_departments").select("*").execute().data
-  )
+    activities = supabase.table("activities").select("*").eq("active", True).execute().data
+    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data
 
-  # Forward maps (Name -> ID) for Forms
-  fy_map = {f["year_name"]: f["id"] for f in fys}
-  dist_map = {d["district_name"]: d["id"] for d in districts}
-  block_map = {b["block_name"]: b["id"] for b in blocks}
-  dept_map = {d["department_name"]: d["id"] for d in depts}
-  theme_map_id_to_name = {t["id"]: t["theme_name"] for t in themes}
+    # Forward maps (Name -> ID) for Forms
+    fy_map = {f["year_name"]: f["id"] for f in fys}
+    dist_map = {d["district_name"]: d["id"] for d in districts}
+    block_map = {b["block_name"]: b["id"] for b in blocks}
+    dept_map = {d["department_name"]: d["id"] for d in depts}
+    theme_map_id_to_name = {t["id"]: t["theme_name"] for t in themes}
 
-  # Reverse maps (ID -> Name) for Displaying the Dataframe safely
-  fy_reverse_map = {f["id"]: f["year_name"] for f in fys}
-  dist_reverse_map = {d["id"]: d["district_name"] for d in districts}
-  block_reverse_map = {b["id"]: b["block_name"] for b in blocks}
-  dept_reverse_map = {d["id"]: d["department_name"] for d in depts}
+    # Reverse maps (ID -> Name) for Displaying the Dataframe safely
+    fy_reverse_map = {f["id"]: f["year_name"] for f in fys}
+    dist_reverse_map = {d["id"]: d["district_name"] for d in districts}
+    block_reverse_map = {b["id"]: b["block_name"] for b in blocks}
+    dept_reverse_map = {d["id"]: d["department_name"] for d in depts}
 
-  CONVERGENCE_TYPES = [
-      "Technical Convergence (Zero Fund/NOC)",
-      "Financial (as PIA)",
-      "Financial (as Non-PIA)",
-  ]
-
-  UNIT_OPTIONS = [
-      "None",
-      "Sq. Meter",
-      "Cu. Meter",
-      "Running Meter",
-      "Kilometer",
-      "Hectare",
-      "Acre",
-      "Number (Nos.)",
-      "Other",
-  ]
-
-  ORIGIN_SOURCES = [
-      "Normative / Routine",
-      "District Annual Plan",
-      "Block Annual Plan",
-      "Meeting Resolution",
-  ]
-
-  # ==========================================
-  # 2. VIEW EXISTING RECORDS
-  # ==========================================
-  query = supabase.table("convergence_register").select("*")
-
-  if role == "district":
-    query = query.eq("district_id", user["district_id"])
-  elif role == "block":
-    query = query.eq("block_id", user["block_id"])
-  elif role == "department":
-    if not user.get("department_id"):
-      st.error(
-          "🚨 Your user account is missing a Department Assignment. Please"
-          " contact Superadmin."
-      )
-      st.stop()
-    query = query.eq("department_id", user["department_id"]).eq(
-        "district_id", user["district_id"]
-    )
-
-  try:
-    records = query.execute().data
-  except Exception as e:
-    st.error(f"Database error while fetching records: {e}")
-    records = []
-
-  st.subheader(f"Convergence Activities ({len(records)} records)")
-
-  if records:
-    df_display = pd.DataFrame(records)
-
-    fy_col = (
-        "financial_year_id"
-        if "financial_year_id" in df_display.columns
-        else "financial_year"
-    )
-    if fy_col in df_display.columns:
-      df_display["FY"] = (
-          df_display[fy_col]
-          .map(fy_reverse_map)
-          .fillna(df_display[fy_col])
-      )
-    else:
-      df_display["FY"] = "N/A"
-
-    df_display["District"] = df_display["district_id"].map(dist_reverse_map)
-    df_display["Block"] = df_display["block_id"].map(block_reverse_map)
-    df_display["Department"] = df_display["department_id"].map(dept_reverse_map)
-
-    if "convergence_type" not in df_display.columns:
-      df_display["convergence_type"] = "Not Specified"
-    if "mis_code" not in df_display.columns:
-      df_display["mis_code"] = ""
-    if "origin_source" not in df_display.columns:
-      df_display["origin_source"] = "Normative / Routine"
-
-    display_cols = [
-        "FY",
-        "District",
-        "Block",
-        "Department",
-        "activity_description",
+    CONVERGENCE_TYPES = [
+        "Technical Convergence (Zero Fund/NOC)",
+        "Financial (as PIA)",
+        "Financial (as Non-PIA)",
     ]
-    if "scheme_name" in df_display.columns:
-      display_cols.append("scheme_name")
 
-    display_cols.extend([
-        "mis_code",
-        "origin_source",
-        "convergence_type",
-        "current_status",
-        "total_converged_fund",
-    ])
+    ORIGIN_SOURCES = [
+        "District Plan",
+        "Block Plan",
+        "District Meeting",
+        "Block Meeting",
+    ]
 
-    st.dataframe(
-        df_display[display_cols], use_container_width=True, hide_index=True
-    )
-  else:
-    st.info("No records found.")
+    # ==========================================
+    # 2. VIEW EXISTING RECORDS
+    # ==========================================
+    query = supabase.table("convergence_register").select("*")
 
-  # ==========================================
-  # 2.5 MANAGE (EDIT/DELETE) SAVED ENTRIES
-  # ==========================================
-  if role in ["superadmin", "district"] and records:
-    st.markdown("---")
-    st.subheader("🛠️ Manage (Edit / Delete) Saved Entries")
-
-    with st.expander("✏️ Edit or 🗑️ Delete an Activity", expanded=False):
-      display_options = {
-          r["id"]: (
-              f"{r['activity_description']} -"
-              f" {dept_reverse_map.get(r['department_id'], 'Unknown')}"
-              f" (₹{r.get('total_converged_fund', 0)} Lakhs)"
-          )
-          for r in records
-      }
-
-      selected_edit_id = st.selectbox(
-          "Select Activity to Manage",
-          options=list(display_options.keys()),
-          format_func=lambda x: display_options[x],
-      )
-
-      if selected_edit_id:
-        rec = next(r for r in records if r["id"] == selected_edit_id)
-
-        if st.button("🗑️ Permanently Delete Activity", type="primary"):
-          try:
-            (
-                supabase.table("convergence_register")
-                .delete()
-                .eq("id", selected_edit_id)
-                .execute()
+    if role == "district":
+        query = query.eq("district_id", user["district_id"])
+    elif role == "block":
+        query = query.eq("block_id", user["block_id"])
+    elif role == "department":
+        if not user.get("department_id"):
+            st.error(
+                "🚨 Your user account is missing a Department Assignment. Please"
+                " contact Superadmin."
             )
-            try:
-              log_action(
-                  user.get("id"),
-                  f"DELETE convergence_register {selected_edit_id}",
-              )
-            except Exception:
-              pass
-            st.success("Activity deleted successfully!")
-            st.rerun()
-          except Exception as e:
-            st.error(f"Error deleting record: {e}")
-
-        st.markdown("#### Edit Details")
-        with st.form("edit_conv_form"):
-          col_e1, col_e2 = st.columns(2)
-
-          status_opts = [
-              "Planned",
-              "Approved",
-              "Under Implementation",
-              "Completed",
-              "Delayed",
-          ]
-          current_status = rec.get("current_status", "Planned")
-          new_status = col_e1.selectbox(
-              "Update Status",
-              status_opts,
-              index=(
-                  status_opts.index(current_status)
-                  if current_status in status_opts
-                  else 0
-              ),
-          )
-
-          current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
-          new_conv_type = col_e2.selectbox(
-              "Convergence Type",
-              CONVERGENCE_TYPES,
-              index=(
-                  CONVERGENCE_TYPES.index(current_conv)
-                  if current_conv in CONVERGENCE_TYPES
-                  else 0
-              ),
-          )
-
-          st.markdown("##### Detailed Work Specifications")
-          col_det1, col_det2, col_det3, col_det4 = st.columns([2, 2, 1, 1])
-          new_scheme = col_det1.text_input(
-              "Scheme Name", value=rec.get("scheme_name", "") or ""
-          )
-          new_geo = col_det2.text_input(
-              "Geo Location (Village/GP/Lat-Long)",
-              value=rec.get("geo_location", "") or "",
-          )
-          new_dim = col_det3.text_input(
-              "Dimension Value", value=rec.get("work_dimensions", "") or ""
-          )
-
-          curr_unit = rec.get("dimension_unit", "None")
-          new_unit = col_det4.selectbox(
-              "Unit",
-              UNIT_OPTIONS,
-              index=(
-                  UNIT_OPTIONS.index(curr_unit)
-                  if curr_unit in UNIT_OPTIONS
-                  else 0
-              ),
-          )
-
-          col_det5, col_det6 = st.columns(2)
-          new_mis = col_det5.text_input(
-              "MIS Code", value=rec.get("mis_code", "") or ""
-          )
-          curr_origin = rec.get("origin_source", "Normative / Routine")
-          new_origin = col_det6.selectbox(
-              "Source of Activity Linkage",
-              ORIGIN_SOURCES,
-              index=(
-                  ORIGIN_SOURCES.index(curr_origin)
-                  if curr_origin in ORIGIN_SOURCES
-                  else 0
-              ),
-          )
-
-          st.markdown("##### Targets & Financials")
-          col_t1, col_t2 = st.columns(2)
-          new_target = col_t1.number_input(
-              "Physical Target", value=int(rec.get("desired_target", 0))
-          )
-          new_pd = col_t2.number_input(
-              "Expected Persondays", value=int(rec.get("expected_persondays", 0))
-          )
-
-          new_d_fund = col_t1.number_input(
-              "Department Fund (₹ Lakhs)",
-              value=float(rec.get("department_fund", 0.0)),
-          )
-          new_v_fund = col_t2.number_input(
-              "VB-G RAM G Fund (₹ Lakhs)",
-              value=float(rec.get("vbgramg_fund", 0.0)),
-          )
-
-          if st.form_submit_button("Update Activity Details"):
-            if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
-              new_d_fund = 0.0
-              new_v_fund = 0.0
-
-            update_payload = {
-                "current_status": new_status,
-                "convergence_type": new_conv_type,
-                "scheme_name": new_scheme,
-                "geo_location": new_geo,
-                "work_dimensions": new_dim,
-                "dimension_unit": new_unit if new_unit != "None" else None,
-                "mis_code": new_mis.strip() if new_mis else None,
-                "origin_source": new_origin,
-                "desired_target": new_target,
-                "expected_persondays": new_pd,
-                "department_fund": new_d_fund,
-                "vbgramg_fund": new_v_fund,
-            }
-            try:
-              (
-                  supabase.table("convergence_register")
-                  .update(update_payload)
-                  .eq("id", selected_edit_id)
-                  .execute()
-              )
-              try:
-                log_action(
-                    user.get("id"),
-                    f"UPDATE convergence_register {selected_edit_id}",
-                )
-              except Exception:
-                pass
-              st.success("Activity updated successfully!")
-              st.rerun()
-            except Exception as e:
-              st.error(f"Error updating record: {e}")
-
-  st.markdown("---")
-
-  # ==========================================
-  # 3. MANUAL ENTRY FORM (Dynamic Layout)
-  # ==========================================
-  with st.expander("➕ Add New Convergence Activity", expanded=True):
-    col1, col2 = st.columns(2)
-
-    sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
-
-    if role == "department":
-      dept_default = next(
-          (
-              d["department_name"]
-              for d in depts
-              if d["id"] == user.get("department_id")
-          ),
-          None,
-      )
-      if not dept_default:
-        st.error(
-            "🚨 Your account is not mapped to any specific department. Please"
-            " contact the Superadmin."
+            st.stop()
+        query = query.eq("department_id", user["department_id"]).eq(
+            "district_id", user["district_id"]
         )
-        st.stop()
-      sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
-    else:
-      sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
 
-    selected_dept_id = dept_map.get(sel_dept)
+    try:
+        records = query.execute().data
+    except Exception as e:
+        st.error(f"Database error while fetching records: {e}")
+        records = []
 
-    if role in ["block", "district", "department"]:
-      dist_default = next(
-          d["district_name"] for d in districts if d["id"] == user["district_id"]
-      )
-      sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
-    else:
-      sel_dist = col1.selectbox("District*", list(dist_map.keys()))
+    st.subheader(f"Convergence Activities ({len(records)} records)")
 
-    selected_dist_id = dist_map.get(sel_dist)
+    if records:
+        df_display = pd.DataFrame(records)
 
-    filtered_blocks = [
-        b["block_name"]
-        for b in blocks
-        if b["district_id"] == selected_dist_id
-    ]
-
-    # Block Selection (Now Mandatory)
-    if role == "block":
-      block_default = next(
-          b["block_name"] for b in blocks if b["id"] == user["block_id"]
-      )
-      sel_block = col2.selectbox("Block*", [block_default], disabled=True)
-    else:
-      # Force user to choose a block
-      sel_block = col2.selectbox(
-          "Block*", ["Select Block"] + filtered_blocks
-      )
-
-    st.markdown("##### Activity & Convergence Type")
-
-    mapped_act_ids = [
-        m["activity_id"]
-        for m in act_dept_mapping
-        if m["department_id"] == selected_dept_id
-    ]
-    valid_activities = [a for a in activities if a["id"] in mapped_act_ids]
-    valid_act_names = [a["activity_name"] for a in valid_activities]
-
-    col_act1, col_act2 = st.columns(2)
-
-    if not valid_act_names:
-      st.warning(f"No approved activities found for {sel_dept}.")
-      sel_act_name = col_act1.selectbox(
-          "Activity / Work Description*",
-          ["No activities available"],
-          disabled=True,
-      )
-      selected_theme_name = "None"
-      theme_id = None
-    else:
-      sel_act_name = col_act1.selectbox(
-          "Activity / Work Description*", valid_act_names
-      )
-      selected_act_record = next(
-          (a for a in valid_activities if a["activity_name"] == sel_act_name),
-          None,
-      )
-      theme_id = (
-          selected_act_record["theme_id"] if selected_act_record else None
-      )
-      selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
-
-    col_act2.text_input(
-        "Thematic Category (Auto-filled)",
-        value=selected_theme_name,
-        disabled=True,
-    )
-
-    sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
-
-    st.markdown("##### Detailed Work Specifications")
-    col_det1, col_det2, col_det3, col_det4 = st.columns([2, 2, 1, 1])
-    inp_scheme = col_det1.text_input("Scheme Name (Optional)")
-    inp_geo = col_det2.text_input(
-        "Geo Location (Village/GP/Lat-Long) (Optional)"
-    )
-    inp_dim = col_det3.text_input(
-        "Dimension Value (Optional)", placeholder="e.g. 500"
-    )
-    inp_unit = col_det4.selectbox("Unit", UNIT_OPTIONS)
-
-    col_det5, col_det6 = st.columns(2)
-    inp_mis_code = col_det5.text_input(
-        "MIS Code (Optional during planning, required for implementation)"
-    )
-    inp_origin = col_det6.selectbox(
-        "Source of Activity Linkage", ORIGIN_SOURCES
-    )
-
-    st.markdown("##### Targets & Financials")
-    col3, col4 = st.columns(2)
-    target = col3.number_input("Physical Target (Number)", min_value=0)
-    persondays = col4.number_input("Expected Persondays", min_value=0)
-
-    if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
-      st.info(
-          "ℹ️ Technical Convergence selected: Fund involvement is automatically"
-          " set to zero."
-      )
-      dept_fund = 0.0
-      vbg_fund = 0.0
-    else:
-      dept_fund = col3.number_input(
-          "Department Fund (₹ Lakhs)", min_value=0.0, step=0.1
-      )
-      vbg_fund = col4.number_input(
-          "VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1
-      )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    submitted = st.button(
-        "Save Convergence Activity", type="primary", use_container_width=True
-    )
-
-    if submitted:
-      if not valid_act_names:
-        st.error("Cannot save without a valid approved activity.")
-      elif sel_block == "Select Block":
-        st.error("Please select a valid Block to proceed.")
-      else:
-        block_id = block_map.get(sel_block)
-
-        insert_data = {
-            "financial_year_id": fy_map[sel_fy],
-            "district_id": selected_dist_id,
-            "block_id": block_id,
-            "department_id": selected_dept_id,
-            "activity_description": sel_act_name,
-            "thematic_category_id": theme_id,
-            "convergence_type": sel_conv_type,
-            "scheme_name": inp_scheme.strip() if inp_scheme else None,
-            "geo_location": inp_geo.strip() if inp_geo else None,
-            "work_dimensions": inp_dim.strip() if inp_dim else None,
-            "dimension_unit": inp_unit if inp_unit != "None" else None,
-            "mis_code": inp_mis_code.strip() if inp_mis_code else None,
-            "origin_source": inp_origin,
-            "desired_target": target,
-            "expected_persondays": persondays,
-            "department_fund": dept_fund,
-            "vbgramg_fund": vbg_fund,
-            "current_status": "Planned",
-        }
-
-        try:
-          res = (
-              supabase.table("convergence_register")
-              .insert(insert_data)
-              .execute()
-          )
-          try:
-            log_action(
-                user.get("id"),
-                f"CREATE convergence_register {res.data[0]['id']}",
+        fy_col = (
+            "financial_year_id"
+            if "financial_year_id" in df_display.columns
+            else "financial_year"
+        )
+        if fy_col in df_display.columns:
+            df_display["FY"] = (
+                df_display[fy_col]
+                .map(fy_reverse_map)
+                .fillna(df_display[fy_col])
             )
-          except Exception:
-            pass
-          st.success("✅ 1 activity successfully captured and recorded!")
-          st.rerun()
-        except Exception as e:
-          st.error(f"Error saving record: {e}")
+        else:
+            df_display["FY"] = "N/A"
 
-  # ==========================================
-  # 4. BULK UPLOAD MODULE
-  # ==========================================
-  st.markdown("---")
-  st.subheader("📂 Bulk Upload Activities")
-  st.caption(
-      "Upload a CSV file to create multiple convergence entries at once."
-      " **Only approved activities for the specified department will be"
-      " accepted.**"
-  )
+        df_display["District"] = df_display["district_id"].map(dist_reverse_map)
+        df_display["Block"] = df_display["block_id"].map(block_reverse_map)
+        df_display["Department"] = df_display["department_id"].map(dept_reverse_map)
 
-  with st.expander("View CSV Template Requirements"):
-    st.markdown("""
-        Your CSV must contain exact matches for the following column headers:
-        * `Financial Year` (e.g., 2026-27)
-        * `District`
-        * `Block` (Mandatory field)
-        * `Department` 
-        * `Activity` 
-        * `Convergence Type` (Must be: 'Technical Convergence (Zero Fund/NOC)', 'Financial (as PIA)', or 'Financial (as Non-PIA)')
-        * `Scheme Name` (Optional)
-        * `Geo Location` (Optional)
-        * `Work Dimensions` (Optional)
-        * `Dimension Unit` (Optional)
-        * `MIS Code` (Optional)
-        * `Origin Source` (Optional - e.g., 'District Annual Plan', defaults to 'Normative / Routine')
-        * `Physical Target`
-        * `Expected Persondays`
-        * `Department Fund`
-        * `VB-G RAM G Fund`
-        """)
+        if "convergence_type" not in df_display.columns:
+            df_display["convergence_type"] = "Not Specified"
+        if "mis_code" not in df_display.columns:
+            df_display["mis_code"] = ""
+        if "origin_source" not in df_display.columns:
+            df_display["origin_source"] = "District Plan"
 
-  uploaded_file = st.file_uploader("Upload CSV", type="csv")
+        display_cols = [
+            "FY",
+            "District",
+            "Block",
+            "Department",
+            "activity_description",
+        ]
+        if "scheme_name" in df_display.columns:
+            display_cols.append("scheme_name")
 
-  if uploaded_file:
-    df_upload = pd.read_csv(uploaded_file)
-    st.write("Preview of Uploaded Data:")
-    st.dataframe(df_upload.head(3), use_container_width=True)
+        display_cols.extend([
+            "geo_location",
+            "origin_source",
+            "convergence_type",
+            "current_status",
+            "total_converged_fund",
+        ])
 
-    if st.button("Validate & Import Data", type="primary"):
-      success_count = 0
-      error_log = []
+        st.dataframe(
+            df_display[display_cols], use_container_width=True, hide_index=True
+        )
+    else:
+        st.info("No records found.")
 
-      with st.spinner("Processing records..."):
-        for index, row in df_upload.iterrows():
-          try:
-            fy_str = str(row.get("Financial Year", "")).strip()
-            dist_str = str(row.get("District", "")).strip()
-            block_str = str(
-                row.get("Block", "")
-            ).strip()  # Default to empty string instead of 'None'
-            dept_str = str(row.get("Department", "")).strip()
-            act_str = str(row.get("Activity", "")).strip()
-            conv_str = str(row.get("Convergence Type", "")).strip()
+    # ==========================================
+    # 2.5 MANAGE (EDIT/DELETE) SAVED ENTRIES
+    # ==========================================
+    if role in ["superadmin", "district"] and records:
+        st.markdown("---")
+        st.subheader("🛠️ Manage (Edit / Delete) Saved Entries")
 
-            fy_id = fy_map.get(fy_str)
-            dist_id = dist_map.get(dist_str)
-            block_id = block_map.get(block_str)  # Fetch strictly mapped block
-            dept_id = dept_map.get(dept_str)
+        with st.expander("✏️ Edit or 🗑️ Delete an Activity", expanded=False):
+            display_options = {
+                r["id"]: (
+                    f"{r['activity_description'][:60]}... -"
+                    f" {dept_reverse_map.get(r['department_id'], 'Unknown')}"
+                    f" (₹{r.get('total_converged_fund', 0)} Lakhs)"
+                )
+                for r in records
+            }
 
-            # Added strict check for block_id in bulk validation
-            if not all([fy_id, dist_id, block_id, dept_id]):
-              error_log.append(
-                  f"Row {index+2}: Invalid Master Data references (Ensure FY,"
-                  " District, Block, and Department are provided and exact"
-                  " matches)."
-              )
-              continue
+            selected_edit_id = st.selectbox(
+                "Select Activity to Manage",
+                options=list(display_options.keys()),
+                format_func=lambda x: display_options[x],
+            )
 
-            if conv_str not in CONVERGENCE_TYPES:
-              error_log.append(
-                  f"Row {index+2}: Invalid Convergence Type. Must match template"
-                  " exactly."
-              )
-              continue
+            if selected_edit_id:
+                rec = next(r for r in records if r["id"] == selected_edit_id)
 
-            mapped_acts = [
-                m["activity_id"]
-                for m in act_dept_mapping
-                if m["department_id"] == dept_id
-            ]
-            valid_acts_for_dept = [
-                a for a in activities if a["id"] in mapped_acts
-            ]
-            target_act = next(
+                if st.button("🗑️ Permanently Delete Activity", type="primary"):
+                    try:
+                        (
+                            supabase.table("convergence_register")
+                            .delete()
+                            .eq("id", selected_edit_id)
+                            .execute()
+                        )
+                        try:
+                            log_action(
+                                user.get("id"),
+                                f"DELETE convergence_register {selected_edit_id}",
+                            )
+                        except Exception:
+                            pass
+                        st.success("Activity deleted successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error deleting record: {e}")
+
+                st.markdown("#### Edit Details")
+                with st.form("edit_conv_form"):
+                    col_e1, col_e2 = st.columns(2)
+
+                    status_opts = [
+                        "Planned",
+                        "Approved",
+                        "Under Implementation",
+                        "Completed",
+                        "Delayed",
+                    ]
+                    current_status = rec.get("current_status", "Planned")
+                    new_status = col_e1.selectbox(
+                        "Update Status",
+                        status_opts,
+                        index=(
+                            status_opts.index(current_status)
+                            if current_status in status_opts
+                            else 0
+                        ),
+                    )
+
+                    current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
+                    new_conv_type = col_e2.selectbox(
+                        "Convergence Type",
+                        CONVERGENCE_TYPES,
+                        index=(
+                            CONVERGENCE_TYPES.index(current_conv)
+                            if current_conv in CONVERGENCE_TYPES
+                            else 0
+                        ),
+                    )
+
+                    st.markdown("##### Detailed Work Specifications")
+                    new_scheme = st.text_input("Scheme Name", value=rec.get("scheme_name", "") or "")
+                    new_geo = st.text_input(
+                        "Location Details & GP Mapping",
+                        value=rec.get("geo_location", "") or "",
+                    )
+                    
+                    new_outcome = st.text_area(
+                        "Possible Outcome / Work Dimensions", 
+                        value=rec.get("work_dimensions", "") or ""
+                    )
+
+                    col_det5, col_det6 = st.columns(2)
+                    new_mis = col_det5.text_input(
+                        "MIS Code", value=rec.get("mis_code", "") or ""
+                    )
+                    curr_origin = rec.get("origin_source", "District Plan")
+                    new_origin = col_det6.selectbox(
+                        "Source of Activity Linkage",
+                        ORIGIN_SOURCES,
+                        index=(
+                            ORIGIN_SOURCES.index(curr_origin)
+                            if curr_origin in ORIGIN_SOURCES
+                            else 0
+                        ),
+                    )
+
+                    st.markdown("##### Targets & Financials")
+                    col_t1, col_t2 = st.columns(2)
+                    
+                    new_d_fund = col_t1.number_input(
+                        "Department Fund (₹ Lakhs)",
+                        value=float(rec.get("department_fund", 0.0)),
+                    )
+                    new_v_fund = col_t2.number_input(
+                        "VB-G RAM G Fund (₹ Lakhs)",
+                        value=float(rec.get("vbgramg_fund", 0.0)),
+                    )
+                    new_pd = st.number_input(
+                        "Expected Persondays", value=int(rec.get("expected_persondays", 0))
+                    )
+
+                    if st.form_submit_button("Update Activity Details"):
+                        if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
+                            new_d_fund = 0.0
+                            new_v_fund = 0.0
+
+                        update_payload = {
+                            "current_status": new_status,
+                            "convergence_type": new_conv_type,
+                            "scheme_name": new_scheme,
+                            "geo_location": new_geo,
+                            "work_dimensions": new_outcome,
+                            "mis_code": new_mis.strip() if new_mis else None,
+                            "origin_source": new_origin,
+                            "expected_persondays": new_pd,
+                            "department_fund": new_d_fund,
+                            "vbgramg_fund": new_v_fund,
+                        }
+                        try:
+                            (
+                                supabase.table("convergence_register")
+                                .update(update_payload)
+                                .eq("id", selected_edit_id)
+                                .execute()
+                            )
+                            try:
+                                log_action(
+                                    user.get("id"),
+                                    f"UPDATE convergence_register {selected_edit_id}",
+                                )
+                            except Exception:
+                                pass
+                            st.success("Activity updated successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error updating record: {e}")
+
+    st.markdown("---")
+
+    # ==========================================
+    # 3. MANUAL ENTRY FORM (Dynamic Layout)
+    # ==========================================
+    with st.expander("➕ Add New Convergence Activity", expanded=True):
+        col1, col2 = st.columns(2)
+
+        sel_fy = col1.selectbox("Financial Year*", list(fy_map.keys()))
+
+        if role == "department":
+            dept_default = next(
                 (
-                    a
-                    for a in valid_acts_for_dept
-                    if a["activity_name"].lower() == act_str.lower()
+                    d["department_name"]
+                    for d in depts
+                    if d["id"] == user.get("department_id")
                 ),
                 None,
             )
+            if not dept_default:
+                st.error(
+                    "🚨 Your account is not mapped to any specific department. Please"
+                    " contact the Superadmin."
+                )
+                st.stop()
+            sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
+        else:
+            sel_dept = col2.selectbox("Department*", list(dept_map.keys()))
 
-            if not target_act:
-              error_log.append(
-                  f"Row {index+2}: Activity '{act_str}' is NOT approved for"
-                  f" {dept_str}."
-              )
-              continue
+        selected_dept_id = dept_map.get(sel_dept)
 
-            if conv_str == "Technical Convergence (Zero Fund/NOC)":
-              d_fund = 0.0
-              m_fund = 0.0
+        if role in ["block", "district", "department"]:
+            dist_default = next(
+                d["district_name"] for d in districts if d["id"] == user["district_id"]
+            )
+            sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
+        else:
+            sel_dist = col1.selectbox("District*", list(dist_map.keys()))
+
+        selected_dist_id = dist_map.get(sel_dist)
+
+        filtered_blocks = [
+            b["block_name"]
+            for b in blocks
+            if b["district_id"] == selected_dist_id
+        ]
+
+        # Block Selection
+        if role == "block":
+            block_default = next(
+                b["block_name"] for b in blocks if b["id"] == user["block_id"]
+            )
+            sel_block = col2.selectbox("Block*", [block_default], disabled=True)
+        else:
+            sel_block = col2.selectbox("Block*", ["Select Block"] + filtered_blocks)
+
+        st.markdown("##### 📍 Gram Panchayat (GP) & Location Mapping")
+        col_gp1, col_gp2, col_gp3 = st.columns(3)
+        primary_gp = col_gp1.text_input("Primary Gram Panchayat (GP)*", placeholder="Name of primary GP")
+        
+        has_add_gp = col_gp2.selectbox("Additional GP Covered?", ["No", "Yes"])
+        additional_gp = ""
+        add_gp_portion = ""
+        if has_add_gp == "Yes":
+            additional_gp = col_gp2.text_input("Additional GP Name")
+            add_gp_portion = col_gp3.text_input("Portion in Addl. GP", placeholder="e.g., 2 km or 40%")
+
+        st.markdown("##### 🏗️ Activity & Convergence Type")
+
+        mapped_act_ids = [
+            m["activity_id"]
+            for m in act_dept_mapping
+            if m["department_id"] == selected_dept_id
+        ]
+        valid_activities = [a for a in activities if a["id"] in mapped_act_ids]
+        valid_act_names = [a["activity_name"] for a in valid_activities]
+
+        col_act1, col_act2 = st.columns(2)
+
+        if not valid_act_names:
+            st.warning(f"No approved activities found for {sel_dept}.")
+            sel_act_name = col_act1.selectbox(
+                "Base Activity / Work Category*",
+                ["No activities available"],
+                disabled=True,
+            )
+            selected_theme_name = "None"
+            theme_id = None
+        else:
+            sel_act_name = col_act1.selectbox(
+                "Base Activity / Work Category*", valid_act_names
+            )
+            selected_act_record = next(
+                (a for a in valid_activities if a["activity_name"] == sel_act_name),
+                None,
+            )
+            theme_id = (
+                selected_act_record["theme_id"] if selected_act_record else None
+            )
+            selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
+
+        inp_scheme = col_act2.text_input("Scheme Name (Optional)", placeholder="e.g. MGNREGS, PMAY")
+
+        col_loc1, col_loc2 = st.columns(2)
+        inp_loc_details = col_loc1.text_input(
+            "Location Details*", 
+            placeholder="Village / Beneficiary Name / From X to Y / Chainage"
+        )
+        inp_lat_long = col_loc2.text_input(
+            "Latitude & Longitude (Optional)", placeholder="e.g., 22.89, 88.01"
+        )
+        
+        # --- AUTO GENERATED DESCRIPTION LOGIC ---
+        auto_desc = ""
+        if sel_act_name and inp_loc_details:
+            scheme_prefix = f"[{inp_scheme}] " if inp_scheme else ""
+            auto_desc = f"{scheme_prefix}{sel_act_name} at {inp_loc_details}"
+            st.info(f"💡 **Auto-Generated Work Description:** {auto_desc}")
+
+        sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
+
+        st.markdown("##### 🎯 Targets & Financials")
+        col_f1, col_f2 = st.columns(2)
+        inp_origin = col_f1.selectbox("Source of Activity Linkage", ORIGIN_SOURCES)
+        
+        st.caption("ℹ️ *Overall Physical Targets are linked directly with the Department's Yearly Target limits. Define the specific localized outcome for this entry below:*")
+        possible_outcome = st.text_area("Possible Outcome / Deliverables", placeholder="e.g., 50 farmers benefited, 2km road built, 1 Anganwadi Center constructed")
+        
+        persondays = col_f2.number_input("Expected Persondays", min_value=0)
+
+        if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
+            st.info(
+                "ℹ️ Technical Convergence selected: Fund involvement is automatically"
+                " set to zero."
+            )
+            dept_fund = 0.0
+            vbg_fund = 0.0
+        else:
+            col_f3, col_f4 = st.columns(2)
+            dept_fund = col_f3.number_input(
+                "Department Fund (₹ Lakhs)", min_value=0.0, step=0.1
+            )
+            vbg_fund = col_f4.number_input(
+                "VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        submitted = st.button(
+            "Save Convergence Activity", type="primary", use_container_width=True
+        )
+
+        if submitted:
+            if not valid_act_names:
+                st.error("Cannot save without a valid approved activity.")
+            elif sel_block == "Select Block":
+                st.error("Please select a valid Block to proceed.")
+            elif not primary_gp.strip():
+                st.error("Primary Gram Panchayat (GP) is a mandatory field.")
+            elif not inp_loc_details.strip():
+                st.error("Location Details are mandatory to auto-generate the Activity Description.")
             else:
-              d_fund = float(
-                  row.get("Department Fund", 0)
-                  if pd.notna(row.get("Department Fund"))
-                  else 0
-              )
-              m_fund = float(
-                  row.get("VB-G RAM G Fund", 0)
-                  if pd.notna(row.get("VB-G RAM G Fund"))
-                  else 0
-              )
+                block_id = block_map.get(sel_block)
+                
+                # Safely pack all location data into the geo_location string to avoid schema missing column errors
+                geo_string = f"Loc: {inp_loc_details} | GP: {primary_gp}"
+                if has_add_gp == "Yes" and additional_gp:
+                    geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
+                if inp_lat_long:
+                    geo_string += f" | GPS: {inp_lat_long}"
 
-            mis_val = (
-                str(row.get("MIS Code", "")).strip()
-                if pd.notna(row.get("MIS Code"))
-                else None
-            )
-            origin_val = (
-                str(row.get("Origin Source", "Normative / Routine")).strip()
-                if pd.notna(row.get("Origin Source"))
-                else "Normative / Routine"
-            )
+                insert_data = {
+                    "financial_year_id": fy_map[sel_fy],
+                    "district_id": selected_dist_id,
+                    "block_id": block_id,
+                    "department_id": selected_dept_id,
+                    "activity_description": auto_desc,
+                    "thematic_category_id": theme_id,
+                    "convergence_type": sel_conv_type,
+                    "scheme_name": inp_scheme.strip() if inp_scheme else None,
+                    "geo_location": geo_string,
+                    "work_dimensions": possible_outcome,
+                    "dimension_unit": "Outcome",
+                    "origin_source": inp_origin,
+                    "desired_target": 0, # Intentionally 0 as numeric target is tracked at the department level
+                    "expected_persondays": persondays,
+                    "department_fund": dept_fund,
+                    "vbgramg_fund": vbg_fund,
+                    "current_status": "Planned",
+                }
 
-            if origin_val not in ORIGIN_SOURCES:
-              origin_val = "Normative / Routine"
+                try:
+                    res = (
+                        supabase.table("convergence_register")
+                        .insert(insert_data)
+                        .execute()
+                    )
+                    try:
+                        log_action(
+                            user.get("id"),
+                            f"CREATE convergence_register {res.data[0]['id']}",
+                        )
+                    except Exception:
+                        pass
+                    st.success("✅ 1 activity successfully auto-generated, captured and recorded!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving record: {e}")
 
-            insert_data = {
-                "financial_year_id": fy_id,
-                "district_id": dist_id,
-                "block_id": block_id,
-                "department_id": dept_id,
-                "activity_description": target_act["activity_name"],
-                "thematic_category_id": target_act["theme_id"],
-                "convergence_type": conv_str,
-                "scheme_name": (
-                    str(row.get("Scheme Name", "")).strip()
-                    if pd.notna(row.get("Scheme Name"))
-                    else None
-                ),
-                "geo_location": (
-                    str(row.get("Geo Location", "")).strip()
-                    if pd.notna(row.get("Geo Location"))
-                    else None
-                ),
-                "work_dimensions": (
-                    str(row.get("Work Dimensions", "")).strip()
-                    if pd.notna(row.get("Work Dimensions"))
-                    else None
-                ),
-                "dimension_unit": (
-                    str(row.get("Dimension Unit", "")).strip()
-                    if pd.notna(row.get("Dimension Unit"))
-                    else None
-                ),
-                "mis_code": mis_val if mis_val else None,
-                "origin_source": origin_val,
-                "desired_target": int(
-                    row.get("Physical Target", 0)
-                    if pd.notna(row.get("Physical Target"))
-                    else 0
-                ),
-                "expected_persondays": int(
-                    row.get("Expected Persondays", 0)
-                    if pd.notna(row.get("Expected Persondays"))
-                    else 0
-                ),
-                "department_fund": d_fund,
-                "vbgramg_fund": m_fund,
-                "current_status": "Planned",
-            }
+    # ==========================================
+    # 4. BULK UPLOAD MODULE
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📂 Bulk Upload Activities")
+    st.caption(
+        "1st download the template, populate it, then reupload. **Only approved activities for the specified department will be accepted.**"
+    )
 
-            (
-                supabase.table("convergence_register")
-                .insert(insert_data)
-                .execute()
-            )
-            success_count += 1
+    # Generate CSV Template dynamically
+    template_df = pd.DataFrame(columns=[
+        "Financial Year", "District", "Block", "Primary GP", "Additional GP", "Additional GP Portion",
+        "Department", "Base Activity", "Scheme Name", "Location Details", "Latitude Longitude",
+        "Convergence Type", "Source of Activity Linkage", "Possible Outcome", "Expected Persondays",
+        "Department Fund", "VB-G RAM G Fund"
+    ])
+    csv_template = template_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 1st: Download CSV Template",
+        data=csv_template,
+        file_name="convergence_bulk_upload_template.csv",
+        mime="text/csv",
+    )
 
-          except Exception as e:
-            error_log.append(
-                f"Row {index+2}: Failed to process due to error: {str(e)}"
-            )
+    uploaded_file = st.file_uploader("2nd: Upload Populated CSV", type="csv")
 
-      if success_count > 0:
-        st.success(
-            f"✅ Successfully imported and captured {success_count} activities!"
-        )
+    if uploaded_file:
+        df_upload = pd.read_csv(uploaded_file)
+        st.write("Preview of Uploaded Data:")
+        st.dataframe(df_upload.head(3), use_container_width=True)
 
-      if error_log:
-        st.error(
-            f"{len(error_log)} rows failed validation and were skipped."
-        )
-        with st.expander("View Error Details"):
-          for err in error_log:
-            st.write(err)
+        if st.button("Validate & Import Data", type="primary"):
+            success_count = 0
+            error_log = []
 
-      if success_count > 0 and not error_log:
-        st.rerun()
+            with st.spinner("Processing records..."):
+                for index, row in df_upload.iterrows():
+                    try:
+                        fy_str = str(row.get("Financial Year", "")).strip()
+                        dist_str = str(row.get("District", "")).strip()
+                        block_str = str(row.get("Block", "")).strip()
+                        dept_str = str(row.get("Department", "")).strip()
+                        act_str = str(row.get("Base Activity", "")).strip()
+                        conv_str = str(row.get("Convergence Type", "")).strip()
+
+                        fy_id = fy_map.get(fy_str)
+                        dist_id = dist_map.get(dist_str)
+                        block_id = block_map.get(block_str)
+                        dept_id = dept_map.get(dept_str)
+
+                        if not all([fy_id, dist_id, block_id, dept_id]):
+                            error_log.append(
+                                f"Row {index+2}: Invalid Master Data references (Ensure FY, District, Block, and Department are provided and exact matches)."
+                            )
+                            continue
+
+                        if conv_str not in CONVERGENCE_TYPES:
+                            error_log.append(f"Row {index+2}: Invalid Convergence Type. Must match template exactly.")
+                            continue
+
+                        mapped_acts = [m["activity_id"] for m in act_dept_mapping if m["department_id"] == dept_id]
+                        valid_acts_for_dept = [a for a in activities if a["id"] in mapped_acts]
+                        target_act = next(
+                            (a for a in valid_acts_for_dept if a["activity_name"].lower() == act_str.lower()), None,
+                        )
+
+                        if not target_act:
+                            error_log.append(f"Row {index+2}: Base Activity '{act_str}' is NOT approved for {dept_str}.")
+                            continue
+
+                        if conv_str == "Technical Convergence (Zero Fund/NOC)":
+                            d_fund = 0.0
+                            m_fund = 0.0
+                        else:
+                            d_fund = float(row.get("Department Fund", 0) if pd.notna(row.get("Department Fund")) else 0)
+                            m_fund = float(row.get("VB-G RAM G Fund", 0) if pd.notna(row.get("VB-G RAM G Fund")) else 0)
+
+                        origin_val = str(row.get("Source of Activity Linkage", "District Plan")).strip() if pd.notna(row.get("Source of Activity Linkage")) else "District Plan"
+                        if origin_val not in ORIGIN_SOURCES:
+                            origin_val = "District Plan"
+
+                        # Extract Location & String generation data
+                        scheme_val = str(row.get("Scheme Name", "")).strip() if pd.notna(row.get("Scheme Name")) else ""
+                        loc_val = str(row.get("Location Details", "")).strip() if pd.notna(row.get("Location Details")) else "Unspecified Location"
+                        gp_val = str(row.get("Primary GP", "")).strip() if pd.notna(row.get("Primary GP")) else ""
+                        add_gp_val = str(row.get("Additional GP", "")).strip() if pd.notna(row.get("Additional GP")) else ""
+                        add_gp_por = str(row.get("Additional GP Portion", "")).strip() if pd.notna(row.get("Additional GP Portion")) else ""
+                        gps_val = str(row.get("Latitude Longitude", "")).strip() if pd.notna(row.get("Latitude Longitude")) else ""
+                        
+                        # Generate Auto Description for bulk
+                        scheme_prefix = f"[{scheme_val}] " if scheme_val else ""
+                        bulk_auto_desc = f"{scheme_prefix}{target_act['activity_name']} at {loc_val}"
+                        
+                        # Pack Geography
+                        bulk_geo_string = f"Loc: {loc_val}"
+                        if gp_val: bulk_geo_string += f" | GP: {gp_val}"
+                        if add_gp_val: bulk_geo_string += f" | Addl GP: {add_gp_val} (Portion: {add_gp_por})"
+                        if gps_val: bulk_geo_string += f" | GPS: {gps_val}"
+
+                        insert_data = {
+                            "financial_year_id": fy_id,
+                            "district_id": dist_id,
+                            "block_id": block_id,
+                            "department_id": dept_id,
+                            "activity_description": bulk_auto_desc,
+                            "thematic_category_id": target_act["theme_id"],
+                            "convergence_type": conv_str,
+                            "scheme_name": scheme_val if scheme_val else None,
+                            "geo_location": bulk_geo_string,
+                            "work_dimensions": str(row.get("Possible Outcome", "")).strip() if pd.notna(row.get("Possible Outcome")) else None,
+                            "dimension_unit": "Outcome",
+                            "origin_source": origin_val,
+                            "desired_target": 0,
+                            "expected_persondays": int(row.get("Expected Persondays", 0) if pd.notna(row.get("Expected Persondays")) else 0),
+                            "department_fund": d_fund,
+                            "vbgramg_fund": m_fund,
+                            "current_status": "Planned",
+                        }
+
+                        supabase.table("convergence_register").insert(insert_data).execute()
+                        success_count += 1
+
+                    except Exception as e:
+                        error_log.append(f"Row {index+2}: Failed to process due to error: {str(e)}")
+
+            if success_count > 0:
+                st.success(f"✅ Successfully imported and generated {success_count} activities!")
+
+            if error_log:
+                st.error(f"{len(error_log)} rows failed validation and were skipped.")
+                with st.expander("View Error Details"):
+                    for err in error_log:
+                        st.write(err)
+
+            if success_count > 0 and not error_log:
+                st.rerun()
