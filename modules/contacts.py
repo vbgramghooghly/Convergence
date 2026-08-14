@@ -104,6 +104,7 @@ def show():
     dist_dict = {d["district_name"]: d["id"] for d in districts}
     block_dict = {b["block_name"]: b["id"] for b in blocks}
     dept_dict = {d["department_name"]: d["id"] for d in departments}
+    dept_map = {d["id"]: d["department_name"] for d in departments}
 
     OFFICE_LEVELS = [
         "State / Department",
@@ -376,7 +377,6 @@ def show():
                     (c for c in dept_contacts if c["id"] == target_contact_id), {}
                 )
                 
-                # Allow Department users to delete their department's contact records
                 if st.button("🗑️ Delete This Contact Record", type="secondary"):
                     try:
                         supabase.table("contacts").delete().eq("id", target_contact_id).execute()
@@ -425,7 +425,6 @@ def show():
                     "Sub Division Name (If Applicable)", value=sub_div_val
                 )
 
-            # Department Selection: Locked to User's Department if role == 'department'
             if role == "department":
                 fixed_dept_name = dept_map.get(user.get("department_id"), "Your Department")
                 col_l3.text_input("Parent Department", value=fixed_dept_name, disabled=True)
@@ -456,7 +455,6 @@ def show():
             for w in valid_wings:
                 wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
 
-            # If role == 'department' and user has a wing_id, lock it or restrict to department wings
             if role == "department" and user.get("wing_id"):
                 filtered_wings = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
                 wing_options = filtered_wings
