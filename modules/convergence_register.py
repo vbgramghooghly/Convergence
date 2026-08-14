@@ -294,7 +294,7 @@ def show():
                         value=float(rec.get("vbgramg_fund", 0.0)),
                     )
                     new_pd = st.number_input(
-                        "Expected Persondays", value=int(rec.get("expected_persondays", 0))
+                        "Expected Persondays*", value=int(rec.get("expected_persondays", 0))
                     )
 
                     if st.form_submit_button("Update Activity Details"):
@@ -302,37 +302,45 @@ def show():
                             new_d_fund = 0.0
                             new_v_fund = 0.0
 
-                        update_payload = {
-                            "current_status": new_status,
-                            "convergence_type": new_conv_type,
-                            "activity_description": new_work_name,
-                            "scheme_name": None, # Removed schema to utilize Work Name logic exclusively
-                            "geo_location": new_geo,
-                            "work_dimensions": new_outcome,
-                            "mis_code": new_mis.strip() if new_mis else None,
-                            "origin_source": new_origin,
-                            "expected_persondays": new_pd,
-                            "department_fund": new_d_fund,
-                            "vbgramg_fund": new_v_fund,
-                        }
-                        try:
-                            (
-                                supabase.table("convergence_register")
-                                .update(update_payload)
-                                .eq("id", selected_edit_id)
-                                .execute()
-                            )
+                        # Validations
+                        if not new_work_name.strip():
+                            st.error("⚠️ Work Name cannot be empty.")
+                        elif new_conv_type != "Technical Convergence (Zero Fund/NOC)" and new_d_fund == 0.0 and new_v_fund == 0.0:
+                            st.error("⚠️ Financial Convergence requires a Fund amount. Please enter Department Fund or VB-G RAM G Fund.")
+                        elif new_pd <= 0:
+                            st.error("⚠️ Expected Persondays is a mandatory field and must be greater than zero.")
+                        else:
+                            update_payload = {
+                                "current_status": new_status,
+                                "convergence_type": new_conv_type,
+                                "activity_description": new_work_name,
+                                "scheme_name": None, 
+                                "geo_location": new_geo,
+                                "work_dimensions": new_outcome,
+                                "mis_code": new_mis.strip() if new_mis else None,
+                                "origin_source": new_origin,
+                                "expected_persondays": new_pd,
+                                "department_fund": new_d_fund,
+                                "vbgramg_fund": new_v_fund,
+                            }
                             try:
-                                log_action(
-                                    user.get("id"),
-                                    f"UPDATE convergence_register {selected_edit_id}",
+                                (
+                                    supabase.table("convergence_register")
+                                    .update(update_payload)
+                                    .eq("id", selected_edit_id)
+                                    .execute()
                                 )
-                            except Exception:
-                                pass
-                            st.success("Activity updated successfully!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error updating record: {e}")
+                                try:
+                                    log_action(
+                                        user.get("id"),
+                                        f"UPDATE convergence_register {selected_edit_id}",
+                                    )
+                                except Exception:
+                                    pass
+                                st.success("Activity updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error updating record: {e}")
 
     st.markdown("---")
 
@@ -467,7 +475,7 @@ def show():
         st.caption("ℹ️ *Overall Physical Targets are linked directly with the Department's Yearly Target limits. Define the specific localized outcome for this entry below:*")
         possible_outcome = st.text_area("Possible Outcome / Deliverables", placeholder="e.g., 50 farmers benefited, 2km road built, 1 Anganwadi Center constructed")
         
-        persondays = col_f2.number_input("Expected Persondays", min_value=0)
+        persondays = col_f2.number_input("Expected Persondays*", min_value=0)
 
         if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
             st.info(
@@ -491,6 +499,7 @@ def show():
         )
 
         if submitted:
+            # Validations 
             if not valid_act_names:
                 st.error("Cannot save without a valid approved activity.")
             elif sel_block == "Select Block":
@@ -503,6 +512,10 @@ def show():
                 st.error("Location Details are mandatory to structure the geographical mapping.")
             elif not final_work_name.strip():
                 st.error("Work Name is mandatory.")
+            elif sel_conv_type != "Technical Convergence (Zero Fund/NOC)" and dept_fund == 0.0 and vbg_fund == 0.0:
+                st.error("⚠️ Financial Convergence requires a Fund amount. Please enter Department Fund or VB-G RAM G Fund.")
+            elif persondays <= 0:
+                st.error("⚠️ Expected Persondays is a mandatory field and must be greater than zero.")
             else:
                 block_id = block_map.get(sel_block)
                 
@@ -518,15 +531,15 @@ def show():
                     "district_id": selected_dist_id,
                     "block_id": block_id,
                     "department_id": selected_dept_id,
-                    "activity_description": final_work_name, # Directly mapping Work Name to DB description
+                    "activity_description": final_work_name, 
                     "thematic_category_id": theme_id,
                     "convergence_type": sel_conv_type,
-                    "scheme_name": None, # Removed to fully adopt the Work Name architecture
+                    "scheme_name": None, 
                     "geo_location": geo_string,
                     "work_dimensions": possible_outcome,
                     "dimension_unit": "Outcome",
                     "origin_source": inp_origin,
-                    "desired_target": 0, # Intentionally 0 as numeric target is tracked at the department level
+                    "desired_target": 1, # Set to 1 as each entry represents an individual scheme/asset
                     "expected_persondays": persondays,
                     "department_fund": dept_fund,
                     "vbgramg_fund": vbg_fund,
@@ -560,7 +573,7 @@ def show():
         "1st download the template, populate it, then reupload. **Only approved activities for the specified department will be accepted.**"
     )
 
-    # Generate CSV Template dynamically (Removed Scheme Name, Added Work Name)
+    # Generate CSV Template dynamically 
     template_df = pd.DataFrame(columns=[
         "Financial Year", "District", "Block", "Primary GP", "Additional GP", "Additional GP Portion",
         "Department", "Base Activity", "Work Name", "Location Details", "Latitude Longitude",
@@ -620,13 +633,22 @@ def show():
                         if not target_act:
                             error_log.append(f"Row {index+2}: Base Activity '{act_str}' is NOT approved for {dept_str}.")
                             continue
-
+                            
+                        # Validations for Funds & Persondays
                         if conv_str == "Technical Convergence (Zero Fund/NOC)":
                             d_fund = 0.0
                             m_fund = 0.0
                         else:
                             d_fund = float(row.get("Department Fund", 0) if pd.notna(row.get("Department Fund")) else 0)
                             m_fund = float(row.get("VB-G RAM G Fund", 0) if pd.notna(row.get("VB-G RAM G Fund")) else 0)
+                            if d_fund == 0.0 and m_fund == 0.0:
+                                error_log.append(f"Row {index+2}: Financial Convergence requires a Fund amount > 0.")
+                                continue
+                                
+                        expected_pd = int(row.get("Expected Persondays", 0) if pd.notna(row.get("Expected Persondays")) else 0)
+                        if expected_pd <= 0:
+                            error_log.append(f"Row {index+2}: Expected Persondays must be greater than 0.")
+                            continue
 
                         origin_val = str(row.get("Source of Activity Linkage", "District Plan")).strip() if pd.notna(row.get("Source of Activity Linkage")) else "District Plan"
                         if origin_val not in ORIGIN_SOURCES:
@@ -663,8 +685,8 @@ def show():
                             "work_dimensions": str(row.get("Possible Outcome", "")).strip() if pd.notna(row.get("Possible Outcome")) else None,
                             "dimension_unit": "Outcome",
                             "origin_source": origin_val,
-                            "desired_target": 0,
-                            "expected_persondays": int(row.get("Expected Persondays", 0) if pd.notna(row.get("Expected Persondays")) else 0),
+                            "desired_target": 1, # Set to 1 as each entry represents an individual scheme/asset
+                            "expected_persondays": expected_pd,
                             "department_fund": d_fund,
                             "vbgramg_fund": m_fund,
                             "current_status": "Planned",
