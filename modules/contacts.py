@@ -155,12 +155,6 @@ def show():
     # TAB 1: DIRECTORY LIST & EXPORT
     # ==============================================================
     with tab1:
-        st.subheader("Official District Directory & Statutory Roles")
-        st.caption(
-            "Comprehensive list of all departmental officers, statutory members,"
-            " and nodal points within your jurisdiction."
-        )
-
         if not df.empty:
             df["Designation"] = df["designations"].apply(
                 lambda x: (
@@ -258,27 +252,25 @@ def show():
                 "Email ID",
             ]
 
-            # --- ADD QUICK SEARCH ABOVE TABLE ---
+            # --- QUICK SEARCH ABOVE TABLE ---
             search_query = st.text_input("🔍 Quick Search", placeholder="Search by name, designation, department, block...")
             
             if search_query:
-                # Apply a global text search across all columns in the display dataframe
                 mask = display_df.apply(lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(), axis=1)
                 filtered_df = display_df[mask]
             else:
                 filtered_df = display_df
 
-            # Display the table FIRST
+            # Display the table
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # --- MOVE EXPORT OPTIONS BELOW TABLE ---
+            # --- DOWNLOAD & PRINT OPTIONS BELOW TABLE ---
             col_dl, col_pr, _ = st.columns([1.5, 1.8, 6.7])
 
             buffer = io.BytesIO()
             try:
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                    # Using filtered_df so downloads match the search query!
                     filtered_df.to_excel(writer, index=False, sheet_name="Contacts")
                 excel_data = buffer.getvalue()
                 col_dl.download_button(
