@@ -45,15 +45,11 @@ def show():
     block_map = {b['id']: b['block_name'] for b in blocks}
     act_map = {a['id']: a['activity_name'] for a in activities}
 
-    # ======================== 2. FETCH REGISTERS & TARGETS (FILTERED BY FY) ========================
-    q_targets = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
-    
-    try:
-        q_reg = supabase.table("convergence_register").select("*").eq("financial_year", active_fy)
-    except Exception:
-        q_reg = supabase.table("convergence_register").select("*")
+    # ======================== 2. FETCH REGISTERS & TARGETS (SAFE PANDAS FILTERING) ========================
+    q_targets = supabase.table("department_targets").select("*")
+    q_reg = supabase.table("convergence_register").select("*")
 
-    # Role-based Database Filtering
+    # Role-based Database Filtering (avoiding schema mismatches on FY columns)
     if role == 'district':
         q_targets = q_targets.eq("district_id", user['district_id'])
         q_reg = q_reg.eq("district_id", user['district_id'])
@@ -69,6 +65,16 @@ def show():
     
     df_targets = pd.DataFrame(targets_data)
     df_reg = pd.DataFrame(reg_data)
+
+    # Filter by Active Financial Year safely using Pandas
+    if not df_targets.empty and 'financial_year' in df_targets.columns:
+        df_targets = df_targets[df_targets['financial_year'] == active_fy]
+
+    if not df_reg.empty:
+        if 'financial_year' in df_reg.columns:
+            df_reg = df_reg[df_reg['financial_year'] == active_fy]
+        elif 'financial_year_id' in df_reg.columns:
+            df_reg = df_reg[df_reg['financial_year_id'].astype(str) == str(active_fy)]
 
     # ======================== 3. ADVANCED KPIS & METRICS ========================
     total_depts_wings = len(departments) + len(wings)
