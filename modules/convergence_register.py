@@ -147,23 +147,28 @@ def show():
         if "origin_source" not in df_display.columns:
             df_display["origin_source"] = "District Plan"
 
+        # Rename columns cleanly for professional tabular display
+        df_display.rename(columns={
+            "activity_description": "Work Name",
+            "geo_location": "Location Details",
+            "origin_source": "Source",
+            "convergence_type": "Convergence Type",
+            "current_status": "Status",
+            "total_converged_fund": "Total Fund (₹ Lakhs)"
+        }, inplace=True)
+
         display_cols = [
             "FY",
             "District",
             "Block",
             "Department",
-            "activity_description",
+            "Work Name",
+            "Location Details",
+            "Source",
+            "Convergence Type",
+            "Status",
+            "Total Fund (₹ Lakhs)",
         ]
-        if "scheme_name" in df_display.columns:
-            display_cols.append("scheme_name")
-
-        display_cols.extend([
-            "geo_location",
-            "origin_source",
-            "convergence_type",
-            "current_status",
-            "total_converged_fund",
-        ])
 
         st.dataframe(
             df_display[display_cols], use_container_width=True, hide_index=True
@@ -251,7 +256,7 @@ def show():
                     )
 
                     st.markdown("##### Detailed Work Specifications")
-                    new_scheme = st.text_input("Scheme Name", value=rec.get("scheme_name", "") or "")
+                    new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
                     new_geo = st.text_input(
                         "Location Details & GP Mapping",
                         value=rec.get("geo_location", "") or "",
@@ -300,7 +305,8 @@ def show():
                         update_payload = {
                             "current_status": new_status,
                             "convergence_type": new_conv_type,
-                            "scheme_name": new_scheme,
+                            "activity_description": new_work_name,
+                            "scheme_name": None, # Removed schema to utilize Work Name logic exclusively
                             "geo_location": new_geo,
                             "work_dimensions": new_outcome,
                             "mis_code": new_mis.strip() if new_mis else None,
@@ -412,7 +418,7 @@ def show():
         valid_activities = [a for a in activities if a["id"] in mapped_act_ids]
         valid_act_names = [a["activity_name"] for a in valid_activities]
 
-        col_act1, col_act2 = st.columns(2)
+        col_act1, col_loc1 = st.columns(2)
 
         if not valid_act_names:
             st.warning(f"No approved activities found for {sel_dept}.")
@@ -421,7 +427,6 @@ def show():
                 ["No activities available"],
                 disabled=True,
             )
-            selected_theme_name = "None"
             theme_id = None
         else:
             sel_act_name = col_act1.selectbox(
@@ -434,24 +439,24 @@ def show():
             theme_id = (
                 selected_act_record["theme_id"] if selected_act_record else None
             )
-            selected_theme_name = theme_map_id_to_name.get(theme_id, "Unassigned")
 
-        inp_scheme = col_act2.text_input("Scheme Name (Optional)", placeholder="e.g. MGNREGS, PMAY")
-
-        col_loc1, col_loc2 = st.columns(2)
         inp_loc_details = col_loc1.text_input(
             "Location Details*", 
             placeholder="Village / Beneficiary Name / From X to Y / Chainage"
         )
-        inp_lat_long = col_loc2.text_input(
+        
+        # --- AUTO GENERATED DESCRIPTION LOGIC INSIDE EDITABLE TEXT INPUT ---
+        auto_desc = ""
+        if sel_act_name and sel_act_name != "No activities available" and inp_loc_details:
+            auto_desc = f"{sel_act_name} at {inp_loc_details}"
+
+        col_wn, col_ll = st.columns(2)
+        # The value automatically updates based on above, but remains an editable field!
+        final_work_name = col_wn.text_input("Work Name*", value=auto_desc)
+        
+        inp_lat_long = col_ll.text_input(
             "Latitude & Longitude (Optional)", placeholder="e.g., 22.89, 88.01"
         )
-        
-        # --- AUTO GENERATED DESCRIPTION LOGIC ---
-        auto_desc = ""
-        if sel_act_name and inp_loc_details:
-            auto_desc = f"{sel_act_name} at {inp_loc_details}"
-            st.info(f"💡 **Auto-Generated Work Description:** {auto_desc}")
 
         sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
 
@@ -495,7 +500,9 @@ def show():
             elif has_add_gp == "Yes" and additional_gp == "Select GP":
                 st.error("You selected 'Yes' for Additional GP. Please choose a valid Additional GP Name.")
             elif not inp_loc_details.strip():
-                st.error("Location Details are mandatory to auto-generate the Activity Description.")
+                st.error("Location Details are mandatory to structure the geographical mapping.")
+            elif not final_work_name.strip():
+                st.error("Work Name is mandatory.")
             else:
                 block_id = block_map.get(sel_block)
                 
@@ -511,10 +518,10 @@ def show():
                     "district_id": selected_dist_id,
                     "block_id": block_id,
                     "department_id": selected_dept_id,
-                    "activity_description": auto_desc,
+                    "activity_description": final_work_name, # Directly mapping Work Name to DB description
                     "thematic_category_id": theme_id,
                     "convergence_type": sel_conv_type,
-                    "scheme_name": inp_scheme.strip() if inp_scheme else None,
+                    "scheme_name": None, # Removed to fully adopt the Work Name architecture
                     "geo_location": geo_string,
                     "work_dimensions": possible_outcome,
                     "dimension_unit": "Outcome",
@@ -553,10 +560,10 @@ def show():
         "1st download the template, populate it, then reupload. **Only approved activities for the specified department will be accepted.**"
     )
 
-    # Generate CSV Template dynamically
+    # Generate CSV Template dynamically (Removed Scheme Name, Added Work Name)
     template_df = pd.DataFrame(columns=[
         "Financial Year", "District", "Block", "Primary GP", "Additional GP", "Additional GP Portion",
-        "Department", "Base Activity", "Scheme Name", "Location Details", "Latitude Longitude",
+        "Department", "Base Activity", "Work Name", "Location Details", "Latitude Longitude",
         "Convergence Type", "Source of Activity Linkage", "Possible Outcome", "Expected Persondays",
         "Department Fund", "VB-G RAM G Fund"
     ])
@@ -626,7 +633,6 @@ def show():
                             origin_val = "District Plan"
 
                         # Extract Location & String generation data
-                        scheme_val = str(row.get("Scheme Name", "")).strip() if pd.notna(row.get("Scheme Name")) else ""
                         loc_val = str(row.get("Location Details", "")).strip() if pd.notna(row.get("Location Details")) else "Unspecified Location"
                         gp_val = str(row.get("Primary GP", "")).strip() if pd.notna(row.get("Primary GP")) else ""
                         add_gp_val = str(row.get("Additional GP", "")).strip() if pd.notna(row.get("Additional GP")) else ""
@@ -634,7 +640,9 @@ def show():
                         gps_val = str(row.get("Latitude Longitude", "")).strip() if pd.notna(row.get("Latitude Longitude")) else ""
                         
                         # Generate Auto Description for bulk
-                        bulk_auto_desc = f"{target_act['activity_name']} at {loc_val}"
+                        work_name_val = str(row.get("Work Name", "")).strip() if pd.notna(row.get("Work Name")) else ""
+                        if not work_name_val:
+                            work_name_val = f"{target_act['activity_name']} at {loc_val}"
                         
                         # Pack Geography
                         bulk_geo_string = f"Loc: {loc_val}"
@@ -647,10 +655,10 @@ def show():
                             "district_id": dist_id,
                             "block_id": block_id,
                             "department_id": dept_id,
-                            "activity_description": bulk_auto_desc,
+                            "activity_description": work_name_val,
                             "thematic_category_id": target_act["theme_id"],
                             "convergence_type": conv_str,
-                            "scheme_name": scheme_val if scheme_val else None,
+                            "scheme_name": None,
                             "geo_location": bulk_geo_string,
                             "work_dimensions": str(row.get("Possible Outcome", "")).strip() if pd.notna(row.get("Possible Outcome")) else None,
                             "dimension_unit": "Outcome",
