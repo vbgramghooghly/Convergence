@@ -167,8 +167,8 @@ def show():
                 "active": active,
                 "district_id": new_dist_id,
                 "block_id": new_block_id if new_role == 'block' else None,
-                "department_id": new_dept_id if new_role == 'department' else None,
-                "wing_id": new_wing_id if new_role == 'department' else None
+                "department_id": new_dept_id if new_role == 'department' else None
+                # "wing_id" removed to prevent PGRST204 column missing error
             }
             try:
                 # 1. Update Database
@@ -263,7 +263,7 @@ def show():
                 "district_id": new_dist_id,
                 "block_id": None,   
                 "department_id": new_dept_id,
-                "wing_id": new_wing_id,
+                # "wing_id" removed to prevent PGRST204 column missing error
                 "active": True
             }
             supabase.table("users").insert(user_record).execute()
