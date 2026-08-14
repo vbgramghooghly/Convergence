@@ -28,10 +28,10 @@ def show():
     inject_custom_css()
 
     st.markdown(
-        "<h1 style='color: #1F77B4;'>📋 Advanced Convergence Meeting & Resolution Tracker</h1>",
+        "<h1 style='color: #1F77B4;'>📋 Convergence Meeting & Resolution</h1>",
         unsafe_allow_html=True,
     )
-    st.caption("Manage statutory convergence meetings: Scheduling → Attendance → Target Review → Resolutions → Next Agenda.")
+    st.caption("convergence meetings: Scheduling → Attendance → Target Review → Resolutions → Next Agenda.")
     st.markdown("---")
 
     supabase = get_supabase()
