@@ -314,11 +314,6 @@ def show():
         target_contact_id = None
 
         if role in ["superadmin", "district", "block"]:
-            st.subheader("🛠️ Manage Official Directory")
-            st.caption(
-                "As an Administrator, you can add multiple officials or update existing profiles and map statutory roles."
-            )
-
             action = st.radio(
                 "Action",
                 ["➕ Add New Official", "✏️ Edit Existing Official"],
