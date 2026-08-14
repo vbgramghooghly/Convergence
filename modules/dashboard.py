@@ -99,11 +99,9 @@ def show():
         elif 'financial_year' in df_reg.columns:
             df_reg = df_reg[df_reg['financial_year'] == active_fy]
 
-    # ======================== 4. CONDITIONAL CHECK FOR NO DATA ========================
+    # ======================== 4. FY WARNING (NON-BLOCKING) ========================
     if df_targets.empty and df_reg.empty:
-        st.markdown("---")
-        st.warning(f"⚠️ **No data available for Financial Year {active_fy}.** No targets or convergence register entries have been entered against this FY yet. Please switch back to **2026-27** or add records via the *Implementation & Targets* module.")
-        return
+        st.warning(f"⚠️ **Notice for FY {active_fy}:** No specific targets or convergence register entries have been recorded for this financial year yet. Master onboarding and linkage data remains visible below.")
 
     # ======================== 5. ADVANCED KPIS & METRICS ========================
     total_depts_wings = len(departments) + len(wings)
