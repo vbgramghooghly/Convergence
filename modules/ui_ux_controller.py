@@ -6,44 +6,42 @@ from utils.db import get_supabase
 from utils.theme import load_theme, apply_global_theme
 
 def init_ui_state():
-    """Initializes session state from the database active theme."""
-    if 'ui_initialized' not in st.session_state:
+    """Initializes a persistent dictionary for theme state."""
+    if 'theme_state' not in st.session_state:
         active_theme = load_theme()
         
-        # Load DB tokens into session state for the live editor
-        st.session_state.ui_primary_color = active_theme.get('primary_color', '#1F77B4')
-        st.session_state.ui_bg_color = active_theme.get('bg_color', '#F8F9FA')
-        st.session_state.ui_app_name = active_theme.get('app_name', 'VB-G RAM G Convergence')
-        st.session_state.ui_font = active_theme.get('font_family', 'sans serif')
-        st.session_state.ui_card_shadow = active_theme.get('card_shadow', True)
-        st.session_state.ui_border_radius = active_theme.get('border_radius', 12)
-        
-        st.session_state.ui_initialized = True
+        # Load DB tokens into a separate dictionary so they survive widget unmounts
+        st.session_state.theme_state = {
+            'primary_color': active_theme.get('primary_color', '#1F77B4'),
+            'bg_color': active_theme.get('bg_color', '#F8F9FA'),
+            'app_name': active_theme.get('app_name', 'VB-G RAM G Convergence'),
+            'font_family': active_theme.get('font_family', 'sans serif'),
+            'card_shadow': active_theme.get('card_shadow', True),
+            'border_radius': active_theme.get('border_radius', 12)
+        }
 
 def save_to_database():
-    """Upserts the current session state to the ui_settings database table."""
+    """Upserts the current theme_state to the ui_settings database table."""
     supabase = get_supabase()
     user = get_current_user()
     
+    state = st.session_state.theme_state
+    
     payload = {
         "profile_name": "Custom Live Theme",
-        "primary_color": st.session_state.ui_primary_color,
-        "bg_color": st.session_state.ui_bg_color,
-        "app_name": st.session_state.ui_app_name,
-        "font_family": st.session_state.ui_font,
-        "card_shadow": st.session_state.ui_card_shadow,
-        "border_radius": st.session_state.ui_border_radius,
-        "is_active": True, # Make this the active theme
+        "primary_color": state['primary_color'],
+        "bg_color": state['bg_color'],
+        "app_name": state['app_name'],
+        "font_family": state['font_family'],
+        "card_shadow": state['card_shadow'],
+        "border_radius": state['border_radius'],
+        "is_active": True,
         "updated_by": user["id"]
     }
     
     try:
-        # Deactivate all other themes first (if supporting multiple profiles)
         supabase.table("ui_settings").update({"is_active": False}).neq("id", "0").execute()
-        
-        # Upsert the new live configuration
-        # Assuming you have an ID '1' for the main global theme, or you insert a new active record
-        result = supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
+        supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
         return True
     except Exception as e:
         st.error(f"Failed to save to database: {e}")
@@ -73,32 +71,41 @@ def show():
     # ================= 2. PROPERTIES PANEL =================
     with col_prop:
         st.subheader("⚙️ Properties")
+        state = st.session_state.theme_state
+        
+        # Notice we assign the widget's return value directly to our persistent state
         if design_category == "Theme & Colors":
-            st.color_picker("Primary Color", key="ui_primary_color")
-            st.color_picker("Background Color", key="ui_bg_color")
-            st.checkbox("Enable Card Shadows", key="ui_card_shadow")
-            st.slider("Border Radius (px)", min_value=0, max_value=24, step=2, key="ui_border_radius")
+            state['primary_color'] = st.color_picker("Primary Color", value=state['primary_color'])
+            state['bg_color'] = st.color_picker("Background Color", value=state['bg_color'])
+            state['card_shadow'] = st.checkbox("Enable Card Shadows", value=state['card_shadow'])
+            state['border_radius'] = st.slider("Border Radius (px)", min_value=0, max_value=24, step=2, value=state['border_radius'])
             
         elif design_category == "Header Details":
-            st.text_input("Application Name", key="ui_app_name")
+            state['app_name'] = st.text_input("Application Name", value=state['app_name'])
             
         elif design_category == "Typography":
-            st.selectbox("Main Font Family", ["sans serif", "serif", "monospace", "Arial", "Inter"], key="ui_font")
+            font_opts = ["sans serif", "serif", "monospace", "Arial", "Inter"]
+            # Find current index to set as default
+            current_idx = font_opts.index(state['font_family']) if state['font_family'] in font_opts else 0
+            state['font_family'] = st.selectbox("Main Font Family", font_opts, index=current_idx)
 
     # ================= 3. LIVE PREVIEW =================
     with col_preview:
         st.subheader("👁️ Live Preview")
         
-        shadow_css = "box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" if st.session_state.ui_card_shadow else "border: 1px solid #ddd;"
-        primary = st.session_state.ui_primary_color
-        bg = st.session_state.ui_bg_color
-        radius = st.session_state.ui_border_radius
-        font = st.session_state.ui_font
+        # Read strictly from the persistent dictionary, never from widget keys
+        state = st.session_state.theme_state
+        shadow_css = "box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" if state['card_shadow'] else "border: 1px solid #ddd;"
+        primary = state['primary_color']
+        bg = state['bg_color']
+        radius = state['border_radius']
+        font = state['font_family']
+        app_name = state['app_name']
         
         preview_html = f"""
         <div style="background-color: {bg}; padding: 20px; border-radius: 8px; border: 2px dashed #ccc; font-family: {font};">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
-                <h2 style="color: {primary}; margin: 0;">{st.session_state.ui_app_name}</h2>
+                <h2 style="color: {primary}; margin: 0;">{app_name}</h2>
                 <div style="color: #666;">🔔 👤 Admin</div>
             </div>
             <div style="display: flex; gap: 15px; margin-bottom: 20px;">
@@ -136,7 +143,7 @@ def show():
     
     with action_col1:
         if st.button("🔄 Reset to Default", use_container_width=True):
-            del st.session_state['ui_initialized']
+            del st.session_state['theme_state']
             st.rerun()
             
     with action_col3:
