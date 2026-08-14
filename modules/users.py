@@ -141,10 +141,7 @@ def show():
         
         dept_index = 0
         if cur_dept_id:
-            # Match against the combined options
             for i, opt in enumerate(dept_options):
-                # We check equality for both dept and wing. 
-                # (e.g. if wing is None, we want the parent dept option)
                 if opt['dept_id'] == cur_dept_id and opt['wing_id'] == cur_wing_id:
                     dept_index = i + 1 
                     break
@@ -168,14 +165,16 @@ def show():
                 "district_id": new_dist_id,
                 "block_id": new_block_id if new_role == 'block' else None,
                 "department_id": new_dept_id if new_role == 'department' else None
-                # "wing_id" removed to prevent PGRST204 column missing error
             }
             try:
                 # 1. Update Database
                 supabase.table("users").update(updates).eq("id", selected_uid).execute()
                 
-                # 2. Log Action 
-                log_action(user, "UPDATE", "users", selected_uid, new_vals=updates)
+                # 2. Log Action (FIXED SIGNATURE)
+                try:
+                    log_action(user.get('id'), f"UPDATE users {selected_uid}")
+                except Exception:
+                    pass # Fail silently if audit logging fails
                 
                 st.success("User updated successfully!")
                 st.rerun()
@@ -206,7 +205,6 @@ def show():
     st.markdown("---")
     st.subheader("➕ Create Single User Manually")
     
-    # Removed st.form, added unique keys to prevent DuplicateWidgetID errors
     new_fullname = st.text_input("Full Name (e.g. Nodal Officer WBSRDA)", key="create_fname")
     new_email = st.text_input("Username (without @domain)", key="create_uname")
     new_password = st.text_input("Password", type="password", key="create_pw")
@@ -263,11 +261,16 @@ def show():
                 "district_id": new_dist_id,
                 "block_id": None,   
                 "department_id": new_dept_id,
-                # "wing_id" removed to prevent PGRST204 column missing error
                 "active": True
             }
             supabase.table("users").insert(user_record).execute()
-            log_action(user, "CREATE", "users", new_uuid, new_vals=user_record)
+            
+            # Log Action (FIXED SIGNATURE)
+            try:
+                log_action(user.get('id'), f"CREATE users {new_uuid}")
+            except Exception:
+                pass # Fail silently if audit logging fails
+                
             st.success(f"User {new_fullname} created successfully!")
             st.rerun()
         except Exception as e:
