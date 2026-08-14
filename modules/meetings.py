@@ -40,6 +40,7 @@ def show():
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
     activities_data = supabase.table("activities").select("id, activity_name").execute().data or []
+    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
 
     dept_map = {d["id"]: d["department_name"] for d in departments}
     wing_map = {w["id"]: w for w in wings}
@@ -360,39 +361,41 @@ def show():
                 general_minutes = st.text_area("Meeting Minutes / Observations", value=proc_mtg.get("decisions", "") or "", disabled=is_locked or role=="department")
                 
                 if not is_locked and role != "department":
-                    if st.button("Save General Minutes"):
+                    if st.button("Save General Minutes", key=f"btn_mins_{proc_sel}"):
                         supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
                         st.success("Minutes saved.")
 
                     st.markdown("---")
                     st.markdown("#### Assign New Resolution / Action Point")
 
-                    with st.form("add_new_resolution"):
+                    # Removed st.form to allow the Scheme dropdown to dynamically filter based on Department selection
+                    with st.container(border=True):
                         c_r1, c_r2 = st.columns(2)
-                        res_dept_label = c_r1.selectbox("Assign to Department / Wing*", dept_labels)
+                        res_dept_label = c_r1.selectbox("Assign to Department / Wing*", dept_labels, key=f"r_dept_{proc_sel}")
                         selected_opt = next(opt for opt in unified_depts if opt['label'] == res_dept_label)
                         res_dept_id = selected_opt['dept_id']
                         res_wing_id = selected_opt['wing_id']
 
-                        mapped_act_ids = [m['activity_id'] for m in supabase.table("activity_departments").select("*").eq("department_id", res_dept_id).execute().data or []]
+                        # Dynamically filter activities mapped to the selected department
+                        mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == res_dept_id]
                         valid_act_names = ["General / Administrative"] + [a['activity_name'] for a in activities_data if a['id'] in mapped_act_ids]
-                        res_scheme = c_r2.selectbox("Scheme / Activity Linkage", valid_act_names)
+                        
+                        res_scheme = c_r2.selectbox("Scheme / Activity Linkage", valid_act_names, key=f"r_sch_{proc_sel}")
 
-                        res_issue = st.text_input("Issue / Discussion")
-                        res_resolution = st.text_area("Resolution / Directives Given*")
-                        res_outcome = st.text_input("Expected Outcome")
+                        res_issue = st.text_input("Issue / Discussion", key=f"r_iss_{proc_sel}")
+                        res_resolution = st.text_area("Resolution / Directives Given*", key=f"r_res_{proc_sel}")
+                        res_outcome = st.text_input("Expected Outcome", key=f"r_out_{proc_sel}")
 
                         c_r3, c_r4, c_r5 = st.columns(3)
-                        res_status = c_r3.selectbox("Current Status", ["Not Started", "On Track"])
-                        res_priority = c_r4.selectbox("Priority", ["High", "Medium", "Low"], index=1)
-                        res_deadline = c_r5.date_input("Target Date", date.today())
-                        atr_req = st.checkbox("ATR Required?", value=True)
+                        res_status = c_r3.selectbox("Current Status", ["Not Started", "On Track"], key=f"r_stat_{proc_sel}")
+                        res_priority = c_r4.selectbox("Priority", ["High", "Medium", "Low"], index=1, key=f"r_pri_{proc_sel}")
+                        res_deadline = c_r5.date_input("Target Date", date.today(), key=f"r_dl_{proc_sel}")
+                        atr_req = st.checkbox("ATR Required?", value=True, key=f"r_atr_{proc_sel}")
 
-                        if st.form_submit_button("Add Resolution", type="primary"):
+                        if st.button("Add Resolution to Tracker", type="primary", key=f"btn_add_{proc_sel}"):
                             if not res_resolution.strip():
                                 st.error("Resolution directive cannot be empty.")
                             else:
-                                # Pack detailed UI fields into DB schema seamlessly
                                 packed_action_point = f"[{res_scheme}] {res_resolution.strip()}"
                                 packed_remarks = f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                 
@@ -429,7 +432,7 @@ def show():
             # --- E. LOCK PROCEEDINGS ---
             st.markdown("---")
             if not is_locked and role in ["superadmin", "district", "block"]:
-                if st.button("🔒 Complete Proceedings & Mark as Convened", type="primary", use_container_width=True):
+                if st.button("🔒 Complete Proceedings & Mark as Convened", type="primary", use_container_width=True, key=f"btn_lock_{proc_sel}"):
                     supabase.table("meetings").update({"status": "Convened"}).eq("id", proc_sel).execute()
                     st.success("Meeting locked! Proceedings are now read-only.")
                     st.rerun()
