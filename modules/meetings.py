@@ -489,53 +489,59 @@ def show():
     with tab6:
         st.subheader("⏭️ Auto-Generated Next Meeting Agenda")
         
-        agenda_text = "AGENDA FOR UPCOMING MEETING:\n\n"
-        has_items = False
-
-        # 1. Low Target Achievement
-        q_targets = supabase.table("department_targets").select("*").eq("district_id", user["district_id"])
-        t_data = q_targets.execute().data
-        if t_data:
-            df_t = pd.DataFrame(t_data)
-            q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", user["district_id"])
-            df_r = pd.DataFrame(q_reg.execute().data) if q_reg.execute().data else pd.DataFrame()
-            
-            low_targets = ""
-            for idx, row in df_t.iterrows():
-                d_id = row['department_id']
-                act = row['activity']
-                t_val = int(row['desired_target'])
-                e_count = df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum() if not df_r.empty and 'activity_description' in df_r[df_r['department_id'] == d_id].columns else 0
-                
-                if t_val > 0 and (e_count / t_val) < 0.5: # Flag if achievement is less than 50%
-                    d_name = dept_map.get(d_id, 'Unknown')
-                    low_targets += f"- [{d_name}] {act}: Target {t_val} | Achieved: {e_count} (Critical Deficit)\n"
-            
-            if low_targets:
-                has_items = True
-                agenda_text += "📊 1. REVIEW OF LOW TARGET ACHIEVEMENT:\n" + low_targets + "\n"
-
-        # 2. Resolutions Formatting
-        if not df_ap.empty:
-            active_df = df_ap[~df_ap["Tracker Flag"].isin(["🟢 CLOSED"])]
-            
-            unfeasible_df = active_df[active_df["Tracker Flag"] == "🟠 FOR REVIEW"]
-            overdue_df = active_df[active_df["Tracker Flag"] == "🔴 OVERDUE"]
-            
-            if not unfeasible_df.empty:
-                has_items = True
-                agenda_text += "🔴 2. ITEMS FLAGGED FOR REVIEW (NOT FEASIBLE):\n"
-                for idx, row in unfeasible_df.iterrows():
-                    agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n  ATR: {row.get('remarks', 'N/A')}\n\n"
-
-            if not overdue_df.empty:
-                has_items = True
-                agenda_text += "🚨 3. OVERDUE COMMITMENTS:\n"
-                for idx, row in overdue_df.iterrows():
-                    agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n"
-
-        if has_items:
-            st.warning("⚠️ High-priority items successfully compiled for the next agenda.")
-            st.text_area("Copy Agenda Text:", value=agenda_text, height=400)
+        district_id = user.get("district_id")
+        
+        # Superadmin check: Don't run queries if district_id is None
+        if not district_id:
+            st.info("ℹ️ As a Superadmin, please select a specific district context to generate an automated agenda.")
         else:
-            st.success("🎉 No overdue items or severe target gaps detected for the next meeting!")
+            agenda_text = "AGENDA FOR UPCOMING MEETING:\n\n"
+            has_items = False
+
+            # 1. Low Target Achievement
+            q_targets = supabase.table("department_targets").select("*").eq("district_id", district_id)
+            t_data = q_targets.execute().data
+            if t_data:
+                df_t = pd.DataFrame(t_data)
+                q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", district_id)
+                df_r = pd.DataFrame(q_reg.execute().data) if q_reg.execute().data else pd.DataFrame()
+                
+                low_targets = ""
+                for idx, row in df_t.iterrows():
+                    d_id = row['department_id']
+                    act = row['activity']
+                    t_val = int(row['desired_target'])
+                    e_count = df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum() if not df_r.empty and 'activity_description' in df_r[df_r['department_id'] == d_id].columns else 0
+                    
+                    if t_val > 0 and (e_count / t_val) < 0.5: # Flag if achievement is less than 50%
+                        d_name = dept_map.get(d_id, 'Unknown')
+                        low_targets += f"- [{d_name}] {act}: Target {t_val} | Achieved: {e_count} (Critical Deficit)\n"
+                
+                if low_targets:
+                    has_items = True
+                    agenda_text += "📊 1. REVIEW OF LOW TARGET ACHIEVEMENT:\n" + low_targets + "\n"
+
+            # 2. Resolutions Formatting
+            if not df_ap.empty:
+                active_df = df_ap[~df_ap["Tracker Flag"].isin(["🟢 CLOSED"])]
+                
+                unfeasible_df = active_df[active_df["Tracker Flag"] == "🟠 FOR REVIEW"]
+                overdue_df = active_df[active_df["Tracker Flag"] == "🔴 OVERDUE"]
+                
+                if not unfeasible_df.empty:
+                    has_items = True
+                    agenda_text += "🔴 2. ITEMS FLAGGED FOR REVIEW (NOT FEASIBLE):\n"
+                    for idx, row in unfeasible_df.iterrows():
+                        agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n  ATR: {row.get('remarks', 'N/A')}\n\n"
+
+                if not overdue_df.empty:
+                    has_items = True
+                    agenda_text += "🚨 3. OVERDUE COMMITMENTS:\n"
+                    for idx, row in overdue_df.iterrows():
+                        agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n"
+
+            if has_items:
+                st.warning("⚠️ High-priority items successfully compiled for the next agenda.")
+                st.text_area("Copy Agenda Text:", value=agenda_text, height=400)
+            else:
+                st.success("🎉 No overdue items or severe target gaps detected for the next meeting!")
