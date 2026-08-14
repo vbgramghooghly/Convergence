@@ -28,6 +28,22 @@ def check_password():
         st.session_state.user = None
 
     if st.session_state.authenticated:
+        # ---------- PERSISTENT FY SELECTOR IN TOP LEFT SIDEBAR ----------
+        if "selected_fy" not in st.session_state:
+            st.session_state.selected_fy = "2026-27"
+
+        with st.sidebar:
+            st.markdown("### 📅 Financial Year")
+            fy_options = ["2026-27", "2027-28", "2028-29"]
+            current_fy_idx = fy_options.index(st.session_state.selected_fy) if st.session_state.selected_fy in fy_options else 0
+            st.session_state.selected_fy = st.selectbox(
+                "Select Active FY", 
+                fy_options, 
+                index=current_fy_idx, 
+                label_visibility="collapsed"
+            )
+            st.markdown("---")
+
         return True
 
     # ---------- STYLING FOR THE LANDING / LOGIN PAGE ----------
