@@ -8,10 +8,14 @@ from utils.db import get_supabase
 
 
 def inject_custom_css():
+    """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
     st.markdown(
         """
         <style>
-        .stAppToolbar { visibility: hidden !important; }
+        /* Hide Streamlit toolbar (Fork and GitHub buttons) */
+        .stAppToolbar {
+            visibility: hidden !important;
+        }
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
         .print-btn { background-color: #2B8A3E; color: white; padding: 10px 15px; border-radius: 6px; text-align: center; font-weight: bold; cursor: pointer; text-decoration: none; display: block; margin-top: 10px; }
         .print-btn:hover { background-color: #21702f; color: white; }
@@ -42,19 +46,20 @@ def show():
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
     
-    # Fetch activities and mapping
+    # Explicitly fetch activities and mapping to ensure the dropdown filters correctly
     activities_data = supabase.table("activities").select("id, activity_name").eq("active", True).execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("activity_id, department_id").execute().data or []
 
-    # Fetch User Directory for Attendance & Statutory Display
-    users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id, email").execute().data or []
+    # Fetch User Directory for Attendance & Statutory Display (Removed 'email' to prevent DB error)
+    users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
     user_dict = {u["id"]: u for u in users_data}
 
     dept_map = {d["id"]: d["department_name"] for d in departments}
     wing_map = {w["id"]: w for w in wings}
     block_dict_reverse = {b["id"]: b["block_name"] for b in blocks_data}
+    act_map = {a["id"]: a["activity_name"] for a in activities_data}
 
-    # Build Unified Department / Wing Options
+    # Build Unified Department / Wing Options for clean multiselects
     unified_depts = []
     for d in departments:
         unified_depts.append({
@@ -76,6 +81,7 @@ def show():
     unified_uid_to_label = {u["uid"]: u["label"] for u in unified_depts}
     dept_labels = [u["label"] for u in unified_depts]
 
+    # Helper function to format Department/Wing display cleanly for dataframes
     def format_dept_display(row):
         d_name = dept_map.get(row.get("department_id"), "Unknown")
         w_id = row.get("wing_id")
@@ -112,6 +118,7 @@ def show():
         ap_data = supabase.table("meeting_action_points").select("*").in_("meeting_id", valid_meet_ids).execute().data or []
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
+    # Apply Tracker Logic to APs
     if not df_ap.empty:
         if role == "department":
             if user.get('wing_id'):
@@ -153,6 +160,7 @@ def show():
         if df_ap.empty:
             st.info("No resolution data available for your jurisdiction.")
         else:
+            # Key Metrics
             total_res = len(df_ap)
             closed = len(df_ap[df_ap["Tracker Flag"] == "🟢 CLOSED"])
             on_track = len(df_ap[df_ap["Tracker Flag"] == "🔵 ON TRACK"])
@@ -223,7 +231,7 @@ def show():
 
             st.markdown(f"#### 🏛️ Statutory Officials for {meeting_type} Jurisdiction (From User Directory)")
             if stat_users:
-                st.info(", ".join([f"{u['full_name']} ({u.get('email', 'N/A')})" for u in stat_users]))
+                st.info(", ".join([f"{u['full_name']}" for u in stat_users]))
             else:
                 st.warning("No statutory administrative users found for this jurisdiction in the directory.")
 
@@ -372,7 +380,7 @@ def show():
                                 
                                 # Filter users mapping to this department/wing
                                 dept_users = [u for u in users_data if u['role'] == 'department' and u['department_id'] == d_id and u.get('wing_id') == w_id]
-                                user_options = {u['id']: f"{u['full_name']} ({u.get('email','')})" for u in dept_users}
+                                user_options = {u['id']: f"{u['full_name']}" for u in dept_users}
 
                                 st.markdown(f"**🏛️ {label}**")
                                 is_present = st.checkbox("Department Present?", value=True, key=f"pres_{uid}_{proc_sel}")
