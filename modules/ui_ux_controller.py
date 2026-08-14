@@ -8,11 +8,9 @@ def init_ui_state():
     """Initializes the persistent theme dictionary safely."""
     active = load_theme()
     
-    # Create the dictionary if it doesn't exist at all
     if 'theme_state' not in st.session_state:
         st.session_state.theme_state = {}
         
-    # Define what the dictionary SHOULD contain
     defaults = {
         'primary_color': active.get('primary_color', '#0F4C81'),
         'bg_color': active.get('bg_color', '#F4F6F9'),
@@ -24,7 +22,6 @@ def init_ui_state():
         'tab_size': active.get('tab_size', 'Medium')
     }
     
-    # Loop through and add any missing keys (fixes the KeyError)
     for key, default_value in defaults.items():
         if key not in st.session_state.theme_state:
             st.session_state.theme_state[key] = default_value
@@ -59,7 +56,6 @@ def save_to_database():
     }
     
     try:
-        # Deactivate any other active themes, then upsert ours as ID 1
         supabase.table("ui_settings").update({"is_active": False}).neq("id", "0").execute()
         supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
         return True
@@ -72,10 +68,9 @@ def show():
     init_ui_state()
     state = st.session_state.theme_state
     
-    # Hide standard header to make the controller look like a distinct app module
     st.markdown("""<style>
         .stAppToolbar {visibility: hidden;} 
-        .block-container {max-width: 95rem !important;} /* Force controller to be wide */
+        .block-container {max-width: 95rem !important;}
     </style>""", unsafe_allow_html=True)
     
     st.markdown("<h1 style='color: #1F2937; margin-bottom: 0px;'>✨ Portal Design Studio</h1>", unsafe_allow_html=True)
@@ -107,7 +102,7 @@ def show():
 
         with st.expander("📏 3. Layout & Sizing"):
             st.caption("Website Width (Rem units)")
-            state['content_width'] = st.slider("Container Max Width", min_value=50, max_value=120, value=state['content_width'], step=5, help="Controls how wide the content stretches across the screen.")
+            state['content_width'] = st.slider("Container Max Width", min_value=50, max_value=120, value=state['content_width'], step=5)
             
             st.caption("Component Structure")
             state['border_radius'] = st.slider("Corner Roundness (px)", min_value=0, max_value=24, step=2, value=state['border_radius'])
@@ -121,13 +116,12 @@ def show():
             cur_font = state['font_family'] if state['font_family'] in font_opts else font_opts[0]
             state['font_family'] = st.selectbox("Global Font Family", font_opts, index=font_opts.index(cur_font))
             
-            state['base_font_size'] = st.slider("Base Font Size (px)", min_value=12, max_value=20, value=state['base_font_size'], step=1, help="Scales all text, headers, and inputs up or down.")
+            state['base_font_size'] = st.slider("Base Font Size (px)", min_value=12, max_value=20, value=state['base_font_size'], step=1)
 
     # ================= 2. LIVE PREVIEW (RIGHT COLUMN) =================
     with col_preview:
         st.subheader("👁️ Live Interactive Preview")
         
-        # Extract active states for preview mapping
         primary = state['primary_color']
         bg = state['bg_color']
         radius = state['border_radius']
@@ -137,59 +131,46 @@ def show():
         tab_sz = state['tab_size']
         app_name = state['app_name']
         
-        # Tab parsing logic
         tab_p = "8px 16px" if tab_sz == "Small" else "16px 32px" if tab_sz == "Large" else "12px 24px"
         tab_f = f"{base_font - 2}px" if tab_sz == "Small" else f"{base_font + 2}px" if tab_sz == "Large" else f"{base_font}px"
         
-        # CRITICAL: The HTML below MUST NOT be indented. 
-        # It must sit entirely flush to the left margin to prevent Streamlit from turning it into a Markdown Code Block.
+        # ZERO INDENTATION HTML STRING (Prevents Markdown Code Block bugs)
         preview_html = f"""
 <div style="background: #E5E7EB; padding: 15px; border-radius: 10px 10px 0 0; display: flex; gap: 8px;">
-    <div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56;"></div>
-    <div style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e;"></div>
-    <div style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f;"></div>
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56;"></div>
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e;"></div>
+<div style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f;"></div>
 </div>
 <div style="background-color: {bg}; padding: 30px; border: 1px solid #D1D5DB; border-top: none; border-radius: 0 0 10px 10px; font-family: {font}; min-height: 500px; display: flex; flex-direction: column; align-items: center;">
-    
-    <!-- Simulated Website Container Width -->
-    <div style="width: 100%; max-width: {width}%; transition: max-width 0.3s ease;">
-        
-        <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
-            <h2 style="color: {primary}; margin: 0; font-size: {base_font * 1.8}px; font-weight: 700;">{app_name}</h2>
-            <div style="color: #6B7280; font-size: {base_font}px;">👤 User Profile</div>
-        </div>
-
-        <!-- Simulated Tabs -->
-        <div style="display: flex; gap: 10px; border-bottom: 2px solid #E5E7EB; margin-bottom: 25px;">
-            <div style="padding: {tab_p}; border-bottom: 3px solid {primary}; color: {primary}; font-weight: 600; font-size: {tab_f}; cursor: pointer;">Dashboard</div>
-            <div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Reports</div>
-            <div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Settings</div>
-        </div>
-
-        <!-- Simulated KPI Cards -->
-        <div style="display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Total Users</div>
-                <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #1F2937;">1,284</div>
-            </div>
-            <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-                <div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Server Status</div>
-                <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #10B981;">Online</div>
-            </div>
-        </div>
-
-        <!-- Simulated Input & Button Area -->
-        <div style="background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <h3 style="color: {primary}; margin-top: 0; font-size: {base_font * 1.3}px;">Quick Action Form</h3>
-            <label style="font-size: {base_font}px; color: #374151; display: block; margin-bottom: 5px;">Search Query</label>
-            <input type="text" placeholder="Enter keywords..." disabled style="width: 100%; padding: 10px; border-radius: {radius}px; border: 1px solid #D1D5DB; margin-bottom: 15px; font-size: {base_font}px; font-family: {font}; box-sizing: border-box;">
-            
-            <button style="background-color: {primary}; color: white; border: none; padding: 10px 20px; border-radius: {radius}px; cursor: pointer; font-size: {base_font}px; font-weight: 500; font-family: {font};">
-                Submit Query (Primary Button)
-            </button>
-        </div>
-    </div>
+<div style="width: 100%; max-width: {width}%; transition: max-width 0.3s ease;">
+<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
+<h2 style="color: {primary}; margin: 0; font-size: {base_font * 1.8}px; font-weight: 700;">{app_name}</h2>
+<div style="color: #6B7280; font-size: {base_font}px;">👤 User Profile</div>
+</div>
+<div style="display: flex; gap: 10px; border-bottom: 2px solid #E5E7EB; margin-bottom: 25px;">
+<div style="padding: {tab_p}; border-bottom: 3px solid {primary}; color: {primary}; font-weight: 600; font-size: {tab_f}; cursor: pointer;">Dashboard</div>
+<div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Reports</div>
+<div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Settings</div>
+</div>
+<div style="display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap;">
+<div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+<div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Total Users</div>
+<div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #1F2937;">1,284</div>
+</div>
+<div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+<div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Server Status</div>
+<div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #10B981;">Online</div>
+</div>
+</div>
+<div style="background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+<h3 style="color: {primary}; margin-top: 0; font-size: {base_font * 1.3}px;">Quick Action Form</h3>
+<label style="font-size: {base_font}px; color: #374151; display: block; margin-bottom: 5px;">Search Query</label>
+<input type="text" placeholder="Enter keywords..." disabled style="width: 100%; padding: 10px; border-radius: {radius}px; border: 1px solid #D1D5DB; margin-bottom: 15px; font-size: {base_font}px; font-family: {font}; box-sizing: border-box;">
+<button style="background-color: {primary}; color: white; border: none; padding: 10px 20px; border-radius: {radius}px; cursor: pointer; font-size: {base_font}px; font-weight: 500; font-family: {font};">
+Submit Query (Primary Button)
+</button>
+</div>
+</div>
 </div>
 """
         st.markdown(preview_html, unsafe_allow_html=True)
