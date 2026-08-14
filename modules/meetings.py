@@ -66,6 +66,9 @@ def show():
     unified_depts = sorted(unified_depts, key=lambda x: x["label"])
     unified_uid_to_label = {u["uid"]: u["label"] for u in unified_depts}
     unified_label_to_uid = {u["label"]: u["uid"] for u in unified_depts}
+    
+    # Define the missing dept_labels array used for Dropdowns
+    dept_labels = [u["label"] for u in unified_depts]
 
     # Helper function to format Department/Wing display cleanly for dataframes
     def format_dept_display(row):
@@ -209,7 +212,7 @@ def show():
                             "chairperson": chairperson,
                             "venue": venue,
                             "objective": objective,
-                            "attendees": invited_uids, # Saving list of dept UIDs
+                            "attendees": invited_uids, 
                             "status": "Scheduled",
                             "created_by": user["id"],
                         }
@@ -390,7 +393,7 @@ def show():
                                 "wing_id": res_wing_id,
                                 "action_point": res_action.strip(),
                                 "target": res_target if res_target.strip() else None,
-                                "responsible_officer": "Department Representative", # Generic fallback to satisfy DB constraints
+                                "responsible_officer": "Department Representative", 
                                 "deadline": str(res_deadline) if has_deadline else None,
                                 "status": "Under Process",
                                 "priority": "Medium",
