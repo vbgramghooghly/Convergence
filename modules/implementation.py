@@ -277,7 +277,7 @@ def show():
     # =====================================================================
     with tab2:
         st.subheader("Physical & Financial Progress Updates")
-        st.caption("Update the on-ground reality of specific schemes. MIS Code is mandatory for implementation tracking.")
+        st.caption("Update the on-ground reality of Specific Work. MIS Code is mandatory for implementation tracking.")
         
         query_reg = supabase.table("convergence_register").select("*")
         if role == 'district':
@@ -292,9 +292,13 @@ def show():
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
-            activity_map = {a['id']: f"{a.get('activity_code', a.get('id', ''))} - {a.get('activity_description', 'Unnamed Activity')[:60]}..." for a in activities_reg}
+            # Fully displayed activity names without truncation
+            activity_map = {
+                a['id']: f"{a.get('activity_code', a.get('id', ''))} - {a.get('activity_description', 'Unnamed Activity')}"
+                for a in activities_reg
+            }
 
-            selected_act_id = st.selectbox("Select Convergence Activity to Update", options=list(activity_map.keys()), format_func=lambda x: activity_map[x])
+            selected_act_id = st.selectbox("Select Specific Work to Update", options=list(activity_map.keys()), format_func=lambda x: activity_map[x])
             selected_activity = next((a for a in activities_reg if a['id'] == selected_act_id), None)
 
             if selected_activity:
