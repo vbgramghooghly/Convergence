@@ -1,8 +1,10 @@
 import streamlit as st
 import os
 from utils.db import get_supabase
+from utils.theme import apply_global_theme
 
 # ---------- PAGE CONFIG ----------
+# Layout MUST be "wide" for our central theme engine to control the website width dynamically.
 st.set_page_config(
     page_title="VB-G RAM G Convergence",
     page_icon="📊",
@@ -24,52 +26,19 @@ if not user or 'role' not in user:
 
 role = user['role']
 
-# ---------- FONT SIZE SESSION STATE INITIALIZATION ----------
-if 'global_font_size' not in st.session_state:
-    st.session_state.global_font_size = 15
+# ---------- APPLY CENTRAL UI/UX THEME ----------
+# This single function handles all global font scaling, background colors, 
+# tab bulkiness, and container width across the entire app!
+theme = apply_global_theme()
+primary_color = theme.get("primary_color", "#0F4C81")
+base_font = theme.get("base_font_size", 14)
 
-global_font_size = st.session_state.global_font_size
-
-# ---------- MODERN SAAS SIDEBAR & UI STYLING ----------
+# ---------- DYNAMIC SIDEBAR STYLING ----------
+# We only need CSS here for the sleek hover/select animations on the sidebar menu.
+# We dynamically inject the active primary_color and base_font from the theme.
 st.markdown(f"""
     <style>
-        /* Main background and global font scaling */
-        .main {{
-            background-color: #F8F9FA;
-            font-size: {global_font_size}px !important;
-        }}
-        .main p, .main span, .main label, .main div {{
-            font-size: {global_font_size}px !important;
-        }}
-        
-        /* Sleek Modern Sidebar */
-        [data-testid="stSidebar"] {{
-            background-color: #F8F9FA;
-            border-right: 1px solid #E5E7EB;
-            padding-bottom: 20px;
-        }}
-        
-        /* Custom Headers */
-        h1 {{
-            font-size: {global_font_size + 12}px !important;
-            color: #1F77B4;
-        }}
-        h2 {{
-            font-size: {global_font_size + 8}px !important;
-            color: #1F77B4;
-        }}
-        h3 {{
-            font-size: {global_font_size + 4}px !important;
-            color: #1F77B4;
-        }}
-        
-        /* Metric Cards Accent */
-        [data-testid="stMetricValue"] {{
-            color: #2B8A3E;
-            font-size: {global_font_size + 10}px !important;
-        }}
-        
-        /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION (HOVER & SELECT) --- */
+        /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION --- */
         [data-testid="stSidebar"] [role="radiogroup"] {{
             gap: 6px !important;
         }}
@@ -78,15 +47,15 @@ st.markdown(f"""
             background-color: transparent !important;
             border: 1px solid transparent !important;
             padding: 10px 14px !important;
-            border-radius: 10px !important;
+            border-radius: 8px !important;
             margin-bottom: 2px !important;
             cursor: pointer !important;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            transition: all 0.2s ease-in-out !important;
         }}
         
         [data-testid="stSidebar"] [role="radiogroup"] label p, 
         [data-testid="stSidebar"] [role="radiogroup"] label span {{
-            font-size: {global_font_size + 1}px !important;
+            font-size: {base_font}px !important;
             font-weight: 600 !important;
             color: #4B5563 !important;
             transition: color 0.2s ease !important;
@@ -94,21 +63,19 @@ st.markdown(f"""
         
         /* Hover State */
         [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
-            background-color: #EEF2F6 !important;
-            border-color: #E5E7EB !important;
+            background-color: #F3F4F6 !important;
             transform: translateX(3px);
         }}
         
         [data-testid="stSidebar"] [role="radiogroup"] label:hover p,
         [data-testid="stSidebar"] [role="radiogroup"] label:hover span {{
-            color: #1F77B4 !important;
+            color: {primary_color} !important;
         }}
         
         /* Active / Selected State Styling */
         [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
-            background-color: #1F77B4 !important;
-            border-color: #1F77B4 !important;
-            box-shadow: 0 4px 12px rgba(31, 119, 180, 0.25) !important;
+            background-color: {primary_color} !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
         }}
         
         [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p,
@@ -140,8 +107,8 @@ logo_path = "assets/logo.png"
 if os.path.exists(logo_path):
     st.sidebar.image(logo_path, width=180)
 
-st.sidebar.title("VB‑G RAM G Convergence")
-st.sidebar.markdown(f"<span style='color: #4B5563; font-size: 0.85rem;'>FY 2026‑27</span><br><span style='font-size: 0.8rem; color: #6B7280;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: #1F77B4; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
+st.sidebar.title(theme.get("app_name", "VB‑G RAM G Convergence"))
+st.sidebar.markdown(f"<span style='color: #4B5563; font-size: {base_font - 2}px;'>FY 2026‑27</span><br><span style='font-size: {base_font - 2}px; color: #6B7280;'>Logged in as:</span><br><b>{user.get('full_name', 'User')}</b> (<span style='color: {primary_color}; font-weight: bold;'>{role.upper()}</span>)", unsafe_allow_html=True)
 st.sidebar.divider()
 
 # ---------- SORTED & LOGICAL ROLE‑BASED NAVIGATION ----------
@@ -215,17 +182,8 @@ if selection in menu:
 else:
     show_dashboard()
 
-
-# ---------- ACCESSIBILITY, SECURITY, & LOGOUT ----------
-st.sidebar.markdown("<br>" * 2, unsafe_allow_html=True)
-st.sidebar.divider()
-
-# 1. Accessibility Slider
-st.sidebar.markdown("### 🔠 Accessibility")
-st.sidebar.slider("Font Size Scaling", min_value=12, max_value=24, key="global_font_size", step=1)
-st.sidebar.divider()
-
-# 2. Change Password Expander
+# ---------- ACCOUNT SECURITY & LOGOUT ----------
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("### 🔐 Account Security")
 with st.sidebar.expander("Change My Password"):
     with st.form("change_my_password_form"):
@@ -246,7 +204,7 @@ with st.sidebar.expander("Change My Password"):
                 except Exception as e:
                     st.error(f"Error updating password: {e}")
 
-# 3. Logout Button
+# Logout Button
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
