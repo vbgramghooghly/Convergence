@@ -5,6 +5,27 @@ from auth.auth import get_current_user, require_role
 from utils.audit import log_action
 from utils.db import get_supabase
 
+# --- HOOGHLY DISTRICT BLOCK TO GP MAPPING ---
+HOOGHLY_GPS = {
+    "CHINSURAH MOGRA": ["BANDEL", "CHANDRAHATI-I", "CHANDRAHATI-II", "DEBANANDAPUR", "DIGSUIHOYERA", "KODALIA-I", "KODALIA-II", "MOGRA-I", "MOGRA-II", "SAPTAGRAM"],
+    "POLBA DADPUR": ["AKHNA", "AMNAN", "BABNAN", "DADPUR", "GOSWAMIMALIPARA", "HARIT", "MAHANAD", "MAKALPUR", "POLBA", "RAJHAT", "SATITHAN", "SUGANDHA"],
+    "DHANIAKHALI": ["BELMURI", "BHANDARHATI-I", "BHANDARHATI-II", "BHASTARA", "DASHGHARA-I", "DASHGHARA-II", "DHANEKHALI-I", "DHANEKHALI-II", "GOPINATHPUR-I", "GOPINATHPUR-II", "GUDUBARI-I", "GUDUBARI-II", "GURAP", "KHAJUDAHAMILKI", "MANDRA", "PERAMBUASAHABAZAR", "SOMASPUR-I", "SOMASPUR-II"],
+    "PANDUA": ["BANTIKABAINCHI", "BELOONDHAMASIN", "BERELAKONCHMALI", "HARALDASPUR", "ITACHUNAKHANYAN", "JAMNA", "JAMNAGARMONDALAII", "JAYERDWARBASINI", "KSHIRKUNDI-NAMAJGRAM-NIYASA", "LCHHOBADASPUR", "PANCHAGARA-TOREGRAM", "PANDUA", "RAMESWARPUR-GOPALNAGAR", "SARAI-TINNA", "SHIKHIRACHANPTA", "SIMLAGARHVITASIN"],
+    "BALAGARH": ["BAKLIADHOBAPARA", "CHARKRISHNABATI", "DUMURDAHANITYANANDAPUR-I", "DUMURDAHANITYANANDAPUR-II", "EKTARPUR", "GUPTIPARA-I", "GUPTIPARA-II", "JIRAT", "MOHIPALPUR", "SIJAKAMALPUR", "SOMRA-I", "SOMRA-II", "SRIPUR-BALAGARH"],
+    "SINGUR": ["ANANDANAGAR", "BAGDANGACHINAMORE", "BAINCHIPOTA", "BALARAMBATI", "BARUIPARAPALTAGARH", "BASUBATI", "BERABERI", "BIGHATI", "BORA", "BORAIPAHALAMPUR", "GOPALNAGAR", "KAMARKUNDUGOPALNAGARDALUIGACHHA", "MIRZAPURBANKIPUR", "NASIBPUR", "SINGUR-I", "SINGUR-II"],
+    "HARIPAL": ["HARIPALASHUTOSH", "ALIPURKASHIPUR", "BANDIPUR", "CHANDANPUR", "DWARHATTA", "HARIPALKINGKARBATI", "HARIPALSAHADEV", "JEJUR", "KAIKALA", "NALIKULPASCHIM", "NALIKULPURBA", "NARAYANPURBAHIRKHANDA", "PASCHIMGOPINATHPUR", "PYANTRA", "SRIPATIPURILIPUR"],
+    "TARAKESWAR": ["ASHTARADATTAPUR", "BALIGORI-I", "BALIGORI-II", "BHANJIPUR", "CHAMPADANGA", "KESABCHAK", "NAITAMALPAHARPUR", "PURBARAMNAGAR", "SANTOSHPUR", "TALPUR"],
+    "SERAMPORE UTTARPARA": ["KANAIPUR", "NABAGRAM", "PAYARAPUR", "RAGHUNATHPUR", "RAJYADHARPUR", "RISHRA"],
+    "CHANDITALA I": ["AINYA", "BHAGABATIPUR", "GANGADHARPUR", "HARIPUR", "KRISHNARAMPUR", "KUMIRMORE", "MASAT", "NABABPUR", "SHIYAKHALA"],
+    "CHANDITALA II": ["BAKSA", "BARIJHATI", "BEGUMPUR", "CHANDITALA", "GARALGACHHA", "JANAI", "KAPASARIA", "NAITI", "PANCHGHORA"],
+    "JANGIPARA": ["ANTPUR", "DILAKASH", "FURFURA", "JANGIPARA", "KOTALPUR", "MUNDALIKA", "RADHANAGAR", "RAJBALHAT-I", "RAJBALHAT-II", "RASIDPUR"],
+    "GOGHAT I": ["BALI", "BHADUR", "GOGHAT", "KUMARSA", "NAKUNDA", "RAGHUBATI", "SAORA"],
+    "GOGHAT II": ["BADANGANJ-FALUI-I", "BADANGANJ-FALUI-II", "BENGAI", "HAZIPUR", "KAMARPUKUR", "KUMARGANJ", "MANDARAN", "PASCHIMPARA", "SHYAMBAZAR"],
+    "ARAMBAGH": ["ARANDI-I", "ARANDI-II", "BATANAL", "GOURHATI-I", "GOURHATI-II", "HARINKHOLA-I", "HARINKHOLA-II", "MADHABPUR", "MALAYPUR-I", "MALAYPUR-II", "MAYAPUR-I", "MAYAPUR-II", "SALEPUR-I", "SALEPUR-II", "TIROLE"],
+    "KHANAKUL I": ["ARUNDA", "BALIPUR", "GHOSHPUR", "KHANAKUL-I", "KHANAKUL-II", "KISHOREPUR-I", "KISHOREPUR-II", "POLE-I", "POLE-II", "RAMMOHAN-I", "RAMMOHAN-II", "TANTISAL", "THAKURANICHAK"],
+    "KHANAKUL II": ["CHINGRA", "DHANYAGORI", "JAGATPUR", "MAROKHANA", "NATIBPUR-I", "NATIBPUR-II", "PALASHPAI-I", "PALASHPAI-II", "RAJHATI-I", "RAJHATI-II", "SABALSINGHAPUR"],
+    "PURSURAH": ["BHANGAMORA", "CHILADANGI", "DIHIBADPUR", "KELEPARA", "PURSURAH-I", "PURSURAH-II", "SHYAMPUR", "SREERAMPUR"]
+}
 
 def inject_custom_css():
     """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
@@ -363,15 +384,22 @@ def show():
         else:
             sel_block = col2.selectbox("Block*", ["Select Block"] + filtered_blocks)
 
+        # Dynamic GP Loading Logic based on Block
         st.markdown("##### 📍 Gram Panchayat (GP) & Location Mapping")
+        
+        # Clean block name for mapping
+        block_key = str(sel_block).upper().replace("-", " ").strip()
+        gps_in_block = HOOGHLY_GPS.get(block_key, [])
+        gp_options = ["Select GP"] + gps_in_block if sel_block != "Select Block" else ["Select GP"]
+        
         col_gp1, col_gp2, col_gp3 = st.columns(3)
-        primary_gp = col_gp1.text_input("Primary Gram Panchayat (GP)*", placeholder="Name of primary GP")
+        primary_gp = col_gp1.selectbox("Primary Gram Panchayat (GP)*", gp_options)
         
         has_add_gp = col_gp2.selectbox("Additional GP Covered?", ["No", "Yes"])
         additional_gp = ""
         add_gp_portion = ""
         if has_add_gp == "Yes":
-            additional_gp = col_gp2.text_input("Additional GP Name")
+            additional_gp = col_gp2.selectbox("Additional GP Name", gp_options)
             add_gp_portion = col_gp3.text_input("Portion in Addl. GP", placeholder="e.g., 2 km or 40%")
 
         st.markdown("##### 🏗️ Activity & Convergence Type")
@@ -463,16 +491,18 @@ def show():
                 st.error("Cannot save without a valid approved activity.")
             elif sel_block == "Select Block":
                 st.error("Please select a valid Block to proceed.")
-            elif not primary_gp.strip():
+            elif primary_gp == "Select GP":
                 st.error("Primary Gram Panchayat (GP) is a mandatory field.")
+            elif has_add_gp == "Yes" and additional_gp == "Select GP":
+                st.error("You selected 'Yes' for Additional GP. Please choose a valid Additional GP Name.")
             elif not inp_loc_details.strip():
                 st.error("Location Details are mandatory to auto-generate the Activity Description.")
             else:
                 block_id = block_map.get(sel_block)
                 
-                # Safely pack all location data into the geo_location string to avoid schema missing column errors
+                # Safely pack all location data into the geo_location string
                 geo_string = f"Loc: {inp_loc_details} | GP: {primary_gp}"
-                if has_add_gp == "Yes" and additional_gp:
+                if has_add_gp == "Yes" and additional_gp and additional_gp != "Select GP":
                     geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
                 if inp_lat_long:
                     geo_string += f" | GPS: {inp_lat_long}"
