@@ -1,40 +1,45 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from auth.auth import require_role, get_current_user
 from utils.db import get_supabase
-from utils.theme import load_theme, apply_global_theme
+from utils.theme import load_theme
 
 def init_ui_state():
-    """Initializes a persistent dictionary for theme state."""
+    """Initializes the persistent theme dictionary."""
     if 'theme_state' not in st.session_state:
-        active_theme = load_theme()
-        
-        # Load DB tokens into a separate dictionary so they survive widget unmounts
+        active = load_theme()
         st.session_state.theme_state = {
-            'primary_color': active_theme.get('primary_color', '#1F77B4'),
-            'bg_color': active_theme.get('bg_color', '#F8F9FA'),
-            'app_name': active_theme.get('app_name', 'VB-G RAM G Convergence'),
-            'font_family': active_theme.get('font_family', 'sans serif'),
-            'card_shadow': active_theme.get('card_shadow', True),
-            'border_radius': active_theme.get('border_radius', 12)
+            'primary_color': active.get('primary_color', '#0F4C81'),
+            'bg_color': active.get('bg_color', '#F4F6F9'),
+            'app_name': active.get('app_name', 'VB-G RAM G Convergence'),
+            'font_family': active.get('font_family', "'Inter', sans-serif"),
+            'border_radius': active.get('border_radius', 6),
+            'base_font_size': active.get('base_font_size', 14),
+            'content_width': active.get('content_width', 75),
+            'tab_size': active.get('tab_size', 'Medium')
         }
 
+def apply_preset(primary, bg, radius, font):
+    """Helper to apply quick color presets."""
+    st.session_state.theme_state.update({
+        'primary_color': primary, 'bg_color': bg, 'border_radius': radius, 'font_family': font
+    })
+
 def save_to_database():
-    """Upserts the current theme_state to the ui_settings database table."""
     supabase = get_supabase()
     user = get_current_user()
-    
     state = st.session_state.theme_state
     
     payload = {
-        "profile_name": "Custom Live Theme",
+        "profile_name": "Active Custom Theme",
         "primary_color": state['primary_color'],
         "bg_color": state['bg_color'],
         "app_name": state['app_name'],
         "font_family": state['font_family'],
-        "card_shadow": state['card_shadow'],
         "border_radius": state['border_radius'],
+        "base_font_size": state['base_font_size'],
+        "content_width": state['content_width'],
+        "tab_size": state['tab_size'],
         "is_active": True,
         "updated_by": user["id"]
     }
@@ -44,111 +49,131 @@ def save_to_database():
         supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
         return True
     except Exception as e:
-        st.error(f"Failed to save to database: {e}")
+        st.error(f"Failed to save: {e}")
         return False
 
 def show():
     require_role('superadmin')
     init_ui_state()
+    state = st.session_state.theme_state
     
-    st.markdown("<h1 style='color: #2C3E50;'>🎨 System UI/UX Controller</h1>", unsafe_allow_html=True)
-    st.markdown("Easily customize the application's appearance. **Changes preview instantly in the center. Click 'Publish to Live' to apply globally.**")
+    # Hide standard header to make the controller look like a distinct app module
+    st.markdown("""<style>
+        .stAppToolbar {visibility: hidden;} 
+        .block-container {max-width: 95rem !important;} /* Force controller to be wide */
+    </style>""", unsafe_allow_html=True)
+    
+    st.markdown("<h1 style='color: #1F2937; margin-bottom: 0px;'>✨ Portal Design Studio</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #6B7280; font-size: 16px;'>Configure the global aesthetics of the application. Changes preview instantly.</p>", unsafe_allow_html=True)
     st.markdown("---")
 
-    col_design, col_preview, col_prop = st.columns([2, 5, 2.5])
+    col_controls, col_preview = st.columns([1, 2.5], gap="large")
 
-    # ================= 1. DESIGN SELECTOR =================
-    with col_design:
-        st.subheader("🛠️ Design")
-        design_category = st.radio(
-            "Select Component",
-            ["Theme & Colors", "Header Details", "Typography"],
-            label_visibility="collapsed"
-        )
-        st.markdown("<br><br><br>", unsafe_allow_html=True)
-        st.info("💡 **Tip:** Adjust settings on the right to see them in the center preview.")
-
-    # ================= 2. PROPERTIES PANEL =================
-    with col_prop:
-        st.subheader("⚙️ Properties")
-        state = st.session_state.theme_state
+    # ================= 1. CONTROLS (LEFT COLUMN) =================
+    with col_controls:
+        if st.button("🚀 Publish Design to Live App", type="primary", use_container_width=True):
+            if save_to_database():
+                st.success("✅ Global Theme Updated!")
+                st.balloons()
         
-        # Notice we assign the widget's return value directly to our persistent state
-        if design_category == "Theme & Colors":
-            state['primary_color'] = st.color_picker("Primary Color", value=state['primary_color'])
-            state['bg_color'] = st.color_picker("Background Color", value=state['bg_color'])
-            state['card_shadow'] = st.checkbox("Enable Card Shadows", value=state['card_shadow'])
-            state['border_radius'] = st.slider("Border Radius (px)", min_value=0, max_value=24, step=2, value=state['border_radius'])
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        with st.expander("🎨 1. Quick Presets", expanded=True):
+            c1, c2 = st.columns(2)
+            if c1.button("🏛️ Gov Navy", use_container_width=True): apply_preset('#0F4C81', '#F4F6F9', 4, "'Inter', sans-serif")
+            if c2.button("🌲 Eco Green", use_container_width=True): apply_preset('#166534', '#F0FDF4', 8, "'Segoe UI', sans-serif")
+            if c1.button("🏢 Corp Slate", use_container_width=True): apply_preset('#334155', '#F8FAFC', 0, "Arial, sans-serif")
+            if c2.button("🔮 Modern Purp", use_container_width=True): apply_preset('#6366F1', '#FAFAFA', 12, "'Inter', sans-serif")
             
-        elif design_category == "Header Details":
-            state['app_name'] = st.text_input("Application Name", value=state['app_name'])
-            
-        elif design_category == "Typography":
-            font_opts = ["sans serif", "serif", "monospace", "Arial", "Inter"]
-            # Find current index to set as default
-            current_idx = font_opts.index(state['font_family']) if state['font_family'] in font_opts else 0
-            state['font_family'] = st.selectbox("Main Font Family", font_opts, index=current_idx)
+        with st.expander("🖌️ 2. Custom Colors & Identity"):
+            state['app_name'] = st.text_input("Portal Name", value=state['app_name'])
+            state['primary_color'] = st.color_picker("Primary Accent Color", value=state['primary_color'])
+            state['bg_color'] = st.color_picker("Page Background Color", value=state['bg_color'])
 
-    # ================= 3. LIVE PREVIEW =================
+        with st.expander("📏 3. Layout & Sizing"):
+            st.caption("Website Width (Rem units)")
+            state['content_width'] = st.slider("Container Max Width", min_value=50, max_value=120, value=state['content_width'], step=5, help="Controls how wide the content stretches across the screen.")
+            
+            st.caption("Component Structure")
+            state['border_radius'] = st.slider("Corner Roundness (px)", min_value=0, max_value=24, step=2, value=state['border_radius'])
+            
+            st.caption("Navigation Tabs Sizing")
+            tab_opts = ["Small", "Medium", "Large"]
+            state['tab_size'] = st.select_slider("Tab Bulkiness", options=tab_opts, value=state['tab_size'])
+
+        with st.expander("🔤 4. Typography"):
+            font_opts = ["'Inter', sans-serif", "'Segoe UI', sans-serif", "Arial, sans-serif", "Georgia, serif", "monospace"]
+            cur_font = state['font_family'] if state['font_family'] in font_opts else font_opts[0]
+            state['font_family'] = st.selectbox("Global Font Family", font_opts, index=font_opts.index(cur_font))
+            
+            state['base_font_size'] = st.slider("Base Font Size (px)", min_value=12, max_value=20, value=state['base_font_size'], step=1, help="Scales all text, headers, and inputs up or down.")
+
+    # ================= 2. LIVE PREVIEW (RIGHT COLUMN) =================
     with col_preview:
-        st.subheader("👁️ Live Preview")
+        st.subheader("👁️ Live Interactive Preview")
         
-        # Read strictly from the persistent dictionary, never from widget keys
-        state = st.session_state.theme_state
-        shadow_css = "box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" if state['card_shadow'] else "border: 1px solid #ddd;"
+        # Extract active states for preview mapping
         primary = state['primary_color']
         bg = state['bg_color']
         radius = state['border_radius']
         font = state['font_family']
+        base_font = state['base_font_size']
+        width = state['content_width']
+        tab_sz = state['tab_size']
         app_name = state['app_name']
         
+        # Tab parsing logic
+        tab_p = "8px 16px" if tab_sz == "Small" else "16px 32px" if tab_sz == "Large" else "12px 24px"
+        tab_f = f"{base_font - 2}px" if tab_sz == "Small" else f"{base_font + 2}px" if tab_sz == "Large" else f"{base_font}px"
+        
+        # We wrap the preview in a simulated "Browser Window" container
         preview_html = f"""
-        <div style="background-color: {bg}; padding: 20px; border-radius: 8px; border: 2px dashed #ccc; font-family: {font};">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
-                <h2 style="color: {primary}; margin: 0;">{app_name}</h2>
-                <div style="color: #666;">🔔 👤 Admin</div>
+        <div style="background: #E5E7EB; padding: 15px; border-radius: 10px 10px 0 0; display: flex; gap: 8px;">
+            <div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56;"></div>
+            <div style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e;"></div>
+            <div style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f;"></div>
+        </div>
+        <div style="background-color: {bg}; padding: 30px; border: 1px solid #D1D5DB; border-top: none; border-radius: 0 0 10px 10px; font-family: {font}; min-height: 500px; display: flex; flex-direction: column; align-items: center;">
+            
+            <!-- Simulated Website Container Width -->
+            <div style="width: 100%; max-width: {width}%; transition: max-width 0.3s ease;">
+                
+                <!-- Header -->
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
+                    <h2 style="color: {primary}; margin: 0; font-size: {base_font * 1.8}px; font-weight: 700;">{app_name}</h2>
+                    <div style="color: #6B7280; font-size: {base_font}px;">👤 User Profile</div>
+                </div>
+
+                <!-- Simulated Tabs -->
+                <div style="display: flex; gap: 10px; border-bottom: 2px solid #E5E7EB; margin-bottom: 25px;">
+                    <div style="padding: {tab_p}; border-bottom: 3px solid {primary}; color: {primary}; font-weight: 600; font-size: {tab_f}; cursor: pointer;">Dashboard</div>
+                    <div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Reports</div>
+                    <div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Settings</div>
+                </div>
+
+                <!-- Simulated KPI Cards -->
+                <div style="display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Total Users</div>
+                        <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #1F2937;">1,284</div>
+                    </div>
+                    <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                        <div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Server Status</div>
+                        <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #10B981;">Online</div>
+                    </div>
+                </div>
+
+                <!-- Simulated Input & Button Area -->
+                <div style="background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                    <h3 style="color: {primary}; margin-top: 0; font-size: {base_font * 1.3}px;">Quick Action Form</h3>
+                    <label style="font-size: {base_font}px; color: #374151; display: block; margin-bottom: 5px;">Search Query</label>
+                    <input type="text" placeholder="Enter keywords..." disabled style="width: 100%; padding: 10px; border-radius: {radius}px; border: 1px solid #D1D5DB; margin-bottom: 15px; font-size: {base_font}px; font-family: {font}; box-sizing: border-box;">
+                    
+                    <button style="background-color: {primary}; color: white; border: none; padding: 10px 20px; border-radius: {radius}px; cursor: pointer; font-size: {base_font}px; font-weight: 500; font-family: {font};">
+                        Submit Query (Primary Button)
+                    </button>
+                </div>
             </div>
-            <div style="display: flex; gap: 15px; margin-bottom: 20px;">
-                <div style="flex: 1; background: white; padding: 15px; border-radius: {radius}px; {shadow_css} border-left: 5px solid {primary};">
-                    <div style="font-size: 12px; color: #666;">Total Activities</div>
-                    <div style="font-size: 24px; font-weight: bold; color: #333;">142</div>
-                </div>
-                <div style="flex: 1; background: white; padding: 15px; border-radius: {radius}px; {shadow_css} border-left: 5px solid {primary};">
-                    <div style="font-size: 12px; color: #666;">Funds Converged</div>
-                    <div style="font-size: 24px; font-weight: bold; color: #333;">₹ 25.5 L</div>
-                </div>
-                <div style="flex: 1; background: white; padding: 15px; border-radius: {radius}px; {shadow_css} border-left: 5px solid {primary};">
-                    <div style="font-size: 12px; color: #666;">Completion</div>
-                    <div style="font-size: 24px; font-weight: bold; color: #333;">84%</div>
-                </div>
-            </div>
-            <button style="background-color: {primary}; color: white; border: none; padding: 10px 20px; border-radius: {radius}px; cursor: pointer; width: 100%;">
-                Save Convergence Activity (Primary Button Preview)
-            </button>
         </div>
         """
         st.markdown(preview_html, unsafe_allow_html=True)
-        
-        if design_category in ["Theme & Colors"]:
-            st.markdown("<br>", unsafe_allow_html=True)
-            mock_data = pd.DataFrame({'Department': ['Edu', 'Health', 'Agri'], 'Value': [45, 30, 25]})
-            fig = px.bar(mock_data, x='Department', y='Value', title="Chart Color Preview")
-            fig.update_traces(marker_color=primary)
-            fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(t=30, b=0, l=0, r=0))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-
-    # ================= 4. ACTION BAR =================
-    st.markdown("---")
-    action_col1, action_col2, action_col3 = st.columns([1, 1, 1])
-    
-    with action_col1:
-        if st.button("🔄 Reset to Default", use_container_width=True):
-            del st.session_state['theme_state']
-            st.rerun()
-            
-    with action_col3:
-        if st.button("🚀 Publish to Live", type="primary", use_container_width=True):
-            success = save_to_database()
-            if success:
-                st.success("✅ Changes successfully published! All application pages now use this design.")
-                st.balloons()
