@@ -44,15 +44,17 @@ def show():
     role = user['role']
 
     # ======================== MASTER DATA FETCH ========================
-    departments = supabase.table("departments").select("id,department_name").execute().data
-    districts = supabase.table("districts").select("id,district_name").execute().data
-    blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data
+    departments = supabase.table("departments").select("id,department_name").execute().data or []
+    wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
+    districts = supabase.table("districts").select("id,district_name").execute().data or []
+    blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
     
     # Fetch Activities for dynamic dropdowns
-    activities = supabase.table("activities").select("*").eq("active", True).execute().data
-    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data
+    activities = supabase.table("activities").select("*").eq("active", True).execute().data or []
+    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
 
     dept_map = {d['id']: d['department_name'] for d in departments}
+    wing_map = {w['id']: w for w in wings}
     dist_map = {d['id']: d['district_name'] for d in districts}
     block_map = {b['id']: b['block_name'] for b in blocks}
 
@@ -70,20 +72,7 @@ def show():
         st.subheader("Department Targets – FY 2026-27")
         st.caption("Set and view annual physical and financial targets mapped directly to approved activities.")
         
-        if role == 'department':
-            allowed_dept = user.get('department_id')
-            allowed_district = user.get('district_id')
-            t_depts = [d for d in departments if d['id'] == allowed_dept]
-            t_dists = [d for d in districts if d['id'] == allowed_district]
-        elif role == 'district':
-            allowed_district = user.get('district_id')
-            t_depts = departments
-            t_dists = [d for d in districts if d['id'] == allowed_district]
-        else: 
-            t_depts = departments
-            t_dists = districts if role == 'superadmin' else [d for d in districts if d['id'] == user.get('district_id')]
-
-        t_dept_dict = {d['department_name']: d['id'] for d in t_depts}
+        t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
         t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
 
         col_t1, col_t2 = st.columns([1.5, 1])
@@ -93,16 +82,48 @@ def show():
             if role == 'block':
                 st.info("Target setting is managed at the District/Department level. You can view targets on the left.")
             else:
-                # Using a container instead of an st.form so the Activity dropdown reacts immediately to Department changes
                 with st.container(border=True):
+                    
+                    # --- DEPARTMENT / WING CONTEXT LOGIC ---
+                    active_dept_id = None
+                    active_wing_id = None
+                    dist_id = None
+
                     if role == 'department':
-                        dept_sel = list(t_dept_dict.keys())[0] if t_dept_dict else None
+                        active_dept_id = user.get('department_id')
+                        active_wing_id = user.get('wing_id')
+                        
+                        dept_name = dept_map.get(active_dept_id, "Unknown Department")
+                        if active_wing_id and active_wing_id in wing_map:
+                            display_text = f"{dept_name} ➔ {wing_map[active_wing_id]['wing_name']}"
+                        else:
+                            display_text = f"{dept_name} (Main Department)"
+                            
+                        st.markdown(f"**Department / Wing:**<br>{display_text}", unsafe_allow_html=True)
+                        
                         dist_sel = list(t_dist_dict.keys())[0] if t_dist_dict else None
-                        st.text(f"Department: {dept_sel}")
-                        st.text(f"District: {dist_sel}")
-                    else:
-                        dept_sel = st.selectbox("Department*", list(t_dept_dict.keys()) if t_dept_dict else ["None"])
+                        dist_id = user.get('district_id')
+                        st.markdown(f"**District:** {dist_sel}")
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                    else: # Superadmin or District Admin
+                        dept_options = []
+                        for d in departments:
+                            dept_options.append({"label": f"{d['department_name']} (Main Department)", "dept_id": d['id'], "wing_id": None})
+                        for w in wings:
+                            p_name = dept_map.get(w['department_id'], "Unknown Department")
+                            dept_options.append({"label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]", "dept_id": w['department_id'], "wing_id": w['id']})
+                        
+                        dept_options = sorted(dept_options, key=lambda x: x['label'])
+                        dept_labels = [opt['label'] for opt in dept_options]
+                        
+                        sel_dept_label = st.selectbox("Department / Wing*", dept_labels)
+                        selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
+                        active_dept_id = selected_opt['dept_id']
+                        active_wing_id = selected_opt['wing_id']
+                        
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
+                        dist_id = t_dist_dict.get(dist_sel)
 
                     # Editable Project Head Logic
                     project_head_options = [
@@ -122,13 +143,12 @@ def show():
                         project_head = ph_sel
 
                     # Dynamic Activity Dropdown based on Department Selection
-                    active_dept_id = t_dept_dict.get(dept_sel) if dept_sel != "None" else None
                     mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == active_dept_id]
                     valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
                     valid_act_names = [a['activity_name'] for a in valid_activities]
                     
                     if not valid_act_names:
-                        st.warning(f"No approved activities mapped to {dept_sel}.")
+                        st.warning("No approved activities mapped to this parent department.")
                         activity = st.selectbox("Approved Activity / Work Category*", ["No activities available"], disabled=True)
                     else:
                         activity = st.selectbox("Approved Activity / Work Category*", valid_act_names)
@@ -149,7 +169,7 @@ def show():
                     submitted_target = st.button("Save Department Target", type="primary", use_container_width=True)
                     
                     if submitted_target:
-                        if dept_sel == "None" or dist_sel == "None":
+                        if not active_dept_id or not dist_id:
                             st.error("Invalid Department or District.")
                         elif not project_head or not project_head.strip():
                             st.error("Project Head name cannot be empty.")
@@ -158,11 +178,9 @@ def show():
                         elif expected_persondays <= 0:
                             st.error("Expected Persondays is a mandatory field.")
                         else:
-                            dept_id = t_dept_dict[dept_sel]
-                            dist_id = t_dist_dict[dist_sel]
-
                             target_record = {
-                                "department_id": dept_id,
+                                "department_id": active_dept_id,
+                                "wing_id": active_wing_id,
                                 "district_id": dist_id,
                                 "financial_year": "2026-27",
                                 "project_head": project_head.strip(),
@@ -177,7 +195,16 @@ def show():
                             }
 
                             try:
-                                existing = supabase.table("department_targets").select("id").eq("department_id", dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity).execute().data
+                                # Ensure we query safely handling NULL wings
+                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity)
+                                
+                                if active_wing_id:
+                                    q_existing = q_existing.eq("wing_id", active_wing_id)
+                                else:
+                                    q_existing = q_existing.is_("wing_id", "null")
+                                    
+                                existing = q_existing.execute().data
+                                
                                 if existing:
                                     target_id = existing[0]['id']
                                     supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
@@ -190,22 +217,38 @@ def show():
                                     st.success("Target added successfully!")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Error saving target: {e}")
+                                if "wing_id" in str(e):
+                                    st.error("🚨 Database Error: The `wing_id` column is missing from your `department_targets` table in Supabase. Please add it as type `int8` to proceed.")
+                                else:
+                                    st.error(f"Error saving target: {e}")
 
         with col_t1:
             st.markdown("#### Existing Targets Dashboard")
             query_t = supabase.table("department_targets").select("*")
             if role == 'department':
                 query_t = query_t.eq("department_id", user.get('department_id')).eq("district_id", user.get('district_id'))
+                if user.get('wing_id'):
+                    query_t = query_t.eq("wing_id", user.get('wing_id'))
+                else:
+                    query_t = query_t.is_("wing_id", "null")
             elif role in ['district', 'block']:
                 query_t = query_t.eq("district_id", user.get('district_id'))
             
             data_t = query_t.execute().data
             if data_t:
                 df_t = pd.DataFrame(data_t)
-                df_t['Department'] = df_t['department_id'].map(dept_map)
                 
-                # Check for project head safely (for backward compatibility before column was added)
+                # Format Department & Wing nicely for the display table
+                def format_dept_display(row):
+                    d_name = dept_map.get(row.get('department_id'), 'Unknown')
+                    w_id = row.get('wing_id')
+                    if w_id and not pd.isna(w_id) and w_id in wing_map:
+                        return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
+                    return f"{d_name} (Main)"
+                    
+                df_t['Department / Wing'] = df_t.apply(format_dept_display, axis=1)
+                
+                # Check for project head safely (for backward compatibility)
                 if 'project_head' not in df_t.columns:
                     df_t['project_head'] = "N/A"
                 
@@ -219,7 +262,7 @@ def show():
                     'expected_persondays': 'Persondays'
                 }, inplace=True)
 
-                disp_cols = ['Department', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
+                disp_cols = ['Department / Wing', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
                 
                 buffer = io.BytesIO()
