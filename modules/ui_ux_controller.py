@@ -5,27 +5,41 @@ from utils.db import get_supabase
 from utils.theme import load_theme
 
 def init_ui_state():
-    """Initializes the persistent theme dictionary."""
+    """Initializes the persistent theme dictionary safely."""
+    active = load_theme()
+    
+    # Create the dictionary if it doesn't exist at all
     if 'theme_state' not in st.session_state:
-        active = load_theme()
-        st.session_state.theme_state = {
-            'primary_color': active.get('primary_color', '#0F4C81'),
-            'bg_color': active.get('bg_color', '#F4F6F9'),
-            'app_name': active.get('app_name', 'VB-G RAM G Convergence'),
-            'font_family': active.get('font_family', "'Inter', sans-serif"),
-            'border_radius': active.get('border_radius', 6),
-            'base_font_size': active.get('base_font_size', 14),
-            'content_width': active.get('content_width', 75),
-            'tab_size': active.get('tab_size', 'Medium')
-        }
+        st.session_state.theme_state = {}
+        
+    # Define what the dictionary SHOULD contain
+    defaults = {
+        'primary_color': active.get('primary_color', '#0F4C81'),
+        'bg_color': active.get('bg_color', '#F4F6F9'),
+        'app_name': active.get('app_name', 'VB-G RAM G Convergence'),
+        'font_family': active.get('font_family', "'Inter', sans-serif"),
+        'border_radius': active.get('border_radius', 6),
+        'base_font_size': active.get('base_font_size', 14),
+        'content_width': active.get('content_width', 75),
+        'tab_size': active.get('tab_size', 'Medium')
+    }
+    
+    # Loop through and add any missing keys (fixes the KeyError)
+    for key, default_value in defaults.items():
+        if key not in st.session_state.theme_state:
+            st.session_state.theme_state[key] = default_value
 
 def apply_preset(primary, bg, radius, font):
     """Helper to apply quick color presets."""
     st.session_state.theme_state.update({
-        'primary_color': primary, 'bg_color': bg, 'border_radius': radius, 'font_family': font
+        'primary_color': primary, 
+        'bg_color': bg, 
+        'border_radius': radius, 
+        'font_family': font
     })
 
 def save_to_database():
+    """Saves the current design to the database."""
     supabase = get_supabase()
     user = get_current_user()
     state = st.session_state.theme_state
@@ -45,11 +59,12 @@ def save_to_database():
     }
     
     try:
+        # Deactivate any other active themes, then upsert ours as ID 1
         supabase.table("ui_settings").update({"is_active": False}).neq("id", "0").execute()
         supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
         return True
     except Exception as e:
-        st.error(f"Failed to save: {e}")
+        st.error(f"Failed to save to database. Ensure all columns exist! Error: {e}")
         return False
 
 def show():
@@ -73,7 +88,7 @@ def show():
     with col_controls:
         if st.button("🚀 Publish Design to Live App", type="primary", use_container_width=True):
             if save_to_database():
-                st.success("✅ Global Theme Updated!")
+                st.success("✅ Global Theme Updated Successfully!")
                 st.balloons()
         
         st.markdown("<br>", unsafe_allow_html=True)
