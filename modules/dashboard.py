@@ -192,7 +192,7 @@ def show():
             
             w_dist_offs = len([u for u in users_data if u.get('wing_id') == w_id and u.get('block_id') is None])
             w_blk_offs = len([u for u in users_data if u.get('wing_id') == w_id and u.get('block_id') is not None])
-            w_acts = len([m for m in act_dept_mapping if m.get('department_id'] == d_id])
+            w_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
             w_blocks = 0
 
             matrix_rows.append({
@@ -294,7 +294,7 @@ def show():
                 target_w_id_safe = None if pd.isna(w_id) else w_id
                 
                 if target_w_id_safe and target_w_id_safe in wing_map:
-                    dept_display = f"{d_name} ➔ {wing_map[target_w_id_safe]['wing_name']}"
+                    dept_display = f"{d_name} ➔ {wing_map[target_w_id_safe]}"
                 else:
                     dept_display = f"{d_name} (Main Dept)"
 
