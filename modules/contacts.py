@@ -7,14 +7,6 @@ import streamlit as st
 from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
-def show():
-    # 1. Apply the global theme immediately
-    theme = apply_global_theme()
-    
-    # 2. Render Page Content
-    # Use the app_name from the global theme if needed
-    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
-
 def inject_custom_css():
     """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
     st.markdown(
@@ -67,10 +59,15 @@ def inject_tab_css():
 
 
 def show():
+    # 1. Apply the global theme immediately
+    theme = apply_global_theme()
+    primary_color = theme.get("primary_color", "#1F77B4")
+    
     inject_custom_css()
     inject_tab_css()
+    
     st.markdown(
-        "<h1 style='color: #1F77B4;'>📇 Official Contact Directory</h1>",
+        f"<h1 style='color: {primary_color};'>📇 Official Contact Directory</h1>",
         unsafe_allow_html=True,
     )
     st.markdown("---")
@@ -261,12 +258,28 @@ def show():
                 "Email ID",
             ]
 
+            # --- ADD QUICK SEARCH ABOVE TABLE ---
+            search_query = st.text_input("🔍 Quick Search", placeholder="Search by name, designation, department, block...")
+            
+            if search_query:
+                # Apply a global text search across all columns in the display dataframe
+                mask = display_df.apply(lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(), axis=1)
+                filtered_df = display_df[mask]
+            else:
+                filtered_df = display_df
+
+            # Display the table FIRST
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # --- MOVE EXPORT OPTIONS BELOW TABLE ---
             col_dl, col_pr, _ = st.columns([1.5, 1.8, 6.7])
 
             buffer = io.BytesIO()
             try:
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                    display_df.to_excel(writer, index=False, sheet_name="Contacts")
+                    # Using filtered_df so downloads match the search query!
+                    filtered_df.to_excel(writer, index=False, sheet_name="Contacts")
                 excel_data = buffer.getvalue()
                 col_dl.download_button(
                     label="📥 Download Excel",
@@ -278,7 +291,7 @@ def show():
                     use_container_width=True,
                 )
             except Exception:
-                csv = display_df.to_csv(index=False).encode("utf-8")
+                csv = filtered_df.to_csv(index=False).encode("utf-8")
                 col_dl.download_button(
                     label="📥 Download CSV",
                     data=csv,
@@ -287,8 +300,9 @@ def show():
                     use_container_width=True,
                 )
 
-            html_table = display_df.to_html(index=False)
-            printable_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Official Contact Directory</title><style>body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 11px; color: #333; }} h2 {{ text-align: center; color: #1F77B4; border-bottom: 2px solid #1F77B4; padding-bottom: 10px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ border: 1px solid #dddddd; padding: 6px; text-align: left; }} th {{ background-color: #f2f2f2; color: #000; }} @page {{ size: A4 landscape; margin: 15mm; }} @media print {{ .no-print {{ display: none; }} body {{ padding: 0; }} }}</style></head><body onload="window.print()"><div class="no-print" style="text-align: center; margin-bottom: 20px; background-color: #f8f9fa; padding: 15px; border-radius: 8px;"><button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #1F77B4; color: white; border: none; border-radius: 4px;">🖨️ Print or Save as PDF</button></div><h2>Official Contact Directory & Statutory Roles</h2>{html_table}</body></html>"""
+            html_table = filtered_df.to_html(index=False)
+            printable_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Official Contact Directory</title><style>body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 11px; color: #333; }} h2 {{ text-align: center; color: {primary_color}; border-bottom: 2px solid {primary_color}; padding-bottom: 10px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ border: 1px solid #dddddd; padding: 6px; text-align: left; }} th {{ background-color: #f2f2f2; color: #000; }} @page {{ size: A4 landscape; margin: 15mm; }} @media print {{ .no-print {{ display: none; }} body {{ padding: 0; }} }}</style></head><body onload="window.print()"><div class="no-print" style="text-align: center; margin-bottom: 20px; background-color: #f8f9fa; padding: 15px; border-radius: 8px;"><button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: {primary_color}; color: white; border: none; border-radius: 4px;">🖨️ Print or Save as PDF</button></div><h2>Official Contact Directory & Statutory Roles</h2>{html_table}</body></html>"""
+            
             col_pr.download_button(
                 label="🖨️ Download Printable Document",
                 data=printable_html,
@@ -297,8 +311,6 @@ def show():
                 use_container_width=True,
             )
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.info("No contact records found for your jurisdiction.")
 
