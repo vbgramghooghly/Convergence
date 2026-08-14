@@ -5,7 +5,15 @@ import io
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
+from utils.theme import apply_global_theme
 
+def show():
+    # 1. Apply the global theme immediately
+    theme = apply_global_theme()
+    
+    # 2. Render Page Content
+    # Use the app_name from the global theme if needed
+    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
 def safe_parse_date(date_val):
     """
     Safely parses dates from the database. 
