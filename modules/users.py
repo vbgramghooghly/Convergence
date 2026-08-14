@@ -1,4 +1,4 @@
-import streamlit as pd
+import streamlit as st
 import pandas as pd
 from supabase import create_client
 from utils.db import get_supabase
@@ -8,15 +8,15 @@ from config.settings import SUPABASE_URL, SUPABASE_KEY, SERVICE_KEY
 from utils.theme import apply_global_theme
 
 def show():
-    # 1. Apply the global theme immediately
-    theme = apply_global_theme()
-    
-    # 2. Render Page Content
-    # Use the app_name from the global theme if needed
-    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
-def show():
     require_role('superadmin')
-    st.title("User Management")
+    
+    # ---------- APPLY GLOBAL THEME ----------
+    theme = apply_global_theme()
+    app_name = theme.get('app_name', 'Application')
+    
+    # ---------- RENDER PAGE HEADER ----------
+    st.markdown(f"<h1 style='color: {theme.get('primary_color', '#1F77B4')};'>{app_name} User Management</h1>", unsafe_allow_html=True)
+    
     supabase = get_supabase()
     user = get_current_user()
 
