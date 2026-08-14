@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as pd
 import pandas as pd
 from supabase import create_client
 from utils.db import get_supabase
@@ -146,7 +146,7 @@ def show():
                 if opt['dept_id'] == cur_dept_id and opt['wing_id'] == cur_wing_id:
                     dept_index = i + 1 
                     break
-                    
+                
         selected_dept_label = st.selectbox("Department / Wing", dept_options_with_placeholder, index=dept_index)
         
         if selected_dept_label != "-- Select Department or Wing --":
@@ -182,7 +182,7 @@ def show():
                 st.rerun()
             except Exception as e:
                 st.error(f"Failed to update user. Note: Ensure 'wing_id' column exists in 'users' table. Error details: {e}")
-            
+        
     # --- ADMIN PASSWORD ALTERNATION ---
     with st.expander("🔑 Change / Alternate User Password"):
         st.warning("This will immediately overwrite the user's current password.")
@@ -263,7 +263,7 @@ def show():
         if not new_email or not new_password or not new_fullname:
             st.error("Display Name, Login Username, and Password are required.")
             st.stop()
-        
+    
         formatted_email = f"{new_email.strip()}@hooghly.gov.in"
 
         try:
