@@ -27,6 +27,13 @@ def show():
     # ======================== 1. FETCH MASTER DATA ========================
     depts = supabase.table("departments").select("id,department_name").execute().data or []
     dept_map = {d['id']: d['department_name'] for d in depts}
+    
+    # Fetch Wings to accurately display Sub-departments
+    wings = supabase.table("department_wings").select("id, department_id, wing_name").execute().data or []
+    wing_map = {w['id']: w['wing_name'] for w in wings}
+
+    # Fetch Users to identify the assigned Nodal Officers/Logins for Departments & Wings
+    nodal_users = supabase.table("users").select("*").eq("role", "department").execute().data or []
 
     # ======================== 2. FETCH REGISTERS & TARGETS ========================
     q_targets = supabase.table("department_targets").select("*")
@@ -93,15 +100,44 @@ def show():
         # 🚨 NEW ALERT SECTION: ACTIVITY TARGET vs CAPTURE COMPLIANCE
         # =====================================================================
         st.markdown("<h3 style='color: #D32F2F;'>🚨 Activity-wise Target Compliance & Alert Tracker</h3>", unsafe_allow_html=True)
-        st.caption("Highlights mismatches between Departmental Targets and the actual number of activities entered in the Convergence Register. **Red indicates immediate attention is required.**")
+        st.caption("Highlights mismatches between Department/Wing Targets and actual entries. Displays the responsible Nodal Officer for immediate follow-up.")
         
         compliance_data = []
         if not df_targets.empty:
             for idx, row in df_targets.iterrows():
                 d_id = row['department_id']
+                w_id = row.get('wing_id')
                 act = row['activity']
                 target_val = int(row['desired_target'])
                 
+                # 1. Format Department / Wing Name
+                d_name = dept_map.get(d_id, "Unknown")
+                target_w_id_safe = None if pd.isna(w_id) else w_id
+                
+                if target_w_id_safe and target_w_id_safe in wing_map:
+                    dept_display = f"{d_name} ➔ {wing_map[target_w_id_safe]}"
+                else:
+                    dept_display = f"{d_name} (Main Dept)"
+
+                # 2. Map the responsible Nodal Officer(s) tied to this exact Dept & Wing
+                contacts = []
+                for u in nodal_users:
+                    u_dept = u.get('department_id')
+                    u_wing = u.get('wing_id')
+                    user_w_id_safe = None if pd.isna(u_wing) else u_wing
+                    
+                    if u_dept == d_id and user_w_id_safe == target_w_id_safe:
+                        name_desig = u.get('full_name', 'Unknown Officer')
+                        # Check for a phone or mobile column dynamically
+                        phone = u.get('phone', u.get('mobile', ''))
+                        if phone:
+                            contacts.append(f"{name_desig} (☎ {phone})")
+                        else:
+                            contacts.append(name_desig)
+                
+                nodal_display = " | ".join(contacts) if contacts else "⚠️ No Login Assigned"
+
+                # 3. Calculate Gap
                 entered_count = 0
                 if not df_reg.empty:
                     # Filter register strictly to the same department
@@ -112,7 +148,7 @@ def show():
                         
                 gap = entered_count - target_val
                 
-                # Assign Status Texts
+                # 4. Assign Status Texts
                 if gap < 0:
                     status = "Less Entered (Needs Update)"
                 elif gap > 0:
@@ -121,7 +157,8 @@ def show():
                     status = "Target Matched"
                     
                 compliance_data.append({
-                    "Department": dept_map.get(d_id, "Unknown"),
+                    "Department / Wing": dept_display,
+                    "Nodal Person (Login)": nodal_display,
                     "Target Activity": act,
                     "Target Set": target_val,
                     "Entries Captured": entered_count,
