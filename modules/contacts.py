@@ -392,325 +392,327 @@ def show():
                     except Exception as e:
                         st.error(f"Error deleting contact: {e}")
 
-        with st.form("update_contact_form"):
-            st.markdown("#### 1. Official Details")
-            col1, col2 = st.columns(2)
+        # --- FORM REMOVED TO ALLOW INSTANT DYNAMIC DROPDOWN UPDATES ---
+        st.markdown("#### 1. Official Details")
+        col1, col2 = st.columns(2)
 
-            name_val = existing_record.get("full_name", "")
-            name = col1.text_input("Full Name of Official*", value=name_val)
+        name_val = existing_record.get("full_name", "")
+        name = col1.text_input("Full Name of Official*", value=name_val)
 
-            curr_desig_id = existing_record.get("designation_id")
-            curr_desig_name = next(
-                (k for k, v in desig_dict.items() if v == curr_desig_id),
-                list(desig_dict.keys())[0] if desig_dict else "",
+        curr_desig_id = existing_record.get("designation_id")
+        curr_desig_name = next(
+            (k for k, v in desig_dict.items() if v == curr_desig_id),
+            list(desig_dict.keys())[0] if desig_dict else "",
+        )
+        desig_idx = (
+            list(desig_dict.keys()).index(curr_desig_name)
+            if curr_desig_name in desig_dict
+            else 0
+        )
+        sel_desig = col2.selectbox(
+            "Designation*",
+            options=list(desig_dict.keys()) if desig_dict else ["None"],
+            index=desig_idx,
+        )
+
+        st.markdown("#### 2. Department & Level Hierarchy")
+        col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
+
+        curr_lvl = existing_record.get("office_level") or "District"
+        lvl_idx = (
+            OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
+        )
+        sel_lvl = col_l1.selectbox("Posting Level*", OFFICE_LEVELS, index=lvl_idx)
+
+        sub_div_val = existing_record.get("sub_division") or ""
+        if sel_lvl == "Sub Division":
+            sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
+        else:
+            sel_sub_div = col_l2.text_input(
+                "Sub Division Name (If Applicable)", value=sub_div_val
             )
-            desig_idx = (
-                list(desig_dict.keys()).index(curr_desig_name)
-                if curr_desig_name in desig_dict
+
+        if role == "department":
+            fixed_dept_name = dept_map.get(user.get("department_id"), "Your Department")
+            col_l3.text_input("Parent Department", value=fixed_dept_name, disabled=True)
+            selected_parent_id = user.get("department_id")
+            sel_parent_dept = fixed_dept_name
+        else:
+            curr_dept_id = existing_record.get("department_id")
+            curr_dept_name = next(
+                (k for k, v in dept_dict.items() if v == curr_dept_id),
+                list(dept_dict.keys())[0] if dept_dict else "",
+            )
+            dept_idx = (
+                list(dept_dict.keys()).index(curr_dept_name)
+                if curr_dept_name in dept_dict
                 else 0
             )
-            sel_desig = col2.selectbox(
-                "Designation*",
-                options=list(desig_dict.keys()) if desig_dict else ["None"],
-                index=desig_idx,
+            sel_parent_dept = col_l3.selectbox(
+                "Parent Department*",
+                options=list(dept_dict.keys()) if dept_dict else ["None"],
+                index=dept_idx,
             )
+            selected_parent_id = dept_dict.get(sel_parent_dept)
 
-            st.markdown("#### 2. Department & Level Hierarchy")
-            col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
+        # Correctly filters wings based on the selected Parent Department in real time
+        valid_wings = [
+            w for w in wings if w["department_id"] == selected_parent_id
+        ]
+        wing_options = {"Directly under Parent Department": None}
+        for w in valid_wings:
+            wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
 
-            curr_lvl = existing_record.get("office_level") or "District"
-            lvl_idx = (
-                OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
-            )
-            sel_lvl = col_l1.selectbox("Posting Level*", OFFICE_LEVELS, index=lvl_idx)
+        if role == "department" and user.get("wing_id"):
+            filtered_wings = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
+            wing_options = filtered_wings
 
-            sub_div_val = existing_record.get("sub_division") or ""
-            if sel_lvl == "Sub Division":
-                sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
-            else:
-                sel_sub_div = col_l2.text_input(
-                    "Sub Division Name (If Applicable)", value=sub_div_val
+        curr_wing_id = existing_record.get("wing_id") or user.get("wing_id")
+        curr_wing_name = next(
+            (k for k, v in wing_options.items() if v == curr_wing_id),
+            list(wing_options.keys())[0],
+        )
+        wing_idx = (
+            list(wing_options.keys()).index(curr_wing_name)
+            if curr_wing_name in wing_options
+            else 0
+        )
+        sel_wing = st.selectbox(
+            "Specific Wing / Scheme / Parastatal",
+            options=list(wing_options.keys()),
+            index=wing_idx,
+        )
+
+        # JURISDICTION MAPPING
+        st.markdown("#### 3. Primary Jurisdiction Mapping")
+        col_j1, col_j2 = st.columns(2)
+
+        curr_dist = existing_record.get("district_id") or user.get("district_id")
+        if role in ["superadmin", "district"]:
+            dist_names = list(dist_dict.keys())
+            idx = 0
+            if curr_dist:
+                curr_dist_name = next(
+                    (k for k, v in dist_dict.items() if v == curr_dist), dist_names[0]
                 )
-
-            if role == "department":
-                fixed_dept_name = dept_map.get(user.get("department_id"), "Your Department")
-                col_l3.text_input("Parent Department", value=fixed_dept_name, disabled=True)
-                selected_parent_id = user.get("department_id")
-                sel_parent_dept = fixed_dept_name
-            else:
-                curr_dept_id = existing_record.get("department_id")
-                curr_dept_name = next(
-                    (k for k, v in dept_dict.items() if v == curr_dept_id),
-                    list(dept_dict.keys())[0] if dept_dict else "",
-                )
-                dept_idx = (
-                    list(dept_dict.keys()).index(curr_dept_name)
-                    if curr_dept_name in dept_dict
+                idx = (
+                    dist_names.index(curr_dist_name)
+                    if curr_dist_name in dist_names
                     else 0
                 )
-                sel_parent_dept = col_l3.selectbox(
-                    "Parent Department*",
-                    options=list(dept_dict.keys()) if dept_dict else ["None"],
-                    index=dept_idx,
-                )
-                selected_parent_id = dept_dict.get(sel_parent_dept)
-
-            valid_wings = [
-                w for w in wings if w["department_id"] == selected_parent_id
-            ]
-            wing_options = {"Directly under Parent Department": None}
-            for w in valid_wings:
-                wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
-
-            if role == "department" and user.get("wing_id"):
-                filtered_wings = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
-                wing_options = filtered_wings
-
-            curr_wing_id = existing_record.get("wing_id") or user.get("wing_id")
-            curr_wing_name = next(
-                (k for k, v in wing_options.items() if v == curr_wing_id),
-                list(wing_options.keys())[0],
+            sel_dist = col_j1.selectbox("Primary District*", dist_names, index=idx)
+            target_district_id = dist_dict[sel_dist]
+        else:
+            curr_dist_name = next(
+                (k for k, v in dist_dict.items() if v == user.get("district_id")),
+                "Unknown",
             )
-            wing_idx = (
-                list(wing_options.keys()).index(curr_wing_name)
-                if curr_wing_name in wing_options
-                else 0
-            )
-            sel_wing = st.selectbox(
-                "Specific Wing / Scheme / Parastatal",
-                options=list(wing_options.keys()),
-                index=wing_idx,
-            )
+            col_j1.text_input("Primary District", value=curr_dist_name, disabled=True)
+            target_district_id = user.get("district_id")
 
-            # JURISDICTION MAPPING
-            st.markdown("#### 3. Primary Jurisdiction Mapping")
-            col_j1, col_j2 = st.columns(2)
-
-            curr_dist = existing_record.get("district_id") or user.get("district_id")
-            if role in ["superadmin", "district"]:
-                dist_names = list(dist_dict.keys())
-                idx = 0
-                if curr_dist:
-                    curr_dist_name = next(
-                        (k for k, v in dist_dict.items() if v == curr_dist), dist_names[0]
-                    )
-                    idx = (
-                        dist_names.index(curr_dist_name)
-                        if curr_dist_name in dist_names
-                        else 0
-                    )
-                sel_dist = col_j1.selectbox("Primary District*", dist_names, index=idx)
-                target_district_id = dist_dict[sel_dist]
-            else:
-                curr_dist_name = next(
-                    (k for k, v in dist_dict.items() if v == user.get("district_id")),
+        if sel_lvl in ["Block", "Gram Panchayat"]:
+            if role in ["block", "department"] and user.get("block_id"):
+                curr_block_name = next(
+                    (k for k, v in block_dict.items() if v == user.get("block_id")),
                     "Unknown",
                 )
-                col_j1.text_input("Primary District", value=curr_dist_name, disabled=True)
-                target_district_id = user.get("district_id")
-
-            if sel_lvl in ["Block", "Gram Panchayat"]:
-                if role in ["block", "department"] and user.get("block_id"):
-                    curr_block_name = next(
-                        (k for k, v in block_dict.items() if v == user.get("block_id")),
-                        "Unknown",
-                    )
-                    col_j2.text_input("Primary Block", value=curr_block_name, disabled=True)
-                    target_block_id = user.get("block_id")
-                else:
-                    valid_blocks = [
-                        b["block_name"]
-                        for b in blocks
-                        if b["district_id"] == target_district_id
-                    ]
-                    curr_block = existing_record.get("block_id")
-                    idx = 0
-                    if curr_block:
-                        curr_block_name = next(
-                            (k for k, v in block_dict.items() if v == curr_block),
-                            valid_blocks[0] if valid_blocks else "",
-                        )
-                        idx = (
-                            valid_blocks.index(curr_block_name)
-                            if curr_block_name in valid_blocks
-                            else 0
-                        )
-                    sel_block = col_j2.selectbox(
-                        "Primary Block*",
-                        valid_blocks if valid_blocks else ["None"],
-                        index=idx,
-                    )
-                    target_block_id = (
-                        block_dict.get(sel_block) if sel_block != "None" else None
-                    )
+                col_j2.text_input("Primary Block", value=curr_block_name, disabled=True)
+                target_block_id = user.get("block_id")
             else:
-                target_block_id = None
-                col_j2.info("Block selection not applicable for this Posting Level.")
+                valid_blocks = [
+                    b["block_name"]
+                    for b in blocks
+                    if b["district_id"] == target_district_id
+                ]
+                curr_block = existing_record.get("block_id")
+                idx = 0
+                if curr_block:
+                    curr_block_name = next(
+                        (k for k, v in block_dict.items() if v == curr_block),
+                        valid_blocks[0] if valid_blocks else "",
+                    )
+                    idx = (
+                        valid_blocks.index(curr_block_name)
+                        if curr_block_name in valid_blocks
+                        else 0
+                    )
+                sel_block = col_j2.selectbox(
+                    "Primary Block*",
+                    valid_blocks if valid_blocks else ["None"],
+                    index=idx,
+                )
+                target_block_id = (
+                    block_dict.get(sel_block) if sel_block != "None" else None
+                )
+        else:
+            target_block_id = None
+            col_j2.info("Block selection not applicable for this Posting Level.")
 
-            st.markdown("#### 4. Contact & Location Information")
-            col3, col4, col5 = st.columns(3)
-            contact_no = col3.text_input(
-                "Mobile Number", value=existing_record.get("contact_number") or ""
-            )
-            whatsapp_no = col4.text_input(
-                "WhatsApp Number", value=existing_record.get("whatsapp_number") or ""
-            )
-            email = col5.text_input(
-                "Official Email ID", value=existing_record.get("email_id") or ""
+        st.markdown("#### 4. Contact & Location Information")
+        col3, col4, col5 = st.columns(3)
+        contact_no = col3.text_input(
+            "Mobile Number", value=existing_record.get("contact_number") or ""
+        )
+        whatsapp_no = col4.text_input(
+            "WhatsApp Number", value=existing_record.get("whatsapp_number") or ""
+        )
+        email = col5.text_input(
+            "Official Email ID", value=existing_record.get("email_id") or ""
+        )
+
+        col6, col7 = st.columns(2)
+        office = col6.text_input(
+            "Office Name / Address", value=existing_record.get("office") or ""
+        )
+        sub_office = col7.text_input(
+            "Sub Office / Room No.", value=existing_record.get("sub_office") or ""
+        )
+
+        # --- STATUTORY COMMITTEE ROLES ---
+        st.markdown("#### 5. Statutory Committee Memberships")
+
+        if role == "department":
+            st.caption(
+                "🔒 *Committee roles are managed exclusively by District & Block Administrations.*"
             )
 
-            col6, col7 = st.columns(2)
-            office = col6.text_input(
-                "Office Name / Address", value=existing_record.get("office") or ""
-            )
-            sub_office = col7.text_input(
-                "Sub Office / Room No.", value=existing_record.get("sub_office") or ""
-            )
+        col_c1, col_c2 = st.columns(2)
 
-            # --- STATUTORY COMMITTEE ROLES ---
-            st.markdown("#### 5. Statutory Committee Memberships")
+        allow_dist = (role in ["superadmin", "district"]) and (
+            sel_lvl in ["State / Department", "District", "Sub Division"]
+        )
+        allow_block = (role in ["superadmin", "block"]) and (
+            sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"]
+        )
 
-            if role == "department":
-                st.caption(
-                    "🔒 *Committee roles are managed exclusively by District & Block Administrations.*"
+        curr_dist_role = (
+            existing_record.get("district_committee_role") or "None"
+        )
+        dist_role_idx = (
+            COMMITTEE_ROLES.index(curr_dist_role)
+            if curr_dist_role in COMMITTEE_ROLES
+            else 0
+        )
+        sel_dist_role = col_c1.selectbox(
+            "District Committee Role",
+            COMMITTEE_ROLES,
+            index=dist_role_idx,
+            disabled=not allow_dist,
+        )
+        final_dist_role = (
+            sel_dist_role if allow_dist else curr_dist_role
+        )
+
+        curr_block_role = existing_record.get("block_committee_role") or "None"
+        block_role_idx = (
+            COMMITTEE_ROLES.index(curr_block_role)
+            if curr_block_role in COMMITTEE_ROLES
+            else 0
+        )
+        sel_block_role = col_c2.selectbox(
+            "Block Committee Role",
+            COMMITTEE_ROLES,
+            index=block_role_idx,
+            disabled=not allow_block,
+        )
+        final_block_role = (
+            sel_block_role if allow_block else curr_block_role
+        )
+
+        curr_comm_blocks = existing_record.get("committee_blocks") or []
+        if isinstance(curr_comm_blocks, str):
+            try:
+                curr_comm_blocks = json.loads(curr_comm_blocks)
+            except:
+                curr_comm_blocks = []
+
+        curr_comm_blocks = [str(x) for x in curr_comm_blocks]
+        default_blocks = [
+            b
+            for b in list(block_dict.keys())
+            if str(block_dict[b]) in curr_comm_blocks
+        ]
+
+        if not default_blocks and target_block_id and final_block_role != "None":
+            primary_block_name = next(
+                (b_name for b_name, b_id in block_dict.items() if b_id == target_block_id),
+                None,
+            )
+            if primary_block_name:
+                default_blocks = [primary_block_name]
+
+        sel_comm_blocks = st.multiselect(
+            "Tagged Blocks for Committee Membership",
+            options=list(block_dict.keys()),
+            default=default_blocks,
+            disabled=not allow_block,
+        )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Save Profile Details", type="primary"):
+            sel_sub_div = sel_sub_div or ""
+            office = office or ""
+            sub_office = sub_office or ""
+
+            if not name.strip():
+                st.error("⚠️ Full Name is mandatory.")
+            elif sel_lvl == "Sub Division" and not sel_sub_div.strip():
+                st.error(
+                    "⚠️ Sub Division Name is required when 'Sub Division' level is selected."
+                )
+            elif (
+                allow_block and final_block_role != "None" and not sel_comm_blocks
+            ):
+                st.error(
+                    "⚠️ Please tag at least one block for the assigned Block Committee Role."
+                )
+            else:
+                comm_block_ids = (
+                    [block_dict[b] for b in sel_comm_blocks]
+                    if allow_block
+                    else [block_dict[b] for b in default_blocks]
                 )
 
-            col_c1, col_c2 = st.columns(2)
+                payload = {
+                    "full_name": name,
+                    "designation_id": desig_dict.get(sel_desig),
+                    "department_id": selected_parent_id,
+                    "wing_id": wing_options.get(sel_wing),
+                    "office_level": sel_lvl,
+                    "sub_division": (
+                        sel_sub_div.strip() if sel_sub_div.strip() else None
+                    ),
+                    "contact_number": contact_no,
+                    "whatsapp_number": whatsapp_no,
+                    "email_id": email,
+                    "office": office.strip() if office.strip() else None,
+                    "sub_office": sub_office.strip() if sub_office.strip() else None,
+                    "district_committee_role": (
+                        final_dist_role if final_dist_role != "None" else None
+                    ),
+                    "block_committee_role": (
+                        final_block_role if final_block_role != "None" else None
+                    ),
+                    "committee_blocks": comm_block_ids,
+                    "district_id": target_district_id,
+                    "block_id": target_block_id,
+                    "active": True,
+                }
 
-            allow_dist = (role in ["superadmin", "district"]) and (
-                sel_lvl in ["State / Department", "District", "Sub Division"]
-            )
-            allow_block = (role in ["superadmin", "block"]) and (
-                sel_lvl in ["District", "Sub Division", "Block", "Gram Panchayat"]
-            )
-
-            curr_dist_role = (
-                existing_record.get("district_committee_role") or "None"
-            )
-            dist_role_idx = (
-                COMMITTEE_ROLES.index(curr_dist_role)
-                if curr_dist_role in COMMITTEE_ROLES
-                else 0
-            )
-            sel_dist_role = col_c1.selectbox(
-                "District Committee Role",
-                COMMITTEE_ROLES,
-                index=dist_role_idx,
-                disabled=not allow_dist,
-            )
-            final_dist_role = (
-                sel_dist_role if allow_dist else curr_dist_role
-            )
-
-            curr_block_role = existing_record.get("block_committee_role") or "None"
-            block_role_idx = (
-                COMMITTEE_ROLES.index(curr_block_role)
-                if curr_block_role in COMMITTEE_ROLES
-                else 0
-            )
-            sel_block_role = col_c2.selectbox(
-                "Block Committee Role",
-                COMMITTEE_ROLES,
-                index=block_role_idx,
-                disabled=not allow_block,
-            )
-            final_block_role = (
-                sel_block_role if allow_block else curr_block_role
-            )
-
-            curr_comm_blocks = existing_record.get("committee_blocks") or []
-            if isinstance(curr_comm_blocks, str):
                 try:
-                    curr_comm_blocks = json.loads(curr_comm_blocks)
-                except:
-                    curr_comm_blocks = []
-
-            curr_comm_blocks = [str(x) for x in curr_comm_blocks]
-            default_blocks = [
-                b
-                for b in list(block_dict.keys())
-                if str(block_dict[b]) in curr_comm_blocks
-            ]
-
-            if not default_blocks and target_block_id and final_block_role != "None":
-                primary_block_name = next(
-                    (b_name for b_name, b_id in block_dict.items() if b_id == target_block_id),
-                    None,
-                )
-                if primary_block_name:
-                    default_blocks = [primary_block_name]
-
-            sel_comm_blocks = st.multiselect(
-                "Tagged Blocks for Committee Membership",
-                options=list(block_dict.keys()),
-                default=default_blocks,
-                disabled=not allow_block,
-            )
-
-            if st.form_submit_button("Save Profile Details", type="primary"):
-                sel_sub_div = sel_sub_div or ""
-                office = office or ""
-                sub_office = sub_office or ""
-
-                if not name.strip():
-                    st.error("⚠️ Full Name is mandatory.")
-                elif sel_lvl == "Sub Division" and not sel_sub_div.strip():
-                    st.error(
-                        "⚠️ Sub Division Name is required when 'Sub Division' level is selected."
-                    )
-                elif (
-                    allow_block and final_block_role != "None" and not sel_comm_blocks
-                ):
-                    st.error(
-                        "⚠️ Please tag at least one block for the assigned Block Committee Role."
-                    )
-                else:
-                    comm_block_ids = (
-                        [block_dict[b] for b in sel_comm_blocks]
-                        if allow_block
-                        else [block_dict[b] for b in default_blocks]
-                    )
-
-                    payload = {
-                        "full_name": name,
-                        "designation_id": desig_dict.get(sel_desig),
-                        "department_id": selected_parent_id,
-                        "wing_id": wing_options.get(sel_wing),
-                        "office_level": sel_lvl,
-                        "sub_division": (
-                            sel_sub_div.strip() if sel_sub_div.strip() else None
-                        ),
-                        "contact_number": contact_no,
-                        "whatsapp_number": whatsapp_no,
-                        "email_id": email,
-                        "office": office.strip() if office.strip() else None,
-                        "sub_office": sub_office.strip() if sub_office.strip() else None,
-                        "district_committee_role": (
-                            final_dist_role if final_dist_role != "None" else None
-                        ),
-                        "block_committee_role": (
-                            final_block_role if final_block_role != "None" else None
-                        ),
-                        "committee_blocks": comm_block_ids,
-                        "district_id": target_district_id,
-                        "block_id": target_block_id,
-                        "active": True,
-                    }
-
-                    try:
-                        if target_contact_id:
-                            (
-                                supabase.table("contacts")
-                                .update(payload)
-                                .eq("id", target_contact_id)
-                                .execute()
-                            )
-                        else:
-                            supabase.table("contacts").insert(payload).execute()
-
-                        st.success(
-                            "✅ Contact record saved successfully in the Official Directory!"
+                    if target_contact_id:
+                        (
+                            supabase.table("contacts")
+                            .update(payload)
+                            .eq("id", target_contact_id)
+                            .execute()
                         )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving contact details: {e}")
+                    else:
+                        supabase.table("contacts").insert(payload).execute()
+
+                    st.success(
+                        "✅ Contact record saved successfully in the Official Directory!"
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving contact details: {e}")
