@@ -22,8 +22,11 @@ def show():
     role = user['role']
     supabase = get_supabase()
 
+    # Retrieve the active Financial Year selected in the top-left sidebar
+    active_fy = st.session_state.get("selected_fy", "2026-27")
+
     st.markdown("<h1 style='color: #1F77B4;'>Convergence Master Dashboard</h1>", unsafe_allow_html=True)
-    st.caption("FY 2026-27 | Real-time Onboarding, Activity Linkage, Target Compliance & Convergence Health Metrics.")
+    st.caption(f"FY {active_fy} | Real-time Onboarding, Activity Linkage, Target Compliance & Convergence Health Metrics.")
 
     # ======================== 1. MASTER DATA FETCH ========================
     departments = supabase.table("departments").select("id, department_name").execute().data or []
@@ -42,10 +45,14 @@ def show():
     block_map = {b['id']: b['block_name'] for b in blocks}
     act_map = {a['id']: a['activity_name'] for a in activities}
 
-    # ======================== 2. FETCH REGISTERS & TARGETS ========================
-    q_targets = supabase.table("department_targets").select("*")
-    q_reg = supabase.table("convergence_register").select("*")
+    # ======================== 2. FETCH REGISTERS & TARGETS (FILTERED BY FY) ========================
+    q_targets = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
     
+    try:
+        q_reg = supabase.table("convergence_register").select("*").eq("financial_year", active_fy)
+    except Exception:
+        q_reg = supabase.table("convergence_register").select("*")
+
     # Role-based Database Filtering
     if role == 'district':
         q_targets = q_targets.eq("district_id", user['district_id'])
@@ -66,24 +73,19 @@ def show():
     # ======================== 3. ADVANCED KPIS & METRICS ========================
     total_depts_wings = len(departments) + len(wings)
     
-    # Officials mapping counts
     district_officials_count = len([u for u in users_data if u.get('role') in ['district', 'department'] and u.get('block_id') is None])
     block_officials_count = len([u for u in users_data if u.get('block_id') is not None])
     
-    # Blocks onboarded / covered in register
     blocks_covered = df_reg['block_id'].nunique() if not df_reg.empty and 'block_id' in df_reg.columns else 0
     
-    # Activity Linkage Metrics
     total_activities_master = len(activities)
     linked_activity_ids = set([m['activity_id'] for m in act_dept_mapping])
     linked_activities_count = len(linked_activity_ids)
     unlinked_activities_count = total_activities_master - linked_activities_count
     
-    # Departments having ≥1 linked activity
     depts_with_activities = set([m['department_id'] for m in act_dept_mapping])
     depts_active_count = len(depts_with_activities)
     
-    # Multi-Department Activities (Activities linked to >1 department)
     activity_dept_counts = {}
     for m in act_dept_mapping:
         act_id = m['activity_id']
@@ -103,16 +105,14 @@ def show():
     # TAB 1: MASTER DASHBOARD & HEALTH
     # =====================================================================
     with tab1:
-        st.subheader("At-a-Glance Convergence Metrics")
+        st.subheader(f"At-a-Glance Convergence Metrics ({active_fy})")
         
-        # KPI Row 1
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Departments / Wings Onboarded", total_depts_wings)
         c2.metric("District-Level Officials", district_officials_count)
         c3.metric("Block-Level Officials", block_officials_count)
         c4.metric("Activities Linked", f"{linked_activities_count} / {total_activities_master}")
 
-        # KPI Row 2
         c5, c6, c7, c8 = st.columns(4)
         c5.metric("Blocks Covered", f"{blocks_covered} / {len(blocks)}")
         c6.metric("Depts with Activities", depts_active_count)
@@ -121,12 +121,11 @@ def show():
 
         st.markdown("---")
         
-        # Convergence Health Indicators
         st.markdown("### 🟢 Convergence Health Status")
         h1, h2, h3 = st.columns(3)
         
         fully_onboarded = len([d for d in departments if d['id'] in depts_with_activities])
-        partially_onboarded = len(wings) # Wings considered active extensions
+        partially_onboarded = len(wings)
         not_onboarded = total_depts_wings - fully_onboarded - len(wings)
         
         h1.metric("🟢 Fully Onboarded Depts", fully_onboarded)
@@ -145,7 +144,7 @@ def show():
                 df_fin.set_index('Department', inplace=True)
                 st.bar_chart(df_fin[['department_fund', 'vbgramg_fund']])
             else:
-                st.info("No financial data available.")
+                st.info(f"No financial data available for FY {active_fy}.")
                 
         with col_v2:
             st.markdown("##### Physical Achievement by Department")
@@ -155,7 +154,7 @@ def show():
                 df_phys.set_index('Department', inplace=True)
                 st.bar_chart(df_phys['physical_achievement'])
             else:
-                st.info("No achievement data available.")
+                st.info(f"No achievement data available for FY {active_fy}.")
 
     # =====================================================================
     # TAB 2: DEPARTMENT ONBOARDING MATRIX
@@ -165,7 +164,6 @@ def show():
         st.caption("Detailed breakdown of district officials, block officials, and linked activities per department/wing.")
 
         matrix_rows = []
-        # Main Departments
         for d in departments:
             d_id = d['id']
             d_name = d['department_name']
@@ -173,8 +171,6 @@ def show():
             d_dist_offs = len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is None])
             d_blk_offs = len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is not None])
             d_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
-            
-            # Count distinct blocks covered in register for this dept
             d_blocks = df_reg[df_reg['department_id'] == d_id]['block_id'].nunique() if not df_reg.empty and 'department_id' in df_reg.columns else 0
             status = "Active" if d_acts > 0 else "Pending"
 
@@ -188,7 +184,6 @@ def show():
                 "Status": status
             })
 
-        # Wings / Parastatals
         for w in wings:
             w_id = w['id']
             d_id = w['department_id']
@@ -197,8 +192,8 @@ def show():
             
             w_dist_offs = len([u for u in users_data if u.get('wing_id') == w_id and u.get('block_id') is None])
             w_blk_offs = len([u for u in users_data if u.get('wing_id') == w_id and u.get('block_id') is not None])
-            w_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id]) # Linked via parent dept context
-            w_blocks = 0 # Wings tracked at parent level if register uses dept_id
+            w_acts = len([m for m in act_dept_mapping if m.get('department_id'] == d_id])
+            w_blocks = 0
 
             matrix_rows.append({
                 "Department / Wing": f"{parent_name} ➔ {w_name}",
@@ -262,11 +257,9 @@ def show():
             a_id = a['id']
             a_name = a['activity_name']
             
-            # Find all departments mapped to this activity
             mapped_depts = [m['department_id'] for m in act_dept_mapping if m['activity_id'] == a_id]
             dept_names_str = ", ".join([dept_map.get(d_id, "Unknown") for d_id in mapped_depts]) if mapped_depts else "Unlinked"
             
-            # Check register execution count
             exec_count = 0
             if not df_reg.empty and 'activity_description' in df_reg.columns:
                 exec_count = df_reg['activity_description'].apply(lambda x: str(a_name).lower() in str(x).lower()).sum()
@@ -287,7 +280,7 @@ def show():
     # =====================================================================
     with tab5:
         st.subheader("🚨 Activity-wise Target Compliance & Alert Tracker")
-        st.caption("Highlights mismatches between Department/Wing Targets and actual entries.")
+        st.caption(f"Highlights mismatches between Department/Wing Targets and actual entries for FY {active_fy}.")
         
         compliance_data = []
         if not df_targets.empty:
@@ -305,7 +298,6 @@ def show():
                 else:
                     dept_display = f"{d_name} (Main Dept)"
 
-                # Map Nodal Officers
                 contacts = []
                 for u in users_data:
                     u_dept = u.get('department_id')
@@ -352,4 +344,4 @@ def show():
         if not df_comp.empty:
             st.dataframe(df_comp.style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
         else:
-            st.info("No Departmental Targets have been set yet.")
+            st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
