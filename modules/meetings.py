@@ -8,10 +8,14 @@ from utils.db import get_supabase
 
 
 def inject_custom_css():
+    """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
     st.markdown(
         """
         <style>
-        .stAppToolbar { visibility: hidden !important; }
+        /* Hide Streamlit toolbar (Fork and GitHub buttons) */
+        .stAppToolbar {
+            visibility: hidden !important;
+        }
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
         </style>
         """,
@@ -39,15 +43,16 @@ def show():
     departments = supabase.table("departments").select("id, department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
-    activities_data = supabase.table("activities").select("id, activity_name").execute().data or []
-    act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
+    
+    # Explicitly fetch activities and mapping to ensure the dropdown filters correctly
+    activities_data = supabase.table("activities").select("id, activity_name").eq("active", True).execute().data or []
+    act_dept_mapping = supabase.table("activity_departments").select("activity_id, department_id").execute().data or []
 
     dept_map = {d["id"]: d["department_name"] for d in departments}
     wing_map = {w["id"]: w for w in wings}
     block_dict_reverse = {b["id"]: b["block_name"] for b in blocks_data}
-    act_map = {a["id"]: a["activity_name"] for a in activities_data}
 
-    # Unified Department / Wing Options
+    # Build Unified Department / Wing Options for clean multiselects
     unified_depts = []
     for d in departments:
         unified_depts.append({
@@ -69,6 +74,7 @@ def show():
     unified_uid_to_label = {u["uid"]: u["label"] for u in unified_depts}
     dept_labels = [u["label"] for u in unified_depts]
 
+    # Helper function to format Department/Wing display cleanly for dataframes
     def format_dept_display(row):
         d_name = dept_map.get(row.get("department_id"), "Unknown")
         w_id = row.get("wing_id")
@@ -368,7 +374,6 @@ def show():
                     st.markdown("---")
                     st.markdown("#### Assign New Resolution / Action Point")
 
-                    # Removed st.form to allow the Scheme dropdown to dynamically filter based on Department selection
                     with st.container(border=True):
                         c_r1, c_r2 = st.columns(2)
                         res_dept_label = c_r1.selectbox("Assign to Department / Wing*", dept_labels, key=f"r_dept_{proc_sel}")
@@ -376,7 +381,7 @@ def show():
                         res_dept_id = selected_opt['dept_id']
                         res_wing_id = selected_opt['wing_id']
 
-                        # Dynamically filter activities mapped to the selected department
+                        # Fetch ONLY the activities specifically mapped to the chosen department
                         mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == res_dept_id]
                         valid_act_names = ["General / Administrative"] + [a['activity_name'] for a in activities_data if a['id'] in mapped_act_ids]
                         
