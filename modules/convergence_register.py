@@ -450,8 +450,7 @@ def show():
         # --- AUTO GENERATED DESCRIPTION LOGIC ---
         auto_desc = ""
         if sel_act_name and inp_loc_details:
-            scheme_prefix = f"[{inp_scheme}] " if inp_scheme else ""
-            auto_desc = f"{scheme_prefix}{sel_act_name} at {inp_loc_details}"
+            auto_desc = f"{sel_act_name} at {inp_loc_details}"
             st.info(f"💡 **Auto-Generated Work Description:** {auto_desc}")
 
         sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
@@ -635,8 +634,7 @@ def show():
                         gps_val = str(row.get("Latitude Longitude", "")).strip() if pd.notna(row.get("Latitude Longitude")) else ""
                         
                         # Generate Auto Description for bulk
-                        scheme_prefix = f"[{scheme_val}] " if scheme_val else ""
-                        bulk_auto_desc = f"{scheme_prefix}{target_act['activity_name']} at {loc_val}"
+                        bulk_auto_desc = f"{target_act['activity_name']} at {loc_val}"
                         
                         # Pack Geography
                         bulk_geo_string = f"Loc: {loc_val}"
