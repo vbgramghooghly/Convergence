@@ -8,8 +8,7 @@ def show():
     # 1. Role Authentication
     require_role('superadmin', 'district', 'block', 'department')
     
-    # 2. Apply the Global Theme Engine
-    # This automatically injects the CSS for hiding the toolbar, formatting metrics, and fonts!
+    # 2. Apply Global Theme Engine
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
     
@@ -31,11 +30,26 @@ def show():
     activities = supabase.table("activities").select("id, activity_name").execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
     
-    # Fetch Financial Years to create a proper mapping
-    fys_data = supabase.table("financial_years").select("id, fy_name").execute().data or []
-    fy_name_to_id = {f['fy_name']: f['id'] for f in fys_data}
+    # Dynamic Financial Year Mapping (Auto-detects column name)
+    fy_name_to_id = {}
+    try:
+        fys_data = supabase.table("financial_years").select("*").execute().data or []
+        for f in fys_data:
+            f_id = f.get('id')
+            f_label = (
+                f.get('financial_year') 
+                or f.get('fy_name') 
+                or f.get('year') 
+                or f.get('name') 
+                or str(f_id)
+            )
+            fy_name_to_id[str(f_label)] = f_id
+    except Exception:
+        fy_name_to_id = {"2026-27": 1, "2027-28": 2, "2028-29": 3}
+
+    active_fy_id = fy_name_to_id.get(str(active_fy))
     
-    # Fetch Users/Officials directory safely
+    # Fetch Users directory
     users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
     
     dept_map = {d['id']: d['department_name'] for d in departments}
@@ -44,23 +58,27 @@ def show():
     block_map = {b['id']: b['block_name'] for b in blocks}
     act_map = {a['id']: a['activity_name'] for a in activities}
 
-    # Determine the actual DB ID for the selected Financial Year string
-    active_fy_id = fy_name_to_id.get(active_fy)
-
     # ======================== 2. FETCH REGISTERS & TARGETS ========================
     q_targets = supabase.table("department_targets").select("*")
     q_reg = supabase.table("convergence_register").select("*")
 
     # Role-based Database Filtering
     if role == 'district':
-        q_targets = q_targets.eq("district_id", user['district_id'])
-        q_reg = q_reg.eq("district_id", user['district_id'])
+        if user.get('district_id'):
+            q_targets = q_targets.eq("district_id", user['district_id'])
+            q_reg = q_reg.eq("district_id", user['district_id'])
     elif role == 'block':
-        q_targets = q_targets.eq("district_id", user['district_id'])
-        q_reg = q_reg.eq("block_id", user['block_id'])
+        if user.get('district_id'):
+            q_targets = q_targets.eq("district_id", user['district_id'])
+        if user.get('block_id'):
+            q_reg = q_reg.eq("block_id", user['block_id'])
     elif role == 'department':
-        q_targets = q_targets.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
-        q_reg = q_reg.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
+        if user.get('department_id'):
+            q_targets = q_targets.eq("department_id", user['department_id'])
+            q_reg = q_reg.eq("department_id", user['department_id'])
+        if user.get('district_id'):
+            q_targets = q_targets.eq("district_id", user['district_id'])
+            q_reg = q_reg.eq("district_id", user['district_id'])
 
     targets_data = q_targets.execute().data or []
     reg_data = q_reg.execute().data or []
@@ -68,7 +86,7 @@ def show():
     df_targets = pd.DataFrame(targets_data)
     df_reg = pd.DataFrame(reg_data)
 
-    # ======================== 3. FY FILTERING (BUG FIX APPLIED) ========================
+    # ======================== 3. FY FILTERING ========================
     if not df_targets.empty:
         if 'financial_year_id' in df_targets.columns and active_fy_id is not None:
             df_targets = df_targets[df_targets['financial_year_id'] == active_fy_id]
@@ -311,7 +329,7 @@ def show():
                 target_w_id_safe = None if pd.isna(w_id) else w_id
                 
                 if target_w_id_safe and target_w_id_safe in wing_map:
-                    dept_display = f"{d_name} ➔ {wing_map[target_w_id_safe]}"
+                    dept_display = f"{d_name} ➔ {wing_map[target_w_id_safe]['wing_name']}"
                 else:
                     dept_display = f"{d_name} (Main Dept)"
 
