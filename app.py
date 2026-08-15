@@ -11,18 +11,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------- GLOBAL CSS (SAFE TOOLBAR HIDE) ----------
-# We ONLY hide the right-side toolbar. We DO NOT touch the header or sidebar toggle.
-st.markdown("""
-    <style>
-        /* STRICTLY hide ONLY the top-right Streamlit tools (Deploy, GitHub, Options) */
-        [data-testid="stToolbar"] {
-            display: none !important;
-            visibility: hidden !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # ---------- AUTHENTICATION ----------
 from auth.auth import check_password, logout, get_current_user
 
@@ -42,9 +30,32 @@ theme = apply_global_theme()
 primary_color = theme.get("primary_color", "#0F4C81")
 base_font = theme.get("base_font_size", 14)
 
-# ---------- DYNAMIC SIDEBAR MENU STYLING ----------
+# ---------- GLOBAL CSS & DYNAMIC SIDEBAR STYLING ----------
 st.markdown(f"""
     <style>
+        /* --- BULLETPROOF HEADER & SIDEBAR TOGGLE FIX --- */
+        /* Force the header to always be visible so the toggle never disappears */
+        header[data-testid="stHeader"] {{
+            visibility: visible !important;
+            background-color: transparent !important;
+        }}
+        
+        /* Force the specific sidebar toggle button to always show */
+        [data-testid="collapsedControl"] {{
+            display: flex !important;
+            visibility: visible !important;
+        }}
+        
+        /* Safely hide ONLY the right-side Streamlit tools, DO NOT hide the whole toolbar */
+        [data-testid="stToolbar"] {{
+            display: none !important;
+            visibility: hidden !important;
+        }}
+        
+        #MainMenu {{
+            display: none !important;
+        }}
+
         /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION --- */
         [data-testid="stSidebar"] [role="radiogroup"] {{
             gap: 6px !important;
