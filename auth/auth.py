@@ -21,7 +21,7 @@ def check_password():
     st.markdown("""
         <style>
             [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; width: 0px !important;}
-            header[data-testid="stHeader"], [data-testid="stToolbar"] { display: none !important; visibility: hidden !important; }
+            header[data-testid="stHeader"], [data-testid="stToolbar"] { display: none !important; visibility: hidden !important; height: 0px !important; }
             
             .stApp { background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%); }
             [data-testid="stForm"] {
@@ -32,6 +32,8 @@ def check_password():
             .portal-title { font-size: 2.3rem; font-weight: 800; color: #1F77B4; margin-bottom: 0px; }
             .portal-subtitle { font-size: 1.1rem; color: #4A5568; margin-bottom: 25px; }
             .feature-item { font-size: 1.05rem; color: #2D3748; margin-bottom: 14px; font-weight: 500; }
+            
+            .block-container { padding-top: 3rem !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -39,8 +41,7 @@ def check_password():
     col_left, col_right = st.columns([1.3, 1], gap="large")
 
     with col_left:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 class='portal-title'>🏛️ VB-G RAM G Convergence</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='portal-title'>🏛️ VB-G RAM G</h1>", unsafe_allow_html=True)
         st.markdown("<p class='portal-subtitle'>Unified District, Block, and Department Level Convergence Management Portal</p>", unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
@@ -74,7 +75,7 @@ def check_password():
             ## 2. Core Modules
             * **Dashboard:** High-level overview of physical and financial progress.
             * **Work Entry:** Manual Data Entry and Bulk CSV Upload for Convergence Activities.
-            * **Progress:** Contextual sub-navigation for *Department Targets*, *Implementation Progress*, and *Meeting Commitments (Action Taken Reports)*.
+            * **Progress:** Contextual sub-navigation for *Department Targets*, *Implementation Progress*, and *Meeting Commitments*.
             * **Meetings:** Schedule Meetings, Record Proceedings, and Track Resolutions dynamically.
             * **Officials:** Maintain the Official Contact Directory.
             * **Reports:** Generate and export official statutory summary statements.
@@ -126,6 +127,7 @@ def check_password():
                             else:
                                 st.session_state.authenticated = True
                                 st.session_state.user = user_profile
+                                st.session_state.current_page = "📊 Dashboard"
                                 st.success("✅ Login successful! Loading workspace...")
                                 st.rerun()
 
@@ -147,6 +149,7 @@ def logout():
         
     st.session_state.authenticated = False
     st.session_state.user = None
+    st.session_state.current_page = None
     st.rerun()
 
 def require_role(*allowed_roles):
