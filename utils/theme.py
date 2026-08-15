@@ -15,11 +15,11 @@ def load_theme():
     return {
         "primary_color": "#0F4C81",
         "bg_color": "#F4F6F9",
-        "app_name": "VB-G RAM G Convergence",
+        "app_name": "VB-G RAM G Portal",
         "font_family": "'Inter', sans-serif",
         "border_radius": 6,
         "base_font_size": 14,
-        "content_width": 75, # in rem (approx 1200px)
+        "content_width": 75, # in rem
         "tab_size": "Medium"
     }
 
@@ -57,11 +57,9 @@ def apply_global_theme(theme=None):
             font-size: {font_size}px !important;
         }}
         
-        /* Dynamic Container Width (Requires st.set_page_config(layout="wide") in main app) */
+        /* Dynamic Container Width */
         .block-container {{
             max-width: {width_rem}rem !important;
-            padding-top: 3rem !important;
-            padding-bottom: 3rem !important;
         }}
         
         /* Headers scale based on base font size */
@@ -69,13 +67,7 @@ def apply_global_theme(theme=None):
         h2 {{ font-size: {font_size * 1.8}px !important; color: {primary} !important; font-weight: 600 !important; }}
         h3 {{ font-size: {font_size * 1.5}px !important; color: {primary} !important; font-weight: 600 !important; }}
         
-        /* 2. SIDEBAR STYLING */
-        [data-testid="stSidebar"] {{
-            background-color: #FFFFFF !important;
-            border-right: 1px solid #E5E7EB;
-        }}
-
-        /* 3. BUTTONS */
+        /* 2. BUTTONS */
         .stButton > button[kind="primary"] {{
             background-color: {primary} !important;
             color: #FFFFFF !important;
@@ -90,7 +82,7 @@ def apply_global_theme(theme=None):
             opacity: 0.9 !important;
         }}
 
-        /* 4. INPUTS */
+        /* 3. INPUTS */
         .stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{
             border: 1px solid #D1D5DB !important;
             border-radius: {radius}px !important;
@@ -100,7 +92,7 @@ def apply_global_theme(theme=None):
             box-shadow: 0 0 0 1px {primary} !important;
         }}
 
-        /* 5. DYNAMIC TAB SIZING */
+        /* 4. DYNAMIC TAB SIZING */
         .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             border-bottom: 2px solid #E5E7EB;
@@ -118,7 +110,7 @@ def apply_global_theme(theme=None):
             font-size: {tab_font} !important;
         }}
 
-        /* 6. CONTAINERS / CARDS */
+        /* 5. CONTAINERS / CARDS */
         [data-testid="stExpander"], [data-testid="stDataFrameContainer"], [data-testid="metric-container"] {{
             background-color: #FFFFFF;
             border: 1px solid #E5E7EB !important;
@@ -130,8 +122,8 @@ def apply_global_theme(theme=None):
             border-top: 4px solid {primary} !important; 
         }}
 
-        /* Hide Streamlit artifacts */
-        .stAppToolbar, footer {{ visibility: hidden !important; }}
+        /* HIDE DEFAULT STREAMLIT ARTIFACTS GLOBALLY */
+        footer {{ visibility: hidden !important; }}
     </style>
     """
     st.markdown(custom_css, unsafe_allow_html=True)
