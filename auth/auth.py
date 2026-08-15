@@ -6,12 +6,19 @@ from utils.db import get_supabase
 import streamlit as st
 
 def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
+    """Injects custom CSS to hide the Streamlit toolbar and FIX the sidebar toggle."""
     st.markdown("""
     <style>
-    /* Hide Streamlit toolbar (Fork and GitHub buttons) */
-    .stAppToolbar {
+    /* Hide the right-side Streamlit toolbar (Fork, GitHub, Deploy buttons) */
+    .stAppToolbar, [data-testid="stToolbar"] {
         visibility: hidden !important;
+        display: none !important;
+    }
+    
+    /* FORCE the header to be visible so the sidebar toggle button (>) NEVER disappears */
+    header[data-testid="stHeader"] {
+        visibility: visible !important;
+        background-color: transparent !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -19,7 +26,7 @@ def inject_custom_css():
 def check_password():
     """Returns True if the user is authenticated, otherwise renders a professional split-screen landing/login page."""
     
-    # Apply custom UI styling to hide top-right toolbar elements globally on login screen
+    # Apply custom UI styling
     inject_custom_css()
 
     if "authenticated" not in st.session_state:
@@ -49,7 +56,7 @@ def check_password():
     # ---------- STYLING FOR THE LANDING / LOGIN PAGE ----------
     st.markdown("""
         <style>
-            header {visibility: hidden;}
+            /* The problematic 'header {visibility: hidden;}' has been removed from here */
             .stApp {
                 background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%);
             }
@@ -212,130 +219,3 @@ def check_password():
 
             ```
             [Schedule Meeting] ➔ [Mark Attendance] ➔ [Record Minutes/Resolutions] ➔ [Lock Proceedings]
-            ```
-
-            ### Step 1: Scheduling Meetings
-            1. Go to the **🗓️ Schedule Meeting** tab.
-            2. Select **Meeting Level** (*District* or *Block*), **Financial Year**, **Date**, **Chairperson**, **Venue**, and **Objective**.
-            3. Select statutory members from the auto-filtered contact checklist, add optional invitees, and click **Schedule Meeting**.
-
-            ### Step 2: Recording Proceedings & Attendance
-            1. Go to the **✍️ Record Proceedings** tab and select the active scheduled meeting.
-            2. **A. Mark Attendance:** Check off attending officials. If a subordinate attended, check *"Did a subordinate attend instead?"* and enter their name, designation, and phone number. Click **Save Attendance Register**.
-            3. **B. Review Past Decisions:** Review pending resolutions from previous meetings and record quick progress updates.
-            4. **C. Minutes & New Resolutions:** Enter general meeting minutes and assign new action points to attending officers and departments.
-            5. **D. Finalize Meeting:** Click **"🔒 Complete Proceedings & Mark as Convened"** to lock the meeting record and sync resolutions to department dashboards.
-
-            ### Step 3: Resolution Tracking & Agenda Prep
-            * **🎯 Resolution Tracker:** View master resolution flags (*Closed*, *On Track*, *Due Today*, *OVERDUE*, *FOR REVIEW*). Update action taken reports (ATR).
-            * **⏭️ Next Agenda Prep:** Review unfeasible or pending items and instantly copy auto-generated agenda text for upcoming notices.
-
-            ---
-
-            ## 6. Reports & Analytics
-
-            Generate analytical dashboards or export official statutory summary statements.
-
-            1. Navigate to **Reports & Analytics**.
-            2. Select your desired report type:
-               * **Official VB-G RAM G Summary Report (Template):** Matches the primary government export format.
-               * **District / Department-wise Reports:** Summary of activities, funds, and progress.
-               * **Financial Convergence Report:** Dept. Fund vs. VB-G RAM G comparison charts.
-               * **Technical Convergence Report:** Overview of NOC / Zero-fund activities.
-               * **Personday Generation Report:** Target vs. generated labor days.
-               * **Pending / Delayed Activities List:** High-risk delays.
-               * **FY Master Convergence Statement:** Complete register download.
-            3. Click **📥 Download Excel** to download the report.
-
-            ---
-
-            ## 7. Official Contact Directory
-
-            Maintain official directory listings and statutory committee roles.
-
-            * **View Directory (Tab 1):** View departmental officers, posting levels, phone numbers, emails, and assigned statutory committee roles. Click **Download Excel** or **Download Printable Document** for hard-copy printouts.
-            * **Manage Directory (Tab 2):** 
-              * **Administrators (District/Block):** Add new officers or edit existing entries, mapping posting levels (*State*, *District*, *Sub-Division*, *Block*, *GP*) and assigning **District/Block Committee Roles** with tagged blocks.
-              * **Department Users:** Update personal contact details, mobile numbers, office room details, and email addresses.
-
-            ---
-
-            ### ❓ Support & Assistance
-            If you run into database errors or account mapping issues, contact your **District Superadmin** or **Nodal Officer (DNO)**.
-            """)
-
-    with col_right:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        
-        st.markdown("### 🔐 Portal Login")
-        st.markdown("<p style='color: #718096; font-size: 0.9rem; margin-bottom: 15px;'>Enter your credentials to access your workspace.</p>", unsafe_allow_html=True)
-        
-        with st.form("login_form"):
-            username = st.text_input("Username / Email", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            submit_btn = st.form_submit_button("Sign In to Workspace", type="primary", use_container_width=True)
-
-            if submit_btn:
-                if not username or not password:
-                    st.error("⚠️ Please enter both username and password.")
-                else:
-                    try:
-                        supabase = get_supabase()
-                        
-                        # 1. Format the input to match the email structure generated in users.py
-                        clean_input = username.strip()
-                        login_email = clean_input if "@" in clean_input else f"{clean_input}@hooghly.gov.in"
-                        
-                        # 2. Authenticate securely using Supabase Auth
-                        auth_response = supabase.auth.sign_in_with_password({
-                            "email": login_email,
-                            "password": password
-                        })
-                        
-                        # 3. If successful, fetch the user's role profile from the public.users table
-                        user_id = auth_response.user.id
-                        profile_response = supabase.table("users").select("*").eq("id", user_id).execute()
-                        users_data = profile_response.data
-
-                        if not users_data:
-                            st.error("❌ User profile not found in the database.")
-                        else:
-                            user_profile = users_data[0]
-                            if not user_profile.get("active", True):
-                                st.error("🚫 This account has been deactivated. Contact Superadmin.")
-                            else:
-                                st.session_state.authenticated = True
-                                st.session_state.user = user_profile
-                                st.success("✅ Login successful! Loading workspace...")
-                                st.rerun()
-
-                    except Exception as e:
-                        # Supabase auth errors (like wrong password) will trigger this block
-                        st.error("❌ Incorrect username or password.")
-
-    return False
-
-def get_current_user():
-    """Returns the dictionary of the currently logged-in user."""
-    return st.session_state.get("user", None)
-
-def logout():
-    """Clears authentication session and reloads the landing page."""
-    try:
-        supabase = get_supabase()
-        supabase.auth.sign_out()
-    except Exception:
-        pass # Fail silently if no active backend session
-        
-    st.session_state.authenticated = False
-    st.session_state.user = None
-    st.rerun()
-
-def require_role(*allowed_roles):
-    """Enforces role-based access control across pages."""
-    user = get_current_user()
-    if not user or user.get('role') not in allowed_roles:
-        st.error("🚫 Access Denied: You do not have the required permissions to view this module.")
-        st.stop()
