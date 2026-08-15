@@ -18,10 +18,6 @@ def inject_custom_css():
     st.markdown("""
         <style>
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
-        
-        /* Ensure header is visible */
-        header { visibility: visible !important; }
-        [data-testid="collapsedControl"] { display: flex !important; visibility: visible !important; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -109,7 +105,6 @@ def show():
         elif 'financial_year' in df_targets.columns:
             df_targets = df_targets[df_targets['financial_year'] == active_fy]
             
-        # FORCE NUMERIC CONVERSION to prevent 'str' - 'int' errors
         if 'desired_target' in df_targets.columns:
             df_targets['desired_target'] = pd.to_numeric(df_targets['desired_target'], errors='coerce').fillna(0)
 
@@ -119,12 +114,11 @@ def show():
         elif 'financial_year' in df_reg.columns:
             df_reg = df_reg[df_reg['financial_year'] == active_fy]
             
-        # FORCE NUMERIC CONVERSION to prevent string concatenation in charts
         for col in ['department_fund', 'vbgramg_fund', 'physical_achievement']:
             if col in df_reg.columns:
                 df_reg[col] = pd.to_numeric(df_reg[col], errors='coerce').fillna(0)
 
-    # ======================== 4. FY WARNING (NON-BLOCKING) ========================
+    # ======================== 4. FY WARNING ========================
     if df_targets.empty and df_reg.empty:
         st.warning(f"⚠️ **Notice for FY {active_fy}:** No specific targets or convergence register entries have been recorded for this financial year yet. Master onboarding and linkage data remains visible below.")
 
@@ -146,7 +140,7 @@ def show():
         activity_dept_counts[act_id] = activity_dept_counts.get(act_id, 0) + 1
     multi_dept_activities_count = len([act_id for act_id, count in activity_dept_counts.items() if count > 1])
 
-    # ======================== 6. TABS LAYOUT (REORDERED) ========================
+    # ======================== 6. TABS LAYOUT ========================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Dashboard", 
         "🚨 Target Compliance", 
@@ -155,9 +149,6 @@ def show():
         "🔗 Activity Convergence"
     ])
 
-    # =====================================================================
-    # TAB 1: MASTER DASHBOARD & HEALTH
-    # =====================================================================
     with tab1:
         st.subheader(f"At-a-Glance Convergence Metrics ({active_fy})")
         
@@ -210,9 +201,6 @@ def show():
             else:
                 st.info(f"No achievement data available for FY {active_fy}.")
 
-    # =====================================================================
-    # TAB 2: TARGET COMPLIANCE TRACKER
-    # =====================================================================
     with tab2:
         st.subheader("🚨 Activity-wise Target Compliance & Alert Tracker")
         st.caption(f"Highlights mismatches between Department/Wing Targets and actual entries for FY {active_fy}.")
@@ -259,9 +247,6 @@ def show():
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
 
-    # =====================================================================
-    # TAB 3: DEPARTMENT ONBOARDING MATRIX
-    # =====================================================================
     with tab3:
         st.subheader("🏢 Department-Wise Onboarding & Linkage Matrix")
         matrix_rows = []
@@ -286,9 +271,6 @@ def show():
             })
         st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
 
-    # =====================================================================
-    # TAB 4: BLOCK COVERAGE MATRIX
-    # =====================================================================
     with tab4:
         st.subheader("🏘️ Block-Level Coverage & Onboarding Matrix")
         block_rows = []
@@ -308,9 +290,6 @@ def show():
             })
         st.dataframe(pd.DataFrame(block_rows), use_container_width=True, hide_index=True)
 
-    # =====================================================================
-    # TAB 5: ACTIVITY CONVERGENCE
-    # =====================================================================
     with tab5:
         st.subheader("🔗 Activity ➔ Department / Wing Convergence Matrix")
         conv_rows = []
