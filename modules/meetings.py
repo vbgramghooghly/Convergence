@@ -79,10 +79,10 @@ def show():
                 else:
                     df_ap = df_ap[(df_ap['department_id'] == dep_id) & (df_ap['wing_id'].isna() | (df_ap['wing_id'] == ''))]
         elif role == "block" and user.get("block_id"):
-            block_meet_ids = [m['id'] for m in meetings if m.get('block_id'] == user["block_id"]]
+            block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
@@ -372,7 +372,7 @@ def show():
             if not p_aps.empty:
                 for idx, ap in enumerate(p_aps.iterrows(), 1):
                     row = ap[1]
-                    proc_rows += f"<tr><td>{idx[0] if isinstance(idx, tuple) else idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
+                    proc_rows += f"<tr><td>{idx[0]}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
             else:
                 proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
 
