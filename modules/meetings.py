@@ -3,13 +3,17 @@ import base64
 import pandas as pd
 import streamlit as st
 from auth.auth import require_role, get_current_user
-from utils.audit import log_action
 from utils.db import get_supabase
+from utils.audit import log_action
 
 def safe_int(val):
-    if pd.isna(val) or val is None or val == '': return 0
-    try: return int(float(val))
-    except (ValueError, TypeError): return 0
+    """Safely converts empty strings, floats, booleans, and nulls to integers to prevent math/ValueError crashes."""
+    if pd.isna(val) or val is None or val == '': 
+        return 0
+    try: 
+        return int(float(val))
+    except (ValueError, TypeError): 
+        return 0
 
 def show():
     require_role("superadmin", "district", "block", "department")
@@ -245,7 +249,14 @@ def show():
                     for idx, row in df_t.iterrows():
                         d_id, act = row['department_id'], row['activity']
                         t_val = safe_int(row.get('desired_target', 0))
-                        e_count = int(df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum()) if not df_r.empty and 'activity_description' in df_r.columns else 0
+                        
+                        e_count = 0
+                        if not df_r.empty:
+                            dept_r = df_r[df_r['department_id'] == d_id]
+                            if 'activity_description' in dept_r.columns and not dept_r.empty:
+                                mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
+                                e_count = safe_int(mask.sum())
+
                         ach_pct = (e_count / t_val * 100) if t_val > 0 else 0
                         gap = t_val - e_count
                         stat = "Achieved" if gap <= 0 else "Review" if ach_pct > 50 else "Critical Delay"
@@ -376,7 +387,14 @@ def show():
                 for idx, row in df_t.iterrows():
                     d_id, act = row['department_id'], row['activity']
                     t_val = safe_int(row.get('desired_target', 0))
-                    e_count = int(df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum()) if not df_r.empty and 'activity_description' in df_r.columns else 0
+                    
+                    e_count = 0
+                    if not df_r.empty and 'department_id' in df_r.columns and 'activity_description' in df_r.columns:
+                        dept_r = df_r[df_r['department_id'] == d_id]
+                        if not dept_r.empty:
+                            mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
+                            e_count = safe_int(mask.sum())
+
                     if t_val > 0 and (e_count / t_val) < 0.5:
                         low_targets += f"- [{dept_map.get(d_id, 'Unknown')}] {act}: Target {t_val} | Achieved {e_count} (Deficit > 50%)\n"
 
