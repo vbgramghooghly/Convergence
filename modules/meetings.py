@@ -85,10 +85,10 @@ def show():
                         (df_ap['wing_id'].astype(str).str.lower() == 'none')
                     ]
         elif role == "block" and user.get("block_id"):
-            block_meet_ids = [m['id'] for m in meetings if m.get('block_id'] == user["block_id"]]
+            block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
