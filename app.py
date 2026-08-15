@@ -11,6 +11,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ---------- GLOBAL CSS (BULLETPROOF SIDEBAR FIX) ----------
+# We inject this immediately to ensure the sidebar toggle is ALWAYS visible
+st.markdown("""
+    <style>
+        /* 1. Force the Header to be visible but transparent */
+        header, header[data-testid="stHeader"], .stAppHeader {
+            visibility: visible !important;
+            display: block !important;
+            background: transparent !important;
+            z-index: 99998 !important;
+        }
+        
+        /* 2. Turn the Sidebar Toggle (>) into a highly visible Floating Button */
+        [data-testid="collapsedControl"] {
+            visibility: visible !important;
+            display: flex !important;
+            z-index: 99999 !important;
+            background-color: #ffffff !important;
+            border-radius: 50% !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
+            top: 15px !important;
+            left: 15px !important;
+        }
+        
+        /* 3. STRICTLY hide ONLY the top-right Streamlit tools (Deploy, GitHub, Options) */
+        .stAppToolbar, [data-testid="stToolbar"], [data-testid="stStatusWidget"], #MainMenu {
+            display: none !important;
+            visibility: hidden !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ---------- AUTHENTICATION ----------
 from auth.auth import check_password, logout, get_current_user
 
@@ -30,21 +62,9 @@ theme = apply_global_theme()
 primary_color = theme.get("primary_color", "#0F4C81")
 base_font = theme.get("base_font_size", 14)
 
-# ---------- GLOBAL CSS & DYNAMIC SIDEBAR STYLING ----------
+# ---------- DYNAMIC SIDEBAR MENU STYLING ----------
 st.markdown(f"""
     <style>
-        /* --- FIX FOR DISAPPEARING SIDEBAR TOGGLE --- */
-        header[data-testid="stHeader"] {{
-            visibility: visible !important;
-            background-color: transparent !important;
-        }}
-        
-        /* Hide ONLY the specific right-side Streamlit tools */
-        .stAppToolbar, [data-testid="stToolbar"] {{
-            display: none !important;
-            visibility: hidden !important;
-        }}
-
         /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION --- */
         [data-testid="stSidebar"] [role="radiogroup"] {{
             gap: 6px !important;
