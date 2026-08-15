@@ -1,7 +1,3 @@
-from datetime import date, datetime
-import base64
-import json
-import io
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -11,43 +7,24 @@ from utils.excel import dataframe_to_excel
 from utils.theme import apply_global_theme
 
 def show():
-    # 1. Apply the global theme immediately
-    theme = apply_global_theme()
-    
-    # 2. Render Page Content
-    # Use the app_name from the global theme if needed
-    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
-
-def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar and style official export blocks."""
-    st.markdown(
-        """
-        <style>
-        /* Hide Streamlit toolbar */
-        .stAppToolbar {
-            visibility: hidden !important;
-        }
-        .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def show():
-    # Allow all operational roles so they can generate their own reports
+    # 1. ENFORCE SECURITY & ACCESS RULES (Unchanged)
     require_role("superadmin", "district", "block", "department")
-    inject_custom_css()
-
-    st.markdown("<h1 style='color: #1F77B4;'>📊 Reports & Analytics</h1>", unsafe_allow_html=True)
-    st.caption("Official reporting, analytical, printing, and statutory export engine for VB-G RAM G Convergence.")
-    st.markdown("---")
-
-    supabase = get_supabase()
     user = get_current_user()
     role = user["role"]
+    supabase = get_supabase()
 
-    # ======================== BASE QUERY & ROLE SCOPE ========================
+    # 2. GLOBAL THEME, HEADER & BREADCRUMB
+    theme = apply_global_theme()
+    primary_color = theme.get("primary_color", "#0F4C81")
+
+    st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Analytics / Master Reports</div>", unsafe_allow_html=True)
+    st.markdown(f"<h2 style='margin-bottom: 0px; color: {primary_color};'>📊 Reports & Analytics Centre</h2>", unsafe_allow_html=True)
+    st.caption("Official reporting, analytical dashboards, and statutory export engine for VB-G RAM G Convergence.")
+    st.markdown("---")
+
+    # ==========================================
+    # 3. BASE QUERY & ROLE SCOPE (Unchanged Logic)
+    # ==========================================
     query = supabase.table("convergence_register").select("*")
     if role == "district":
         query = query.eq("district_id", user["district_id"])
@@ -64,7 +41,9 @@ def show():
 
     df = pd.DataFrame(data)
 
-    # ======================== MASTER DATA & MAPPINGS ========================
+    # ==========================================
+    # 4. MASTER DATA & MAPPINGS (Unchanged Logic)
+    # ==========================================
     districts = supabase.table("districts").select("id,district_name").execute().data or []
     blocks = supabase.table("blocks").select("id,block_name").execute().data or []
     departments = supabase.table("departments").select("id,department_name").execute().data or []
@@ -77,78 +56,68 @@ def show():
     theme_map = {t["id"]: t["theme_name"] for t in themes}
     wing_map = {w["id"]: w['wing_name'] for w in wings}
 
-    # Replace IDs with names in df safely
+    # Replace IDs with names safely
     df["district_name"] = df["district_id"].map(dist_map).fillna("Unknown")
     df["block_name"] = df["block_id"].map(block_map).fillna("Unknown")
     df["department_name"] = df["department_id"].map(dept_map).fillna("Unknown")
     df["theme_name"] = df["thematic_category_id"].map(theme_map).fillna("Unassigned")
 
-    if "convergence_type" not in df.columns:
-        df["convergence_type"] = "Not Specified"
-    if "total_converged_fund" not in df.columns:
-        df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
+    if "convergence_type" not in df.columns: df["convergence_type"] = "Not Specified"
+    if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
 
-    # =====================================================================
-    # UNIVERSAL REPORT SELECTOR MENU (Grouped by Category)
-    # =====================================================================
-    report_category = st.sidebar.selectbox("Report Category", [
-        "Official Statutory Reports",
-        "Executive & Performance Analytics",
-        "Financial & Technical Analytics",
-        "Risk, Delay & Master Statements",
-        "Meeting & Resolution Register"
-    ])
+    # ==========================================
+    # 5. REPORT CONTROL CENTRE (MOVED FROM SIDEBAR)
+    # ==========================================
+    st.markdown("#### ⚙️ Report Generation Settings")
+    with st.container(border=True):
+        col_c1, col_c2 = st.columns(2)
+        
+        report_category = col_c1.selectbox("1. Select Report Category", [
+            "Official Statutory Reports",
+            "Executive & Performance Analytics",
+            "Financial & Technical Analytics",
+            "Risk, Delay & Master Statements",
+            "Meeting & Resolution Register"
+        ])
 
-    if report_category == "Official Statutory Reports":
-        report_type = st.selectbox(
-            "Select Official Report",
-            [
+        # Cascading selectbox
+        if report_category == "Official Statutory Reports":
+            report_opts = [
                 "Official VB-G RAM G Summary Report (Template)",
                 "District-wise Summary Report",
                 "Department-wise Summary Report",
                 "Block-wise Summary Report",
-            ],
-        )
-    elif report_category == "Executive & Performance Analytics":
-        report_type = st.selectbox(
-            "Select Analytics Report",
-            [
+            ]
+        elif report_category == "Executive & Performance Analytics":
+            report_opts = [
                 "District Performance Dashboard",
                 "Department Performance Dashboard",
                 "Block Performance Dashboard",
                 "Scheme Performance Report",
                 "Personday Generation Report",
-            ],
-        )
-    elif report_category == "Financial & Technical Analytics":
-        report_type = st.selectbox(
-            "Select Financial/Technical Report",
-            [
+            ]
+        elif report_category == "Financial & Technical Analytics":
+            report_opts = [
                 "Financial Convergence Report (Fund Gap Analysis)",
                 "Technical Convergence Report (NOC Status)",
-            ],
-        )
-    elif report_category == "Risk, Delay & Master Statements":
-        report_type = st.selectbox(
-            "Select Master Statement",
-            [
+            ]
+        elif report_category == "Risk, Delay & Master Statements":
+            report_opts = [
                 "Pending / Delayed Activities Report",
                 "FY 2026–27 Master Convergence Statement",
-            ],
-        )
-    else:
-        report_type = st.selectbox(
-            "Select Meeting Report",
-            [
+            ]
+        else:
+            report_opts = [
                 "District Convergence Meeting Register",
                 "Department-wise Resolution Statement",
-            ],
-        )
+            ]
+            
+        report_type = col_c2.selectbox("2. Select Specific Report Format", report_opts)
 
     st.markdown("---")
 
     # =====================================================================
-    # 1. OFFICIAL VB-G RAM G SUMMARY REPORT (Template)
+    # 6. RENDER THE SELECTED REPORT (Unchanged Logic & Data Generation)
     # =====================================================================
     if report_type == "Official VB-G RAM G Summary Report (Template)":
         st.subheader("Summary Report on Vikshit Bharat - G RAM G Convergence Plan with Line Departments for F.Y 2026-27")
@@ -173,138 +142,74 @@ def show():
         st.dataframe(official_df, use_container_width=True, hide_index=True)
 
         excel = dataframe_to_excel(official_df, "Official_Summary_Report")
-        st.download_button(
-            label="📥 Download Official Format (Excel)",
-            data=excel,
-            file_name="VB_GRAM_G_Summary_Report_FY26_27.xlsx",
-            type="primary",
-        )
+        st.download_button("📥 Download Official Format (Excel)", data=excel, file_name="VB_GRAM_G_Summary_Report_FY26_27.xlsx", type="primary")
 
-    # =====================================================================
-    # 2. DISTRICT-WISE SUMMARY REPORT
-    # =====================================================================
     elif report_type == "District-wise Summary Report":
         st.subheader("District-wise Convergence Summary Report")
-        district_summary = (
-            df.groupby("district_name")
-            .agg(
-                Activities=("id", "count"),
-                Target=("desired_target", "sum"),
-                Dept_Fund=("department_fund", "sum"),
-                VBG_Fund=("vbgramg_fund", "sum"),
-                Total_Fund=("total_converged_fund", "sum"),
-                Expected_PD=("expected_persondays", "sum"),
-                Actual_PD=("persondays_generated", "sum"),
-                Completion_Avg=("physical_achievement", "mean"),
-            )
-            .reset_index()
-        )
+        district_summary = df.groupby("district_name").agg(
+            Activities=("id", "count"), Target=("desired_target", "sum"),
+            Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"),
+            Total_Fund=("total_converged_fund", "sum"), Expected_PD=("expected_persondays", "sum"),
+            Actual_PD=("persondays_generated", "sum"), Completion_Avg=("physical_achievement", "mean"),
+        ).reset_index()
         st.dataframe(district_summary, use_container_width=True, hide_index=True)
         excel = dataframe_to_excel(district_summary, "District_Summary")
         st.download_button("📥 Download District Summary (Excel)", excel, "district_summary_report.xlsx")
 
-    # =====================================================================
-    # 3. DEPARTMENT-WISE SUMMARY REPORT
-    # =====================================================================
     elif report_type == "Department-wise Summary Report":
         st.subheader("Department-wise Convergence Summary Report")
-        dept_summary = (
-            df.groupby("department_name")
-            .agg(
-                Activities=("id", "count"),
-                Target=("desired_target", "sum"),
-                Dept_Fund=("department_fund", "sum"),
-                VBG_Fund=("vbgramg_fund", "sum"),
-                Total_Fund=("total_converged_fund", "sum"),
-                Expected_PD=("expected_persondays", "sum"),
-                Actual_PD=("persondays_generated", "sum"),
-                Completion_Avg=("physical_achievement", "mean"),
-            )
-            .reset_index()
-        )
+        dept_summary = df.groupby("department_name").agg(
+            Activities=("id", "count"), Target=("desired_target", "sum"),
+            Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"),
+            Total_Fund=("total_converged_fund", "sum"), Expected_PD=("expected_persondays", "sum"),
+            Actual_PD=("persondays_generated", "sum"), Completion_Avg=("physical_achievement", "mean"),
+        ).reset_index()
         st.dataframe(dept_summary, use_container_width=True, hide_index=True)
         excel = dataframe_to_excel(dept_summary, "Department_Summary")
         st.download_button("📥 Download Department Summary (Excel)", excel, "department_summary_report.xlsx")
 
-    # =====================================================================
-    # 4. BLOCK-WISE SUMMARY REPORT
-    # =====================================================================
     elif report_type == "Block-wise Summary Report":
         st.subheader("Block-wise Convergence Summary Report")
-        block_summary = (
-            df.groupby(["district_name", "block_name"])
-            .agg(
-                Activities=("id", "count"),
-                Target=("desired_target", "sum"),
-                Funds=("total_converged_fund", "sum"),
-                Persondays=("expected_persondays", "sum"),
-            )
-            .reset_index()
-        )
+        block_summary = df.groupby(["district_name", "block_name"]).agg(
+            Activities=("id", "count"), Target=("desired_target", "sum"),
+            Funds=("total_converged_fund", "sum"), Persondays=("expected_persondays", "sum"),
+        ).reset_index()
         st.dataframe(block_summary, use_container_width=True, hide_index=True)
         excel = dataframe_to_excel(block_summary, "Block_Summary")
         st.download_button("📥 Download Block Summary (Excel)", excel, "block_summary_report.xlsx")
 
-    # =====================================================================
-    # 5. DISTRICT PERFORMANCE DASHBOARD
-    # =====================================================================
     elif report_type == "District Performance Dashboard":
         st.subheader("District Performance Analytics")
         if not df.empty:
             fig = px.bar(df, x="district_name", y="total_converged_fund", color="department_name", title="Total Converged Funds by District & Department")
             st.plotly_chart(fig, use_container_width=True)
 
-    # =====================================================================
-    # 6. DEPARTMENT PERFORMANCE DASHBOARD
-    # =====================================================================
     elif report_type == "Department Performance Dashboard":
         st.subheader("Department Performance Analytics")
         if not df.empty:
             fig = px.pie(df, names="department_name", values="desired_target", title="Department Target Distribution")
             st.plotly_chart(fig, use_container_width=True)
 
-    # =====================================================================
-    # 7. BLOCK PERFORMANCE DASHBOARD
-    # =====================================================================
     elif report_type == "Block Performance Dashboard":
         st.subheader("Block Performance Analytics")
         if not df.empty:
             fig = px.bar(df, x="block_name", y="physical_achievement", color="department_name", barmode="group", title="Block-wise Physical Achievement %")
             st.plotly_chart(fig, use_container_width=True)
 
-    # =====================================================================
-    # 8. SCHEME PERFORMANCE REPORT
-    # =====================================================================
     elif report_type == "Scheme Performance Report":
         st.subheader("Scheme-wise Performance Report")
-        scheme_perf = (
-            df.groupby(["activity_description", "department_name"])
-            .agg(
-                Target=("desired_target", "sum"),
-                Physical_Ach=("physical_achievement", "mean"),
-                Financial_Ach=("financial_achievement", "mean"),
-                Persondays_Expected=("expected_persondays", "sum"),
-                Persondays_Actual=("persondays_generated", "sum"),
-            )
-            .reset_index()
-        )
+        scheme_perf = df.groupby(["activity_description", "department_name"]).agg(
+            Target=("desired_target", "sum"), Physical_Ach=("physical_achievement", "mean"),
+            Financial_Ach=("financial_achievement", "mean"), Persondays_Expected=("expected_persondays", "sum"),
+            Persondays_Actual=("persondays_generated", "sum"),
+        ).reset_index()
         st.dataframe(scheme_perf, use_container_width=True, hide_index=True)
         excel = dataframe_to_excel(scheme_perf, "Scheme_Performance")
         st.download_button("📥 Download Scheme Performance (Excel)", excel, "scheme_performance.xlsx")
 
-    # =====================================================================
-    # 9. PERSONDAY GENERATION REPORT
-    # =====================================================================
     elif report_type == "Personday Generation Report":
         st.subheader("Personday Generation Analysis")
-        pd_df = (
-            df.groupby("district_name")
-            .agg(
-                Expected=("expected_persondays", "sum"),
-                Actual=("persondays_generated", "sum"),
-            )
-            .reset_index()
-        )
+        pd_df = df.groupby("district_name").agg(Expected=("expected_persondays", "sum"), Actual=("persondays_generated", "sum")).reset_index()
         pd_df["Achievement%"] = (pd_df["Actual"] / pd_df["Expected"].replace(0, 1)) * 100
         st.dataframe(pd_df, use_container_width=True, hide_index=True)
         
@@ -314,20 +219,11 @@ def show():
         excel = dataframe_to_excel(pd_df, "Personday_Report")
         st.download_button("📥 Download Personday Report (Excel)", excel, "personday_report.xlsx")
 
-    # =====================================================================
-    # 10. FINANCIAL CONVERGENCE REPORT (FUND GAP ANALYSIS)
-    # =====================================================================
     elif report_type == "Financial Convergence Report (Fund Gap Analysis)":
         st.subheader("Financial Convergence & Funding Gap Analysis")
-        fin_df = (
-            df.groupby("district_name")
-            .agg(
-                Dept_Fund=("department_fund", "sum"),
-                VBG_Fund=("vbgramg_fund", "sum"),
-                Total_Converged=("total_converged_fund", "sum"),
-            )
-            .reset_index()
-        )
+        fin_df = df.groupby("district_name").agg(
+            Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"), Total_Converged=("total_converged_fund", "sum"),
+        ).reset_index()
         st.dataframe(fin_df, use_container_width=True, hide_index=True)
         
         fig = px.bar(fin_df, x="district_name", y=["Dept_Fund", "VBG_Fund"], title="Financial Convergence Breakdown by District", barmode="stack")
@@ -336,52 +232,35 @@ def show():
         excel = dataframe_to_excel(fin_df, "Financial_Convergence")
         st.download_button("📥 Download Financial Report (Excel)", excel, "financial_convergence_report.xlsx")
 
-    # =====================================================================
-    # 11. TECHNICAL CONVERGENCE REPORT (NOC STATUS)
-    # =====================================================================
     elif report_type == "Technical Convergence Report (NOC Status)":
         st.subheader("Technical Convergence & Zero-Fund NOC Report")
         tech_df = df[df["convergence_type"].str.contains("Technical", na=False, case=False)]
         if not tech_df.empty:
-            tech_summary = (
-                tech_df.groupby("department_name")
-                .agg(Technical_Activities_Count=("id", "count"))
-                .reset_index()
-            )
+            tech_summary = tech_df.groupby("department_name").agg(Technical_Activities_Count=("id", "count")).reset_index()
             st.dataframe(tech_summary, use_container_width=True, hide_index=True)
             excel = dataframe_to_excel(tech_summary, "Technical_Report")
             st.download_button("📥 Download Technical Report (Excel)", excel, "technical_convergence_report.xlsx")
         else:
             st.info("No technical convergence activities recorded.")
 
-    # =====================================================================
-    # 12. PENDING / DELAYED ACTIVITIES REPORT
-    # =====================================================================
     elif report_type == "Pending / Delayed Activities Report":
         st.subheader("Risk & Delay Monitoring: Pending / Delayed Activities")
         delayed = df[df["current_status"].isin(["Planned", "Approved", "Delayed"]) | (df.get("delay_days", 0) > 0)]
         if not delayed.empty:
             cols = ["id", "activity_description", "district_name", "department_name", "current_status"]
-            if "delay_days" in delayed.columns:
-                cols.append("delay_days")
+            if "delay_days" in delayed.columns: cols.append("delay_days")
             st.dataframe(delayed[cols], use_container_width=True, hide_index=True)
             excel = dataframe_to_excel(delayed, "Delayed_Activities")
             st.download_button("📥 Download Delayed Activities (Excel)", excel, "delayed_activities_report.xlsx")
         else:
             st.success("🎉 No pending or delayed activities found!")
 
-    # =====================================================================
-    # 13. FY 2026-27 MASTER CONVERGENCE STATEMENT
-    # =====================================================================
     elif report_type == "FY 2026–27 Master Convergence Statement":
         st.subheader("Master Convergence Statement FY 2026-27")
         st.dataframe(df, use_container_width=True, hide_index=True)
         excel = dataframe_to_excel(df, "Master_Statement")
         st.download_button("📥 Download Master Statement (Excel)", excel, "master_convergence_statement_fy26_27.xlsx", type="primary")
 
-    # =====================================================================
-    # 14. DISTRICT CONVERGENCE MEETING REGISTER
-    # =====================================================================
     elif report_type == "District Convergence Meeting Register":
         st.subheader("District Convergence Meeting Register")
         meetings = supabase.table("meetings").select("*").eq("meeting_type", "District").execute().data or []
@@ -393,9 +272,6 @@ def show():
         else:
             st.info("No district meetings recorded.")
 
-    # =====================================================================
-    # 15. DEPARTMENT-WISE RESOLUTION STATEMENT
-    # =====================================================================
     elif report_type == "Department-wise Resolution Statement":
         st.subheader("Department-wise Resolution & ATR Register")
         resolutions = supabase.table("meeting_action_points").select("*").execute().data or []
