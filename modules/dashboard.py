@@ -4,11 +4,25 @@ from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.theme import apply_global_theme
 
+def safe_int(val):
+    """Safely converts empty strings, floats, and nulls to integers to prevent math crashes."""
+    if pd.isna(val) or val is None or val == '': 
+        return 0
+    try: 
+        return int(float(val))
+    except (ValueError, TypeError): 
+        return 0
+
 def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar and format metric cards."""
+    """Injects custom CSS to format metric cards and FIX the sidebar toggle issue."""
     st.markdown("""
         <style>
+        /* Hide ONLY the specific right-side Streamlit tools, NOT the whole header */
         .stAppToolbar { visibility: hidden !important; }
+        
+        /* Force the header to be visible so the > button to reopen the sidebar never disappears */
+        header { visibility: visible !important; background-color: transparent !important; }
+        
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
         </style>
         """, unsafe_allow_html=True)
@@ -17,7 +31,7 @@ def show():
     # 1. Role Authentication
     require_role('superadmin', 'district', 'block', 'department')
     
-    # 2. Apply Global Theme Engine
+    # 2. Apply Global Theme Engine & Fix CSS
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
     inject_custom_css()
@@ -259,7 +273,9 @@ def show():
             for idx, row in df_targets.iterrows():
                 d_id = row['department_id']
                 w_id = row.get('wing_id')
-                target_val = int(row.get('desired_target', 0))
+                
+                # Safely convert target using safe_int to completely prevent string-math errors
+                target_val = safe_int(row.get('desired_target', 0))
                 
                 target_w_id_safe = None if pd.isna(w_id) else w_id
                 dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_map[target_w_id_safe]}" if target_w_id_safe and target_w_id_safe in wing_map else f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
@@ -271,7 +287,8 @@ def show():
                 if not df_reg.empty:
                     dept_reg = df_reg[df_reg['department_id'] == d_id]
                     if 'activity_description' in dept_reg.columns:
-                        entered_count = int(dept_reg['activity_description'].apply(lambda x: str(row['activity']).lower() in str(x).lower()).sum())
+                        # Safely cast to integer 
+                        entered_count = safe_int(dept_reg['activity_description'].apply(lambda x: str(row['activity']).lower() in str(x).lower()).sum())
                         
                 gap = entered_count - target_val
                 status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
