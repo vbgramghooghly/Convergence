@@ -53,7 +53,9 @@ def show():
     def format_dept_display(row):
         d_name = dept_map.get(row.get("department_id"), "Unknown")
         w_id = row.get("wing_id")
-        if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
+        if w_id and not pd.isna(w_id) and str(w_id).strip() != '' and str(w_id).lower() != 'none':
+            if w_id in wing_map:
+                return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
         return f"{d_name} (Main)"
 
     # DATA FETCHING (Preserved)
@@ -70,19 +72,26 @@ def show():
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
     if not df_ap.empty:
+        # ROBUST TYPE-SAFE DEPARTMENT & WING FILTERING (Fixes PBSSM visibility issue)
         if role == "department":
             dep_id = user.get('department_id')
             w_id = user.get('wing_id')
             if dep_id:
-                if w_id:
-                    df_ap = df_ap[(df_ap['department_id'] == dep_id) & (df_ap['wing_id'] == w_id)]
-                else:
-                    df_ap = df_ap[(df_ap['department_id'] == dep_id) & (df_ap['wing_id'].isna() | (df_ap['wing_id'] == ''))]
+                # Match department ID safely as string
+                df_ap = df_ap[df_ap['department_id'].astype(str) == str(dep_id)]
+                if w_id and str(w_id).strip() != '' and str(w_id).lower() != 'none':
+                    # If user belongs to a wing (e.g. PBSSM), show commitments for this wing OR unassigned department-level commitments
+                    df_ap = df_ap[
+                        (df_ap['wing_id'].astype(str) == str(w_id)) | 
+                        (df_ap['wing_id'].isna()) | 
+                        (df_ap['wing_id'] == '') | 
+                        (df_ap['wing_id'].astype(str).str.lower() == 'none')
+                    ]
         elif role == "block" and user.get("block_id"):
             block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
@@ -372,7 +381,7 @@ def show():
             if not p_aps.empty:
                 for idx, ap in enumerate(p_aps.iterrows(), 1):
                     row = ap[1]
-                    proc_rows += f"<tr><td>{idx[0]}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
+                    proc_rows += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
             else:
                 proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
 
