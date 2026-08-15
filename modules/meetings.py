@@ -76,7 +76,6 @@ def show():
             dep_id = user.get('department_id')
             w_id = user.get('wing_id')
             if dep_id:
-                # Type-safe filtering ensuring both main department items and sub-wing items match correctly
                 df_ap = df_ap[df_ap['department_id'].astype(str) == str(dep_id)]
                 if w_id and str(w_id).strip() != '' and str(w_id).lower() != 'none':
                     df_ap = df_ap[
@@ -86,10 +85,10 @@ def show():
                         (df_ap['wing_id'].astype(str).str.lower() == 'none')
                     ]
         elif role == "block" and user.get("block_id"):
-            block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
+            block_meet_ids = [m['id'] for m in meetings if m.get('block_id'] == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
@@ -377,7 +376,7 @@ def show():
 
             proc_rows = ""
             if not p_aps.empty:
-                for idx, (i, row) in enumerate(p_aps.iterrows(), 1):
+                for idx, row in enumerate(p_aps.to_dict(orient="records"), 1):
                     proc_rows += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
             else:
                 proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
