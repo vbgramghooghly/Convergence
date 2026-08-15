@@ -72,15 +72,12 @@ def show():
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
     if not df_ap.empty:
-        # ROBUST TYPE-SAFE DEPARTMENT & WING FILTERING (Fixes PBSSM visibility issue)
         if role == "department":
             dep_id = user.get('department_id')
             w_id = user.get('wing_id')
             if dep_id:
-                # Match department ID safely as string
                 df_ap = df_ap[df_ap['department_id'].astype(str) == str(dep_id)]
                 if w_id and str(w_id).strip() != '' and str(w_id).lower() != 'none':
-                    # If user belongs to a wing (e.g. PBSSM), show commitments for this wing OR unassigned department-level commitments
                     df_ap = df_ap[
                         (df_ap['wing_id'].astype(str) == str(w_id)) | 
                         (df_ap['wing_id'].isna()) | 
@@ -91,7 +88,7 @@ def show():
             block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
@@ -527,7 +524,7 @@ def show():
                             if not df_r.empty and 'department_id' in df_r.columns and 'activity_description' in df_r.columns:
                                 dept_r = df_r[df_r['department_id'] == d_id]
                                 if not dept_r.empty:
-                                    mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
+                                    mask = df_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
                                     e_count = safe_int(mask.sum())
 
                             if t_val > 0 and (e_count / t_val) < 0.5:
