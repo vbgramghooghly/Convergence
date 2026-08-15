@@ -70,7 +70,6 @@ def show():
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
     if not df_ap.empty:
-        # Robust filtering for department users matching department_id AND optional wing_id
         if role == "department":
             dep_id = user.get('department_id')
             w_id = user.get('wing_id')
@@ -78,13 +77,12 @@ def show():
                 if w_id:
                     df_ap = df_ap[(df_ap['department_id'] == dep_id) & (df_ap['wing_id'] == w_id)]
                 else:
-                    # Match main department or rows where wing is null/unassigned
                     df_ap = df_ap[(df_ap['department_id'] == dep_id) & (df_ap['wing_id'].isna() | (df_ap['wing_id'] == ''))]
         elif role == "block" and user.get("block_id"):
-            block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
+            block_meet_ids = [m['id'] for m in meetings if m.get('block_id'] == user["block_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
         elif role == "district" and user.get("district_id"):
-            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id'] == user["district_id"]]
             df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
@@ -117,17 +115,15 @@ def show():
         st.markdown("<br>", unsafe_allow_html=True)
 
     # =====================================================================
-    # ROLE-SPECIFIC TAB ARCHITECTURE (Clean & Uncluttered for Departments)
+    # ROLE-SPECIFIC TAB ARCHITECTURE
     # =====================================================================
     if role == "department":
-        # Departments only see what is relevant to their execution workflow: SLA Performance, Record Workspace, and Action Tracker
         tab1, tab4, tab5 = st.tabs([
             "📈 SLA Performance", 
             "🖨️ Meeting Record Workspace",
             "🎯 Action Tracker & ATR"
         ])
     else:
-        # Administrative roles retain full management tabs (Schedule, Attendance, etc.)
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📈 SLA Performance", 
             "🗓️ Schedule Meeting", 
@@ -376,7 +372,7 @@ def show():
             if not p_aps.empty:
                 for idx, ap in enumerate(p_aps.iterrows(), 1):
                     row = ap[1]
-                    proc_rows += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
+                    proc_rows += f"<tr><td>{idx[0] if isinstance(idx, tuple) else idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
             else:
                 proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
 
@@ -490,65 +486,67 @@ def show():
                         st.rerun()
 
     # =====================================================================
-    # TAB 6: AUTOMATED NEXT AGENDA PREP
+    # TAB 6: AUTOMATED NEXT AGENDA PREP (Admin Only)
     # =====================================================================
-    agenda_tab = tab6 if role == "department" else tab6
-    with agenda_tab:
-        st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
-        district_id = user.get("district_id")
-        if not district_id:
-            st.info("Select district context to compile automated agenda.")
-        else:
-            agenda_text = "STATUTORY CONVERGENCE COMMITTEE — UPCOMING AGENDA:\n\n"
-            has_items = False
+    if role != "department":
+        agenda_tab = tab6 if role != "department" else None
+        if agenda_tab:
+            with agenda_tab:
+                st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
+                district_id = user.get("district_id")
+                if not district_id:
+                    st.info("Select district context to compile automated agenda.")
+                else:
+                    agenda_text = "STATUTORY CONVERGENCE COMMITTEE — UPCOMING AGENDA:\n\n"
+                    has_items = False
 
-            q_targets = supabase.table("department_targets").select("*").eq("district_id", district_id)
-            try: q_targets = q_targets.eq("financial_year", active_fy)
-            except: pass
-            t_data = q_targets.execute().data
+                    q_targets = supabase.table("department_targets").select("*").eq("district_id", district_id)
+                    try: q_targets = q_targets.eq("financial_year", active_fy)
+                    except: pass
+                    t_data = q_targets.execute().data
 
-            if t_data:
-                df_t = pd.DataFrame(t_data)
-                q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", district_id)
-                df_r = pd.DataFrame(q_reg.execute().data) if q_reg.execute().data else pd.DataFrame()
-                low_targets = ""
-                for idx, row in df_t.iterrows():
-                    d_id, act = row['department_id'], row['activity']
-                    t_val = safe_int(row.get('desired_target', 0))
-                    
-                    e_count = 0
-                    if not df_r.empty and 'department_id' in df_r.columns and 'activity_description' in df_r.columns:
-                        dept_r = df_r[df_r['department_id'] == d_id]
-                        if not dept_r.empty:
-                            mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
-                            e_count = safe_int(mask.sum())
+                    if t_data:
+                        df_t = pd.DataFrame(t_data)
+                        q_reg = supabase.table("convergence_register").select("department_id, activity_description").eq("district_id", district_id)
+                        df_r = pd.DataFrame(q_reg.execute().data) if q_reg.execute().data else pd.DataFrame()
+                        low_targets = ""
+                        for idx, row in df_t.iterrows():
+                            d_id, act = row['department_id'], row['activity']
+                            t_val = safe_int(row.get('desired_target', 0))
+                            
+                            e_count = 0
+                            if not df_r.empty and 'department_id' in df_r.columns and 'activity_description' in df_r.columns:
+                                dept_r = df_r[df_r['department_id'] == d_id]
+                                if not dept_r.empty:
+                                    mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
+                                    e_count = safe_int(mask.sum())
 
-                    if t_val > 0 and (e_count / t_val) < 0.5:
-                        low_targets += f"- [{dept_map.get(d_id, 'Unknown')}] {act}: Target {t_val} | Achieved {e_count} (Deficit > 50%)\n"
+                            if t_val > 0 and (e_count / t_val) < 0.5:
+                                low_targets += f"- [{dept_map.get(d_id, 'Unknown')}] {act}: Target {t_val} | Achieved {e_count} (Deficit > 50%)\n"
 
-                if low_targets:
-                    has_items = True
-                    agenda_text += "📊 1. REVIEW OF CRITICAL TARGET GAPS (<50% Achieved):\n" + low_targets + "\n"
+                        if low_targets:
+                            has_items = True
+                            agenda_text += "📊 1. REVIEW OF CRITICAL TARGET GAPS (<50% Achieved):\n" + low_targets + "\n"
 
-            if not df_ap.empty:
-                active_df = df_ap[~df_ap["Tracker Flag"].isin(["🟢 CLOSED"])]
-                unfeasible_df = active_df[active_df["Tracker Flag"] == "🟠 FOR REVIEW"]
-                overdue_df = active_df[active_df["Tracker Flag"] == "🔴 OVERDUE"]
+                    if not df_ap.empty:
+                        active_df = df_ap[~df_ap["Tracker Flag"].isin(["🟢 CLOSED"])]
+                        unfeasible_df = active_df[active_df["Tracker Flag"] == "🟠 FOR REVIEW"]
+                        overdue_df = active_df[active_df["Tracker Flag"] == "🔴 OVERDUE"]
 
-                if not unfeasible_df.empty:
-                    has_items = True
-                    agenda_text += "🟠 2. ITEMS FLAGGED AS NOT FEASIBLE (FOR CHAIRPERSON REVIEW):\n"
-                    for idx, row in unfeasible_df.iterrows():
-                        agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n  Reason: {row.get('remarks', 'N/A')}\n\n"
+                        if not unfeasible_df.empty:
+                            has_items = True
+                            agenda_text += "🟠 2. ITEMS FLAGGED AS NOT FEASIBLE (FOR CHAIRPERSON REVIEW):\n"
+                            for idx, row in unfeasible_df.iterrows():
+                                agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n  Reason: {row.get('remarks', 'N/A')}\n\n"
 
-                if not overdue_df.empty:
-                    has_items = True
-                    agenda_text += "🔴 3. OVERDUE COMMITMENTS (SLA BREACH):\n"
-                    for idx, row in overdue_df.iterrows():
-                        agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n"
+                        if not overdue_df.empty:
+                            has_items = True
+                            agenda_text += "🔴 3. OVERDUE COMMITMENTS (SLA BREACH):\n"
+                            for idx, row in overdue_df.iterrows():
+                                agenda_text += f"- [{row['Department / Wing']}] {row['action_point']}\n"
 
-            if has_items:
-                st.warning("⚠️ High-priority governance exceptions identified for next meeting notice.")
-                st.text_area("Compiled Agenda Text:", value=agenda_text, height=350)
-            else:
-                st.success("🎉 No overdue items or severe target gaps detected.")
+                    if has_items:
+                        st.warning("⚠️ High-priority governance exceptions identified for next meeting notice.")
+                        st.text_area("Compiled Agenda Text:", value=agenda_text, height=350)
+                    else:
+                        st.success("🎉 No overdue items or severe target gaps detected.")
