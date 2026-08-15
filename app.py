@@ -8,14 +8,14 @@ st.set_page_config(
     page_title="VB-G RAM G Portal",
     page_icon="🏛️",
     layout="wide",
-    initial_sidebar_state="collapsed" # We collapse it natively, then kill it with CSS
+    initial_sidebar_state="collapsed"
 )
 
 # ---------- APPLY CENTRAL UI/UX THEME ----------
 theme = apply_global_theme()
 primary_color = theme.get("primary_color", "#0F4C81")
 
-# ---------- GLOBAL CSS (NO SIDEBAR, TOP NAV STYLING) ----------
+# ---------- GLOBAL CSS (BULLETPROOF TOP NAV STYLING) ----------
 st.markdown(f"""
     <style>
         /* 1. COMPLETELY KILL THE SIDEBAR AND TOGGLE BUTTON */
@@ -36,55 +36,57 @@ st.markdown(f"""
             max-width: 98% !important;
         }}
 
-        /* 4. STYLE THE TOP RADIO BUTTONS TO LOOK LIKE A MODERN NAVBAR */
-        /* Make the radio group a horizontal flexbox */
-        div.row-widget.stRadio > div {{
-            display: flex;
-            flex-direction: row;
-            flex-wrap: wrap;
-            gap: 10px;
-            padding: 5px;
-            background: #F8FAFC;
-            border-radius: 8px;
-            border: 1px solid #E2E8F0;
-        }}
-        
-        /* Style the individual navigation pills */
-        div.row-widget.stRadio > div > label {{
-            background-color: transparent;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin: 0;
-            transition: all 0.2s ease;
-        }}
-        
-        /* Hide the actual radio circle circles */
-        div[role="radiogroup"] > label > div:first-of-type {{
+        /* 4. SAFE RADIO-TO-NAVBAR CSS */
+        /* Target the exact radio circle element safely without hiding text */
+        [data-testid="stRadio"] [data-baseweb="radio"] {{
             display: none !important;
         }}
         
-        /* Text styling inside the pills */
-        div.row-widget.stRadio > div > label div[data-testid="stMarkdownContainer"] p {{
-            font-weight: 600;
-            color: #4A5568;
-            font-size: 14px;
-            margin: 0;
+        /* Make the radio group a horizontal flex container */
+        [data-testid="stRadio"] > div[role="radiogroup"] {{
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 10px !important;
+            background-color: #F8FAFC !important;
+            padding: 8px 12px !important;
+            border-radius: 8px !important;
+            border: 1px solid #E2E8F0 !important;
+        }}
+        
+        /* Style the individual navigation pills */
+        [data-testid="stRadio"] > div[role="radiogroup"] > label {{
+            background-color: transparent !important;
+            padding: 8px 16px !important;
+            border-radius: 6px !important;
+            cursor: pointer !important;
+            margin: 0 !important;
+            transition: all 0.2s ease !important;
         }}
 
         /* Hover effect */
-        div.row-widget.stRadio > div > label:hover {{
-            background-color: #E2E8F0;
+        [data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
+            background-color: #E2E8F0 !important;
         }}
 
         /* Active/Selected state */
-        div.row-widget.stRadio > div > label:has(input:checked) {{
-            background-color: {primary_color};
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        [data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked),
+        [data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] {{
+            background-color: {primary_color} !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        }}
+        
+        /* Text styling inside the pills */
+        [data-testid="stRadio"] > div[role="radiogroup"] > label p {{
+            font-weight: 600 !important;
+            color: #4A5568 !important;
+            font-size: 15px !important;
+            margin: 0 !important;
         }}
         
         /* Active text color */
-        div.row-widget.stRadio > div > label:has(input:checked) div[data-testid="stMarkdownContainer"] p {{
+        [data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) p,
+        [data-testid="stRadio"] > div[role="radiogroup"] > label[data-checked="true"] p {{
             color: #FFFFFF !important;
         }}
         
@@ -122,12 +124,12 @@ role = user['role']
 
 # ---------- TOP NAVIGATION BAR & PROFILE MENU ----------
 # Layout: Logo (Left) | Navigation (Center) | Profile (Right)
-col_logo, col_nav, col_profile = st.columns([1.5, 7, 1.5], vertical_alignment="center")
+col_logo, col_nav, col_profile = st.columns([1.5, 7, 1.5])
 
 with col_logo:
-    st.markdown(f"<h3 style='color: {primary_color}; margin: 0; font-weight: 800;'>🏛️ VB-G RAM G</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: {primary_color}; margin-top: 8px; font-weight: 800;'>🏛️ VB-G RAM G</h3>", unsafe_allow_html=True)
 
-# 1. Define allowed pages per role (Superadmin gets everything)
+# 1. Define allowed pages per role
 role_pages = {
     "superadmin": ["📊 Dashboard", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "📇 Officials", "📈 Reports", "⚙️ Master Data", "👥 Users", "🛡️ Audit", "🎨 UI/UX"],
     "district": ["📊 Dashboard", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "📇 Officials", "📈 Reports"],
@@ -140,21 +142,21 @@ if not allowed_pages:
     st.error("Invalid role configuration.")
     logout()
 
-# 2. Render Primary Horizontal Navigation
+# 2. Render Primary Horizontal Navigation safely
 with col_nav:
     selection = st.radio("Navigation", allowed_pages, horizontal=True, label_visibility="collapsed")
+    if not selection:
+        selection = allowed_pages[0]
 
 # 3. Render Profile Dropdown (Top Right)
 with col_profile:
     first_name = user.get('full_name', 'User').split()[0]
     
-    # st.popover acts as a perfect dropdown menu
     with st.popover(f"👤 {first_name} ▾", use_container_width=True):
         st.markdown(f"**{user.get('full_name')}**")
         st.caption(f"Role: {role.upper()}")
         st.divider()
         
-        # FY Selector moved to profile menu
         st.markdown("**📅 Active Financial Year**")
         if "selected_fy" not in st.session_state:
             st.session_state.selected_fy = "2026-27"
