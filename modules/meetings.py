@@ -7,99 +7,73 @@ from utils.audit import log_action
 from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
-def show():
-    # 1. Apply the global theme immediately
-    theme = apply_global_theme()
-    
-    # 2. Render Page Content
-    # Use the app_name from the global theme if needed
-    st.markdown(f"<h1>{theme.get('app_name')} Dashboard</h1>", unsafe_allow_html=True)
+def safe_int(val):
+    if pd.isna(val) or val is None or val == '': return 0
+    try: return int(float(val))
+    except (ValueError, TypeError): return 0
 
 def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar (Fork/GitHub buttons)."""
-    st.markdown(
-        """
+    st.markdown("""
         <style>
-        /* Hide Streamlit toolbar (Fork and GitHub buttons) */
-        .stAppToolbar {
-            visibility: hidden !important;
-        }
-        .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
+        .stAppToolbar { visibility: hidden !important; }
+        .print-btn { background-color: #2B8A3E; color: white; padding: 10px 15px; border-radius: 6px; text-align: center; font-weight: bold; cursor: pointer; text-decoration: none; display: block; margin-top: 10px; }
+        .print-btn:hover { background-color: #21702f; color: white; }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
+        """, unsafe_allow_html=True)
 
 def show():
+    # 1. Apply global configurations & theme
     require_role("superadmin", "district", "block", "department")
     inject_custom_css()
-
-    st.markdown(
-        "<h1 style='color: #1F77B4;'>📋 Convergence Meeting & Resolution </h1>",
-        unsafe_allow_html=True,
-    )
-    st.caption("Convergence meetings: Scheduling → Attendance → Target Review → Resolutions → Next Agenda.")
-    st.markdown("---")
+    theme = apply_global_theme()
+    primary_color = theme.get("primary_color", "#1F77B4")
 
     supabase = get_supabase()
     user = get_current_user()
     role = user["role"]
     today = pd.to_datetime(date.today())
+    active_fy = st.session_state.get("selected_fy", "2026-27")
 
-    # ======================== 1. MASTER DATA FETCH & MAPPING ========================
+    st.markdown(f"<h1 style='color: {primary_color};'>📋 Convergence Meeting & Resolution</h1>", unsafe_allow_html=True)
+    st.caption(f"FY {active_fy} | Scheduling → Attendance → Target Review → Resolutions → Next Agenda.")
+    st.markdown("---")
+
+    # ======================== 1. MASTER DATA FETCH ========================
     departments = supabase.table("departments").select("id, department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
-    
-    # Explicitly fetch activities and mapping to ensure the dropdown filters correctly
     activities_data = supabase.table("activities").select("id, activity_name").eq("active", True).execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("activity_id, department_id").execute().data or []
+    users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
 
     dept_map = {d["id"]: d["department_name"] for d in departments}
     wing_map = {w["id"]: w for w in wings}
     block_dict_reverse = {b["id"]: b["block_name"] for b in blocks_data}
 
-    # Build Unified Department / Wing Options for clean multiselects
     unified_depts = []
     for d in departments:
-        unified_depts.append({
-            "uid": f"{d['id']}_main",
-            "label": f"{d['department_name']} (Main Department)",
-            "dept_id": d["id"],
-            "wing_id": None,
-        })
+        unified_depts.append({"uid": f"{d['id']}_main", "label": f"{d['department_name']} (Main Department)", "dept_id": d["id"], "wing_id": None})
     for w in wings:
-        p_name = dept_map.get(w["department_id"], "Unknown Department")
-        unified_depts.append({
-            "uid": f"{w['department_id']}_{w['id']}",
-            "label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]",
-            "dept_id": w["department_id"],
-            "wing_id": w["id"],
-        })
+        unified_depts.append({"uid": f"{w['department_id']}_{w['id']}", "label": f"{dept_map.get(w['department_id'])} ➔ {w['wing_name']} [{w['entity_type']}]", "dept_id": w["department_id"], "wing_id": w["id"]})
 
     unified_depts = sorted(unified_depts, key=lambda x: x["label"])
     unified_uid_to_label = {u["uid"]: u["label"] for u in unified_depts}
     dept_labels = [u["label"] for u in unified_depts]
 
-    # Helper function to format Department/Wing display cleanly for dataframes
     def format_dept_display(row):
         d_name = dept_map.get(row.get("department_id"), "Unknown")
         w_id = row.get("wing_id")
-        if w_id and not pd.isna(w_id) and w_id in wing_map:
-            return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
+        if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
         return f"{d_name} (Main)"
 
-    # ======================== 2. CONTEXTUAL DATA FETCH ========================
-    q_meetings = supabase.table("meetings").select("*")
-    if role in ["district", "department"]:
-        q_meetings = q_meetings.eq("district_id", user["district_id"])
-    elif role == "block":
-        q_meetings = q_meetings.eq("block_id", user["block_id"])
+    # ======================== 2. CONTEXTUAL & FY DATA FETCH ========================
+    q_meetings = supabase.table("meetings").select("*").eq("financial_year", active_fy)
+    if role in ["district", "department"]: q_meetings = q_meetings.eq("district_id", user["district_id"])
+    elif role == "block": q_meetings = q_meetings.eq("block_id", user["block_id"])
 
     meetings = q_meetings.order("meeting_date", desc=True).execute().data or []
     
-    # Contextual Filtering for Departments (Only see meetings they were invited to)
+    # Filter restricted visibility for departments
     if role == "department" and meetings:
         user_uid_main = f"{user.get('department_id')}_main"
         user_uid_wing = f"{user.get('department_id')}_{user.get('wing_id')}" if user.get('wing_id') else user_uid_main
@@ -113,23 +87,17 @@ def show():
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
     valid_meet_ids = [m['id'] for m in meetings]
 
-    # Fetch All Relevant Action Points
-    ap_data = []
-    if valid_meet_ids:
-        ap_data = supabase.table("meeting_action_points").select("*").in_("meeting_id", valid_meet_ids).execute().data or []
+    # Fetch and format Resolution Data securely
+    ap_data = supabase.table("meeting_action_points").select("*").in_("meeting_id", valid_meet_ids).execute().data if valid_meet_ids else []
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
-    # Apply Tracker Logic to APs
     if not df_ap.empty:
         if role == "department":
-            if user.get('wing_id'):
-                df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
-            else:
-                df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
+            if user.get('wing_id'): df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
+            else: df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
-        m_context_map = {m["id"]: f"{m['meeting_date']} ({m['meeting_type']})" for m in meetings}
-        df_ap["Origin Meeting"] = df_ap["meeting_id"].map(m_context_map)
+        df_ap["Origin Meeting"] = df_ap["meeting_id"].map({m["id"]: f"{m['meeting_date']} ({m['meeting_type']})" for m in meetings})
         df_ap["deadline"] = pd.to_datetime(df_ap["deadline"], errors="coerce")
 
         def get_flag(row):
@@ -146,70 +114,43 @@ def show():
         df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
     # ======================== TABS LAYOUT ========================
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📈 Performance Dashboard",
-        "🗓️ Schedule Meeting",
-        "✍️ Record Proceedings",
-        "🎯 Advanced Tracker",
-        "🖨️ Reports & Registers",
-        "⏭️ Next Agenda Prep",
-    ])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Performance Dashboard", "🗓️ Schedule Meeting", "✍️ Record Proceedings", "🎯 Advanced Tracker", "🖨️ Reports", "⏭️ Next Agenda Prep"])
 
-    # ======================== TAB 1: RESOLUTION PERFORMANCE DASHBOARD ========================
     with tab1:
         st.subheader("Resolution Performance Dashboard")
         if df_ap.empty:
-            st.info("No resolution data available for your jurisdiction.")
+            st.info(f"No resolution data available for your jurisdiction in FY {active_fy}.")
         else:
-            # Key Metrics
-            total_res = len(df_ap)
-            closed = len(df_ap[df_ap["Tracker Flag"] == "🟢 CLOSED"])
-            on_track = len(df_ap[df_ap["Tracker Flag"] == "🔵 ON TRACK"])
-            due_today = len(df_ap[df_ap["Tracker Flag"] == "🟡 DUE TODAY"])
-            overdue = len(df_ap[df_ap["Tracker Flag"] == "🔴 OVERDUE"])
-            for_review = len(df_ap[df_ap["Tracker Flag"] == "🟠 FOR REVIEW"])
-
             c1, c2, c3, c4, c5, c6 = st.columns(6)
-            c1.metric("Total Resolutions", total_res)
-            c2.metric("🟢 Closed", closed)
-            c3.metric("🔵 On Track", on_track)
-            c4.metric("🟡 Due Today", due_today)
-            c5.metric("🔴 Overdue", overdue)
-            c6.metric("🟠 For Review", for_review)
+            c1.metric("Total", len(df_ap))
+            c2.metric("🟢 Closed", len(df_ap[df_ap["Tracker Flag"] == "🟢 CLOSED"]))
+            c3.metric("🔵 On Track", len(df_ap[df_ap["Tracker Flag"] == "🔵 ON TRACK"]))
+            c4.metric("🟡 Due Today", len(df_ap[df_ap["Tracker Flag"] == "🟡 DUE TODAY"]))
+            c5.metric("🔴 Overdue", len(df_ap[df_ap["Tracker Flag"] == "🔴 OVERDUE"]))
+            c6.metric("🟠 Review", len(df_ap[df_ap["Tracker Flag"] == "🟠 FOR REVIEW"]))
 
-            st.markdown("---")
             col_dash1, col_dash2 = st.columns(2)
-
             with col_dash1:
                 st.markdown("#### Department-wise View")
-                dept_perf = df_ap.groupby("Department / Wing").agg(
-                    Total=('id', 'count'),
-                    Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum()),
-                    Pending=('Tracker Flag', lambda x: (x.isin(['🔵 ON TRACK', '⚪ NOT STARTED', '🟡 DUE TODAY'])).sum()),
-                    Overdue=('Tracker Flag', lambda x: (x == '🔴 OVERDUE').sum())
-                ).reset_index()
-                dept_perf['Achievement %'] = (dept_perf['Closed'] / dept_perf['Total'] * 100).round(1).astype(str) + '%'
+                dept_perf = df_ap.groupby("Department / Wing").agg(Total=('id', 'count'), Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum())).reset_index()
+                # Safely convert to numeric to prevent string division crashes
+                dept_perf['Total'] = pd.to_numeric(dept_perf['Total'], errors='coerce').fillna(0)
+                dept_perf['Closed'] = pd.to_numeric(dept_perf['Closed'], errors='coerce').fillna(0)
+                dept_perf['Achievement %'] = (dept_perf['Closed'] / dept_perf['Total'].replace(0, 1) * 100).round(1).astype(str) + '%'
                 st.dataframe(dept_perf, use_container_width=True, hide_index=True)
-
             with col_dash2:
                 st.markdown("#### Meeting-wise View")
-                mtg_perf = df_ap.groupby("Origin Meeting").agg(
-                    Resolutions=('id', 'count'),
-                    Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum()),
-                    Overdue=('Tracker Flag', lambda x: (x == '🔴 OVERDUE').sum())
-                ).reset_index()
-                st.dataframe(mtg_perf.sort_values('Origin Meeting', ascending=False), use_container_width=True, hide_index=True)
+                mtg_perf = df_ap.groupby("Origin Meeting").agg(Resolutions=('id', 'count'), Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum())).reset_index()
+                st.dataframe(mtg_perf, use_container_width=True, hide_index=True)
 
-    # ======================== TAB 2: SCHEDULE MEETING ========================
     with tab2:
-        st.subheader("🗓️ 1. Schedule New Convergence Meeting")
-        
+        st.subheader(f"🗓️ 1. Schedule New Meeting ({active_fy})")
         if role == 'department':
             st.warning("🔒 Meeting scheduling is managed by District and Block Administration.")
         else:
             col_m1, col_m2, col_m3 = st.columns(3)
             meeting_type = col_m1.radio("Meeting Level", ["District", "Block"], horizontal=True) if role in ["superadmin", "district"] else "Block"
-            financial_year = col_m2.selectbox("Financial Year", ["2026-27", "2027-28", "2028-29"])
+            col_m2.text_input("Financial Year", value=active_fy, disabled=True)
             meeting_date = col_m3.date_input("Meeting Date", date.today())
 
             if meeting_type == "District":
@@ -228,9 +169,6 @@ def show():
                 chairperson = c_a1.text_input("Chairperson (Name & Designation)", value=chair_default)
                 venue = c_a2.text_input("Venue / Platform")
                 objective = st.text_input("Meeting Objective / Schematic Discussion")
-
-                st.markdown("### 📋 Department / Wing Selection")
-                st.caption("Select the Departments or Wings required for this meeting.")
                 invited_uids = st.multiselect("Invited Departments / Wings*", options=[u["uid"] for u in unified_depts], format_func=lambda x: unified_uid_to_label.get(x, x))
 
                 if st.form_submit_button("Schedule Meeting", type="primary"):
@@ -239,32 +177,29 @@ def show():
                     else:
                         meeting_data = {
                             "meeting_type": meeting_type,
-                            "financial_year": financial_year,
+                            "financial_year": active_fy, 
                             "meeting_date": str(meeting_date),
                             "chairperson": chairperson,
                             "venue": venue,
                             "objective": objective,
                             "attendees": invited_uids, 
                             "status": "Scheduled",
-                            "created_by": user["id"],
+                            "created_by": user["id"]
                         }
-                        if meeting_type == "District":
-                            meeting_data["district_id"] = dist_dict[dist_sel] if role != "district" else user["district_id"]
+                        if meeting_type == "District": meeting_data["district_id"] = dist_dict[dist_sel] if role != "district" else user["district_id"]
                         else:
                             block_obj = next(b for b in blocks_data if b["block_name"] == block_sel)
                             meeting_data["block_id"] = block_obj["id"]
                             meeting_data["district_id"] = block_obj["district_id"]
 
-                        result = supabase.table("meetings").insert(meeting_data).execute()
+                        supabase.table("meetings").insert(meeting_data).execute()
                         st.success("✅ Meeting Scheduled successfully!")
                         st.rerun()
 
-    # ======================== TAB 3: RECORD PROCEEDINGS ========================
     with tab3:
-        st.subheader("✍️ 2. Record Meeting Proceedings")
-        
+        st.subheader("✍️ 2. Record & Print Proceedings")
         if df_meetings.empty:
-            st.info("No meetings available.")
+            st.info(f"No meetings scheduled for FY {active_fy}.")
         else:
             sched_meetings = df_meetings[df_meetings["status"] == "Scheduled"]
             proc_sel = st.selectbox(
@@ -311,7 +246,6 @@ def show():
                 if df_ap.empty:
                     st.info("No past resolutions to review.")
                 else:
-                    # Filter out resolutions from CURRENT meeting
                     past_aps = df_ap[df_ap['meeting_id'] != proc_sel].copy()
                     if not past_aps.empty:
                         disp_cols = ["Origin Meeting", "Department / Wing", "action_point", "Tracker Flag", "status"]
@@ -322,8 +256,12 @@ def show():
             # --- C. REVIEW DEPARTMENT TARGETS & PROGRESS ---
             with st.expander("📊 C. Review Department Targets & Progress", expanded=False):
                 q_targets = supabase.table("department_targets").select("*").eq("district_id", proc_mtg["district_id"])
-                q_reg = supabase.table("convergence_register").select("department_id, activity_description, current_status").eq("district_id", proc_mtg["district_id"])
                 
+                # Check for financial year filter on targets safely
+                try: q_targets = q_targets.eq("financial_year", active_fy)
+                except: pass
+
+                q_reg = supabase.table("convergence_register").select("department_id, activity_description, current_status").eq("district_id", proc_mtg["district_id"])
                 if proc_mtg["meeting_type"] == "Block":
                     q_reg = q_reg.eq("block_id", proc_mtg["block_id"])
                     
@@ -338,13 +276,14 @@ def show():
                     for idx, row in df_t.iterrows():
                         d_id = row['department_id']
                         act = row['activity']
-                        t_val = int(row['desired_target'])
+                        # Safely cast database output to prevent string crash
+                        t_val = safe_int(row.get('desired_target', 0))
                         
                         e_count = 0
                         if not df_r.empty:
                             dept_r = df_r[df_r['department_id'] == d_id]
                             if 'activity_description' in dept_r.columns:
-                                e_count = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum()
+                                e_count = int(dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum())
                         
                         ach_pct = (e_count / t_val * 100) if t_val > 0 else 0
                         gap = t_val - e_count
@@ -356,7 +295,6 @@ def show():
                             "Target": t_val,
                             "Achievement": e_count,
                             "% Achievement": f"{ach_pct:.1f}%",
-                            "Target Gap": gap if gap > 0 else 0,
                             "Status": stat
                         })
                         
@@ -389,7 +327,6 @@ def show():
                         res_dept_id = selected_opt['dept_id']
                         res_wing_id = selected_opt['wing_id']
 
-                        # Fetch ONLY the activities specifically mapped to the chosen department
                         mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == res_dept_id]
                         valid_act_names = ["General / Administrative"] + [a['activity_name'] for a in activities_data if a['id'] in mapped_act_ids]
                         
@@ -446,17 +383,15 @@ def show():
             st.markdown("---")
             if not is_locked and role in ["superadmin", "district", "block"]:
                 if st.button("🔒 Complete Proceedings & Mark as Convened", type="primary", use_container_width=True, key=f"btn_lock_{proc_sel}"):
-                    supabase.table("meetings").update({"status": "Convened"}).eq("id", proc_sel).execute()
+                    supabase.table("meetings").update({"status": "Convened", "decisions": general_minutes}).eq("id", proc_sel).execute()
                     st.success("Meeting locked! Proceedings are now read-only.")
                     st.rerun()
 
-    # ======================== TAB 4: ADVANCED RESOLUTION TRACKER ========================
     with tab4:
         st.subheader("🎯 Advanced Resolution Tracker")
         if df_ap.empty:
             st.info("No action points found.")
         else:
-            # Filters
             c_f1, c_f2 = st.columns(2)
             f_dept = c_f1.selectbox("Filter by Department", ["All"] + dept_labels)
             f_flag = c_f2.selectbox("Filter by Flag", ["All", "🟢 CLOSED", "🔴 OVERDUE", "🟡 DUE TODAY", "🔵 ON TRACK", "🟠 FOR REVIEW", "⚪ NOT STARTED"])
@@ -468,7 +403,6 @@ def show():
             display_cols = ["Origin Meeting", "Department / Wing", "action_point", "deadline", "Tracker Flag", "status", "remarks"]
             st.dataframe(filtered_df[display_cols].sort_values("Tracker Flag"), use_container_width=True, hide_index=True)
 
-            # ATR UPDATE SECTION
             st.markdown("### ✏️ Action Taken Report (ATR) Update")
             with st.form("global_update_atr"):
                 c_u1, c_u2 = st.columns(2)
@@ -486,28 +420,27 @@ def show():
                         st.success("✅ ATR updated successfully.")
                         st.rerun()
 
-    # ======================== TAB 5: REPORTS ========================
     with tab5:
         st.subheader("🖨️ Reports & Registers")
         st.info("Select a meeting from Tab 1 (Dashboard) to view its detailed layout. Custom PDF/Excel extraction will be integrated based on exact district formats.")
         if not df_ap.empty:
             st.download_button("📥 Download Master Tracker (Excel)", data=df_ap.to_csv(index=False).encode('utf-8'), file_name="resolution_tracker.csv", mime="text/csv")
 
-    # ======================== TAB 6: NEXT AGENDA PREP ========================
     with tab6:
         st.subheader("⏭️ Auto-Generated Next Meeting Agenda")
         
         district_id = user.get("district_id")
         
-        # Superadmin check: Don't run queries if district_id is None
         if not district_id:
             st.info("ℹ️ As a Superadmin, please select a specific district context to generate an automated agenda.")
         else:
             agenda_text = "AGENDA FOR UPCOMING MEETING:\n\n"
             has_items = False
 
-            # 1. Low Target Achievement
             q_targets = supabase.table("department_targets").select("*").eq("district_id", district_id)
+            try: q_targets = q_targets.eq("financial_year", active_fy)
+            except: pass
+            
             t_data = q_targets.execute().data
             if t_data:
                 df_t = pd.DataFrame(t_data)
@@ -518,10 +451,12 @@ def show():
                 for idx, row in df_t.iterrows():
                     d_id = row['department_id']
                     act = row['activity']
-                    t_val = int(row['desired_target'])
-                    e_count = df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum() if not df_r.empty and 'activity_description' in df_r[df_r['department_id'] == d_id].columns else 0
+                    # Use safe numerical casting
+                    t_val = safe_int(row.get('desired_target', 0))
                     
-                    if t_val > 0 and (e_count / t_val) < 0.5: # Flag if achievement is less than 50%
+                    e_count = int(df_r[df_r['department_id'] == d_id]['activity_description'].apply(lambda x: str(act).lower() in str(x).lower()).sum()) if not df_r.empty and 'activity_description' in df_r.columns else 0
+                    
+                    if t_val > 0 and (e_count / t_val) < 0.5:
                         d_name = dept_map.get(d_id, 'Unknown')
                         low_targets += f"- [{d_name}] {act}: Target {t_val} | Achieved: {e_count} (Critical Deficit)\n"
                 
@@ -529,7 +464,6 @@ def show():
                     has_items = True
                     agenda_text += "📊 1. REVIEW OF LOW TARGET ACHIEVEMENT:\n" + low_targets + "\n"
 
-            # 2. Resolutions Formatting
             if not df_ap.empty:
                 active_df = df_ap[~df_ap["Tracker Flag"].isin(["🟢 CLOSED"])]
                 
