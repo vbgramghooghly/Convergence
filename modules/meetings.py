@@ -76,6 +76,7 @@ def show():
             dep_id = user.get('department_id')
             w_id = user.get('wing_id')
             if dep_id:
+                # Type-safe filtering ensuring both main department items and sub-wing items match correctly
                 df_ap = df_ap[df_ap['department_id'].astype(str) == str(dep_id)]
                 if w_id and str(w_id).strip() != '' and str(w_id).lower() != 'none':
                     df_ap = df_ap[
@@ -376,8 +377,7 @@ def show():
 
             proc_rows = ""
             if not p_aps.empty:
-                for idx, ap in enumerate(p_aps.iterrows(), 1):
-                    row = ap[1]
+                for idx, (i, row) in enumerate(p_aps.iterrows(), 1):
                     proc_rows += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
             else:
                 proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
@@ -524,7 +524,7 @@ def show():
                             if not df_r.empty and 'department_id' in df_r.columns and 'activity_description' in df_r.columns:
                                 dept_r = df_r[df_r['department_id'] == d_id]
                                 if not dept_r.empty:
-                                    mask = df_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
+                                    mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
                                     e_count = safe_int(mask.sum())
 
                             if t_val > 0 and (e_count / t_val) < 0.5:
