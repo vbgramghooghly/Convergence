@@ -19,7 +19,6 @@ def load_theme():
         "font_family": "'Inter', sans-serif",
         "border_radius": 6,
         "base_font_size": 14,
-        "content_width": 75, # in rem
         "tab_size": "Medium"
     }
 
@@ -33,7 +32,6 @@ def apply_global_theme(theme=None):
     radius = theme.get("border_radius", 6)
     font = theme.get("font_family", "sans-serif")
     font_size = theme.get("base_font_size", 14)
-    width_rem = theme.get("content_width", 75)
     tab_size = theme.get("tab_size", "Medium")
     
     # Calculate Tab Sizing
@@ -57,9 +55,11 @@ def apply_global_theme(theme=None):
             font-size: {font_size}px !important;
         }}
         
-        /* Dynamic Container Width */
+        /* FORCE FULL SCREEN WIDE MODE */
         .block-container {{
-            max-width: {width_rem}rem !important;
+            max-width: 98% !important;
+            padding-top: 2rem !important;
+            padding-bottom: 2rem !important;
         }}
         
         /* Headers scale based on base font size */
