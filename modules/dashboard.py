@@ -14,14 +14,14 @@ def safe_int(val):
         return 0
 
 def inject_custom_css():
-    """Injects custom CSS to format metric cards and FIX the sidebar toggle issue."""
+    """Injects custom CSS to format metric cards and firmly fix the sidebar toggle issue."""
     st.markdown("""
         <style>
-        /* Hide ONLY the specific right-side Streamlit tools, NOT the whole header */
-        .stAppToolbar { visibility: hidden !important; }
-        
-        /* Force the header to be visible so the > button to reopen the sidebar never disappears */
+        /* Force the header to be visible so the sidebar toggle button (>) NEVER disappears */
         header { visibility: visible !important; background-color: transparent !important; }
+        
+        /* Hide ONLY the specific right-side Streamlit tools (Deploy, GitHub, Options) */
+        .stAppToolbar { display: none !important; }
         
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
         </style>
@@ -148,15 +148,18 @@ def show():
         activity_dept_counts[act_id] = activity_dept_counts.get(act_id, 0) + 1
     multi_dept_activities_count = len([act_id for act_id, count in activity_dept_counts.items() if count > 1])
 
-    # ======================== 6. TABS LAYOUT ========================
+    # ======================== 6. TABS LAYOUT (REORDERED) ========================
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Master Dashboard & Health", 
-        "🏢 Department Onboarding Matrix", 
-        "🏘️ Block Coverage Matrix", 
-        "🔗 Activity Convergence", 
-        "🚨 Target Compliance Tracker"
+        "📊 Dashboard", 
+        "🚨 Target Compliance", 
+        "🏢 Department Onboarding", 
+        "🏘️ Block Coverage", 
+        "🔗 Activity Convergence"
     ])
 
+    # =====================================================================
+    # TAB 1: MASTER DASHBOARD & HEALTH
+    # =====================================================================
     with tab1:
         st.subheader(f"At-a-Glance Convergence Metrics ({active_fy})")
         
@@ -209,65 +212,13 @@ def show():
             else:
                 st.info(f"No achievement data available for FY {active_fy}.")
 
+    # =====================================================================
+    # TAB 2: TARGET COMPLIANCE TRACKER (Moved up per request)
+    # =====================================================================
     with tab2:
-        st.subheader("Department-Wise Onboarding & Linkage Matrix")
-        matrix_rows = []
-        for d in departments:
-            d_id = d['id']
-            d_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
-            d_blocks = df_reg[df_reg['department_id'] == d_id]['block_id'].nunique() if not df_reg.empty and 'department_id' in df_reg.columns else 0
-            matrix_rows.append({
-                "Department / Wing": f"{d['department_name']} (Main)", "Onboarded": "✓",
-                "District Officials": len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is None]),
-                "Block Officials": len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is not None]),
-                "Activities Linked": d_acts, "Blocks Covered": d_blocks, "Status": "Active" if d_acts > 0 else "Pending"
-            })
-        for w in wings:
-            d_id = w['department_id']
-            w_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
-            matrix_rows.append({
-                "Department / Wing": f"{dept_map.get(d_id, 'Unknown')} ➔ {w['wing_name']}", "Onboarded": "✓",
-                "District Officials": len([u for u in users_data if u.get('wing_id') == w['id'] and u.get('block_id') is None]),
-                "Block Officials": len([u for u in users_data if u.get('wing_id') == w['id'] and u.get('block_id') is not None]),
-                "Activities Linked": w_acts, "Blocks Covered": 0, "Status": "Active" if w_acts > 0 else "Pending"
-            })
-        st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
-
-    with tab3:
-        st.subheader("Block-Level Coverage & Onboarding Matrix")
-        block_rows = []
-        for b in blocks:
-            b_id = b['id']
-            b_users = [u for u in users_data if str(u.get('block_id')) == str(b_id)]
-            b_reg = df_reg[df_reg['block_id'] == b_id] if not df_reg.empty and 'block_id' in df_reg.columns else pd.DataFrame()
-            block_rows.append({
-                "Block": b['block_name'],
-                "Departments Onboarded": len(set([u.get('department_id') for u in b_users if u.get('department_id')])),
-                "District Officials Mapped": len([u for u in b_users if u.get('role') == 'district']),
-                "Block Officials Mapped": len([u for u in b_users if u.get('role') == 'block']),
-                "Total Activities": len(b_reg),
-                "Completed": len(b_reg[b_reg.get('current_status', '') == 'Completed']) if not b_reg.empty else 0,
-                "Ongoing": len(b_reg[b_reg.get('current_status', '') == 'Under Implementation']) if not b_reg.empty else 0,
-                "Pending": len(b_reg[b_reg.get('current_status', '') == 'Planned']) if not b_reg.empty else 0
-            })
-        st.dataframe(pd.DataFrame(block_rows), use_container_width=True, hide_index=True)
-
-    with tab4:
-        st.subheader("Activity ➔ Department / Wing Convergence Matrix")
-        conv_rows = []
-        for a in activities:
-            mapped_depts = [m['department_id'] for m in act_dept_mapping if m['activity_id'] == a['id']]
-            exec_count = int(df_reg['activity_description'].apply(lambda x: str(a['activity_name']).lower() in str(x).lower()).sum()) if not df_reg.empty and 'activity_description' in df_reg.columns else 0
-            conv_rows.append({
-                "Activity Name": a['activity_name'], 
-                "Linked Departments": ", ".join([dept_map.get(d_id, "Unknown") for d_id in mapped_depts]) if mapped_depts else "Unlinked",
-                "Total Linkages": len(mapped_depts), "Field Executions Captured": exec_count,
-                "Status": "Active Convergence" if len(mapped_depts) > 1 else ("Single Dept" if len(mapped_depts) == 1 else "Unlinked")
-            })
-        st.dataframe(pd.DataFrame(conv_rows), use_container_width=True, hide_index=True)
-
-    with tab5:
         st.subheader("🚨 Activity-wise Target Compliance & Alert Tracker")
+        st.caption(f"Highlights mismatches between Department/Wing Targets and actual entries for FY {active_fy}.")
+        
         compliance_data = []
         if not df_targets.empty:
             for idx, row in df_targets.iterrows():
@@ -278,7 +229,13 @@ def show():
                 target_val = safe_int(row.get('desired_target', 0))
                 
                 target_w_id_safe = None if pd.isna(w_id) else w_id
-                dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_map[target_w_id_safe]}" if target_w_id_safe and target_w_id_safe in wing_map else f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
+                
+                # FIX: Properly fetch wing name from wing_map instead of printing the entire dictionary
+                if target_w_id_safe and target_w_id_safe in wing_map:
+                    wing_name_display = wing_map[target_w_id_safe].get('wing_name', 'Unknown Wing')
+                    dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_name_display}"
+                else:
+                    dept_display = f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
 
                 contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
                 nodal_display = " | ".join(contacts) if contacts else "⚠️ No Login Assigned"
@@ -307,3 +264,69 @@ def show():
             st.dataframe(pd.DataFrame(compliance_data).style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
+
+    # =====================================================================
+    # TAB 3: DEPARTMENT ONBOARDING MATRIX
+    # =====================================================================
+    with tab3:
+        st.subheader("🏢 Department-Wise Onboarding & Linkage Matrix")
+        matrix_rows = []
+        for d in departments:
+            d_id = d['id']
+            d_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
+            d_blocks = df_reg[df_reg['department_id'] == d_id]['block_id'].nunique() if not df_reg.empty and 'department_id' in df_reg.columns else 0
+            matrix_rows.append({
+                "Department / Wing": f"{d['department_name']} (Main)", "Onboarded": "✓",
+                "District Officials": len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is None]),
+                "Block Officials": len([u for u in users_data if u.get('department_id') == d_id and u.get('wing_id') is None and u.get('block_id') is not None]),
+                "Activities Linked": d_acts, "Blocks Covered": d_blocks, "Status": "Active" if d_acts > 0 else "Pending"
+            })
+        for w in wings:
+            d_id = w['department_id']
+            w_acts = len([m for m in act_dept_mapping if m.get('department_id') == d_id])
+            matrix_rows.append({
+                "Department / Wing": f"{dept_map.get(d_id, 'Unknown')} ➔ {w['wing_name']}", "Onboarded": "✓",
+                "District Officials": len([u for u in users_data if u.get('wing_id') == w['id'] and u.get('block_id') is None]),
+                "Block Officials": len([u for u in users_data if u.get('wing_id') == w['id'] and u.get('block_id') is not None]),
+                "Activities Linked": w_acts, "Blocks Covered": 0, "Status": "Active" if w_acts > 0 else "Pending"
+            })
+        st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
+
+    # =====================================================================
+    # TAB 4: BLOCK COVERAGE MATRIX
+    # =====================================================================
+    with tab4:
+        st.subheader("🏘️ Block-Level Coverage & Onboarding Matrix")
+        block_rows = []
+        for b in blocks:
+            b_id = b['id']
+            b_users = [u for u in users_data if str(u.get('block_id')) == str(b_id)]
+            b_reg = df_reg[df_reg['block_id'] == b_id] if not df_reg.empty and 'block_id' in df_reg.columns else pd.DataFrame()
+            block_rows.append({
+                "Block": b['block_name'],
+                "Departments Onboarded": len(set([u.get('department_id') for u in b_users if u.get('department_id')])),
+                "District Officials Mapped": len([u for u in b_users if u.get('role') == 'district']),
+                "Block Officials Mapped": len([u for u in b_users if u.get('role') == 'block']),
+                "Total Activities": len(b_reg),
+                "Completed": len(b_reg[b_reg.get('current_status', '') == 'Completed']) if not b_reg.empty else 0,
+                "Ongoing": len(b_reg[b_reg.get('current_status', '') == 'Under Implementation']) if not b_reg.empty else 0,
+                "Pending": len(b_reg[b_reg.get('current_status', '') == 'Planned']) if not b_reg.empty else 0
+            })
+        st.dataframe(pd.DataFrame(block_rows), use_container_width=True, hide_index=True)
+
+    # =====================================================================
+    # TAB 5: ACTIVITY CONVERGENCE
+    # =====================================================================
+    with tab5:
+        st.subheader("🔗 Activity ➔ Department / Wing Convergence Matrix")
+        conv_rows = []
+        for a in activities:
+            mapped_depts = [m['department_id'] for m in act_dept_mapping if m['activity_id'] == a['id']]
+            exec_count = int(df_reg['activity_description'].apply(lambda x: str(a['activity_name']).lower() in str(x).lower()).sum()) if not df_reg.empty and 'activity_description' in df_reg.columns else 0
+            conv_rows.append({
+                "Activity Name": a['activity_name'], 
+                "Linked Departments": ", ".join([dept_map.get(d_id, "Unknown") for d_id in mapped_depts]) if mapped_depts else "Unlinked",
+                "Total Linkages": len(mapped_depts), "Field Executions Captured": exec_count,
+                "Status": "Active Convergence" if len(mapped_depts) > 1 else ("Single Dept" if len(mapped_depts) == 1 else "Unlinked")
+            })
+        st.dataframe(pd.DataFrame(conv_rows), use_container_width=True, hide_index=True)
