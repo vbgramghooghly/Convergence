@@ -4,7 +4,6 @@ from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
 # ---------- PAGE CONFIG ----------
-# Layout MUST be "wide" for our central theme engine to control the website width dynamically.
 st.set_page_config(
     page_title="VB-G RAM G Convergence",
     page_icon="📊",
@@ -27,25 +26,20 @@ if not user or 'role' not in user:
 role = user['role']
 
 # ---------- APPLY CENTRAL UI/UX THEME ----------
-# This single function handles all global font scaling, background colors, 
-# tab bulkiness, and container width across the entire app!
 theme = apply_global_theme()
 primary_color = theme.get("primary_color", "#0F4C81")
 base_font = theme.get("base_font_size", 14)
 
 # ---------- GLOBAL CSS & DYNAMIC SIDEBAR STYLING ----------
-# Here we fix the disappearing sidebar toggle button by forcing the header to be visible,
-# while keeping the standard Streamlit tools hidden. We also style the sidebar menu dynamically.
 st.markdown(f"""
     <style>
         /* --- FIX FOR DISAPPEARING SIDEBAR TOGGLE --- */
-        /* Force the header to be visible so the sidebar toggle button (>) NEVER disappears */
         header[data-testid="stHeader"] {{
             visibility: visible !important;
             background-color: transparent !important;
         }}
         
-        /* Hide ONLY the specific right-side Streamlit tools (Deploy, GitHub, Options) */
+        /* Hide ONLY the specific right-side Streamlit tools */
         .stAppToolbar, [data-testid="stToolbar"] {{
             display: none !important;
             visibility: hidden !important;
@@ -74,7 +68,6 @@ st.markdown(f"""
             transition: color 0.2s ease !important;
         }}
         
-        /* Hover State */
         [data-testid="stSidebar"] [role="radiogroup"] label:hover {{
             background-color: #F3F4F6 !important;
             transform: translateX(3px);
@@ -85,7 +78,6 @@ st.markdown(f"""
             color: {primary_color} !important;
         }}
         
-        /* Active / Selected State Styling */
         [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
             background-color: {primary_color} !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
@@ -128,11 +120,11 @@ st.sidebar.divider()
 role_pages = {
     "superadmin": [
         "📊 Dashboard",
-        "📋 Convergence Register",
-        "🚀 Implementation & Targets",
+        "📋 Work Entry",
+        "🚀 Progress",
         "🤝 Meetings",
-        "📇 User Directory",
-        "📈 Reports & Excel",
+        "📇 Officials",
+        "📈 Reports",
         "⚙️ Master Data",
         "👥 User Management",
         "🛡️ Audit Log",
@@ -140,26 +132,26 @@ role_pages = {
     ],
     "district": [
         "📊 Dashboard",
-        "📋 Convergence Register",
-        "🚀 Implementation & Targets",
+        "📋 Work Entry",
+        "🚀 Progress",
         "🤝 Meetings",
-        "📇 User Directory",
-        "📈 Reports & Excel",
+        "📇 Officials",
+        "📈 Reports",
     ],
     "block": [
         "📊 Dashboard",
-        "📋 Convergence Register",
-        "🚀 Implementation & Targets",
+        "📋 Work Entry",
+        "🚀 Progress",
         "🤝 Meetings",
-        "📇 User Directory",
+        "📇 Officials",
     ],
     "department": [
         "📊 Dashboard",
-        "📋 Convergence Register",
-        "🚀 Implementation & Targets",
+        "📋 Work Entry",
+        "🚀 Progress",
         "🤝 Meetings",
-        "📇 User Directory",
-        "📈 Reports & Excel",
+        "📇 Officials",
+        "📈 Reports",
     ],
 }
 
@@ -168,25 +160,23 @@ if not allowed_pages:
     st.error("Your user role is not configured correctly. Please contact the administrator.")
     logout()
 
-# ---------- NAVIGATION MENU (TOP OF SIDEBAR) ----------
+# ---------- NAVIGATION MENU ----------
 selection = st.sidebar.radio("Navigation", allowed_pages, label_visibility="collapsed")
 st.sidebar.divider()
 
-# ---------- ROUTING MAPPING (MATCHING EMOJIS) ----------
 menu = {
     "📊 Dashboard": show_dashboard,
-    "📋 Convergence Register": show_convergence,
-    "🚀 Implementation & Targets": show_implementation,
+    "📋 Work Entry": show_convergence,
+    "🚀 Progress": show_implementation,
     "🤝 Meetings": show_meetings,
-    "📈 Reports & Excel": show_reports,
+    "📈 Reports": show_reports,
     "⚙️ Master Data": show_masterdata,
-    "📇 User Directory": show_contacts,
+    "📇 Officials": show_contacts,
     "👥 User Management": show_users,
     "🛡️ Audit Log": show_audit,
     "🎨 UI/UX Controller": show_ui_ux,
 }
 
-# ---------- CALL THE SELECTED PAGE ----------
 if selection in menu:
     try:
         menu[selection]()
@@ -217,7 +207,6 @@ with st.sidebar.expander("Change My Password"):
                 except Exception as e:
                     st.error(f"Error updating password: {e}")
 
-# Logout Button
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🔒 Logout", type="secondary", use_container_width=True):
     logout()
