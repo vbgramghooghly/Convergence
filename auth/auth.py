@@ -6,33 +6,14 @@ from utils.db import get_supabase
 import streamlit as st
 
 def inject_custom_css():
-    """Injects custom CSS to hide the Streamlit toolbar and FIX the sidebar toggle."""
+    """Injects custom CSS to hide the Streamlit toolbar safely."""
     st.markdown("""
     <style>
-        /* 1. Force the Header to be visible but transparent */
-        header, header[data-testid="stHeader"], .stAppHeader {
-            visibility: visible !important;
-            display: block !important;
-            background: transparent !important;
-            z-index: 99998 !important;
-        }
-        
-        /* 2. Turn the Sidebar Toggle (>) into a highly visible Floating Button */
-        [data-testid="collapsedControl"] {
-            visibility: visible !important;
-            display: flex !important;
-            z-index: 99999 !important;
-            background-color: #ffffff !important;
-            border-radius: 50% !important;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
-            top: 15px !important;
-            left: 15px !important;
-        }
-        
-        /* 3. STRICTLY hide ONLY the top-right Streamlit tools (Deploy, GitHub, Options) */
-        .stAppToolbar, [data-testid="stToolbar"], [data-testid="stStatusWidget"], #MainMenu {
+        [data-testid="stToolbar"] {
             display: none !important;
-            visibility: hidden !important;
+        }
+        #MainMenu {
+            display: none !important;
         }
     </style>
     """, unsafe_allow_html=True)
