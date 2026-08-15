@@ -11,32 +11,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ---------- GLOBAL CSS (BULLETPROOF SIDEBAR FIX) ----------
-# We inject this immediately to ensure the sidebar toggle is ALWAYS visible
+# ---------- GLOBAL CSS (SAFE TOOLBAR HIDE) ----------
+# We ONLY hide the right-side toolbar. We DO NOT touch the header or sidebar toggle.
 st.markdown("""
     <style>
-        /* 1. Force the Header to be visible but transparent */
-        header, header[data-testid="stHeader"], .stAppHeader {
-            visibility: visible !important;
-            display: block !important;
-            background: transparent !important;
-            z-index: 99998 !important;
-        }
-        
-        /* 2. Turn the Sidebar Toggle (>) into a highly visible Floating Button */
-        [data-testid="collapsedControl"] {
-            visibility: visible !important;
-            display: flex !important;
-            z-index: 99999 !important;
-            background-color: #ffffff !important;
-            border-radius: 50% !important;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.3) !important;
-            top: 15px !important;
-            left: 15px !important;
-        }
-        
-        /* 3. STRICTLY hide ONLY the top-right Streamlit tools (Deploy, GitHub, Options) */
-        .stAppToolbar, [data-testid="stToolbar"], [data-testid="stStatusWidget"], #MainMenu {
+        /* STRICTLY hide ONLY the top-right Streamlit tools (Deploy, GitHub, Options) */
+        [data-testid="stToolbar"] {
             display: none !important;
             visibility: hidden !important;
         }
