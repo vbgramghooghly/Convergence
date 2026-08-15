@@ -14,16 +14,14 @@ def safe_int(val):
         return 0
 
 def inject_custom_css():
-    """Injects custom CSS to format metric cards and firmly fix the sidebar toggle issue."""
+    """Injects custom CSS to format metric cards."""
     st.markdown("""
         <style>
-        /* Force the header to be visible so the sidebar toggle button (>) NEVER disappears */
-        header { visibility: visible !important; background-color: transparent !important; }
-        
-        /* Hide ONLY the specific right-side Streamlit tools (Deploy, GitHub, Options) */
-        .stAppToolbar { display: none !important; }
-        
         .metric-card { background-color: #ffffff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 4px solid #1F77B4; }
+        
+        /* Ensure header is visible */
+        header { visibility: visible !important; }
+        [data-testid="collapsedControl"] { display: flex !important; visibility: visible !important; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -213,7 +211,7 @@ def show():
                 st.info(f"No achievement data available for FY {active_fy}.")
 
     # =====================================================================
-    # TAB 2: TARGET COMPLIANCE TRACKER (Moved up per request)
+    # TAB 2: TARGET COMPLIANCE TRACKER
     # =====================================================================
     with tab2:
         st.subheader("🚨 Activity-wise Target Compliance & Alert Tracker")
@@ -225,12 +223,9 @@ def show():
                 d_id = row['department_id']
                 w_id = row.get('wing_id')
                 
-                # Safely convert target using safe_int to completely prevent string-math errors
                 target_val = safe_int(row.get('desired_target', 0))
-                
                 target_w_id_safe = None if pd.isna(w_id) else w_id
                 
-                # FIX: Properly fetch wing name from wing_map instead of printing the entire dictionary
                 if target_w_id_safe and target_w_id_safe in wing_map:
                     wing_name_display = wing_map[target_w_id_safe].get('wing_name', 'Unknown Wing')
                     dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_name_display}"
@@ -244,7 +239,6 @@ def show():
                 if not df_reg.empty:
                     dept_reg = df_reg[df_reg['department_id'] == d_id]
                     if 'activity_description' in dept_reg.columns:
-                        # Safely cast to integer 
                         entered_count = safe_int(dept_reg['activity_description'].apply(lambda x: str(row['activity']).lower() in str(x).lower()).sum())
                         
                 gap = entered_count - target_val
