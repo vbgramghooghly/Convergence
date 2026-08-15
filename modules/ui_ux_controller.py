@@ -14,7 +14,7 @@ def init_ui_state():
     defaults = {
         'primary_color': active.get('primary_color', '#0F4C81'),
         'bg_color': active.get('bg_color', '#F4F6F9'),
-        'app_name': active.get('app_name', 'VB-G RAM G Convergence'),
+        'app_name': active.get('app_name', 'VB-G RAM G Portal'),
         'font_family': active.get('font_family', "'Inter', sans-serif"),
         'border_radius': active.get('border_radius', 6),
         'base_font_size': active.get('base_font_size', 14),
@@ -67,11 +67,6 @@ def show():
     require_role('superadmin')
     init_ui_state()
     state = st.session_state.theme_state
-    
-    st.markdown("""<style>
-        .stAppToolbar {visibility: hidden;} 
-        .block-container {max-width: 95rem !important;}
-    </style>""", unsafe_allow_html=True)
     
     st.markdown("<h1 style='color: #1F2937; margin-bottom: 0px;'>✨ Portal Design Studio</h1>", unsafe_allow_html=True)
     st.markdown("<p style='color: #6B7280; font-size: 16px;'>Configure the global aesthetics of the application. Changes preview instantly.</p>", unsafe_allow_html=True)
@@ -128,13 +123,10 @@ def show():
         font = state['font_family']
         base_font = state['base_font_size']
         width = state['content_width']
-        tab_sz = state['tab_size']
         app_name = state['app_name']
         
-        tab_p = "8px 16px" if tab_sz == "Small" else "16px 32px" if tab_sz == "Large" else "12px 24px"
-        tab_f = f"{base_font - 2}px" if tab_sz == "Small" else f"{base_font + 2}px" if tab_sz == "Large" else f"{base_font}px"
-        
-        # ZERO INDENTATION HTML STRING (Prevents Markdown Code Block bugs)
+        # ZERO INDENTATION HTML STRING 
+        # Updated to simulate the Top Horizontal Navigation Bar
         preview_html = f"""
 <div style="background: #E5E7EB; padding: 15px; border-radius: 10px 10px 0 0; display: flex; gap: 8px;">
 <div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56;"></div>
@@ -143,18 +135,26 @@ def show():
 </div>
 <div style="background-color: {bg}; padding: 30px; border: 1px solid #D1D5DB; border-top: none; border-radius: 0 0 10px 10px; font-family: {font}; min-height: 500px; display: flex; flex-direction: column; align-items: center;">
 <div style="width: 100%; max-width: {width}%; transition: max-width 0.3s ease;">
-<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid {primary}; padding-bottom: 10px; margin-bottom: 20px;">
-<h2 style="color: {primary}; margin: 0; font-size: {base_font * 1.8}px; font-weight: 700;">{app_name}</h2>
-<div style="color: #6B7280; font-size: {base_font}px;">👤 User Profile</div>
+
+<!-- SIMULATED TOP NAVIGATION BAR -->
+<div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 15px; margin-bottom: 20px;">
+    <h2 style="color: {primary}; margin: 0; font-size: {base_font * 1.5}px; font-weight: 800;">🏛️ {app_name}</h2>
+    
+    <div style="display: flex; gap: 10px; background-color: #F8FAFC; padding: 6px 10px; border-radius: 8px; border: 1px solid #E2E8F0;">
+        <div style="background-color: {primary}; color: white; padding: 6px 14px; border-radius: 6px; font-size: {base_font}px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📊 Dashboard</div>
+        <div style="color: #4A5568; padding: 6px 14px; border-radius: 6px; font-size: {base_font}px; font-weight: 600;">📋 Work Entry</div>
+        <div style="color: #4A5568; padding: 6px 14px; border-radius: 6px; font-size: {base_font}px; font-weight: 600;">🤝 Meetings</div>
+    </div>
+    
+    <div style="color: #4A5568; font-size: {base_font}px; border: 1px solid #E2E8F0; padding: 6px 14px; border-radius: 6px; background: white;">👤 Admin ▾</div>
 </div>
-<div style="display: flex; gap: 10px; border-bottom: 2px solid #E5E7EB; margin-bottom: 25px;">
-<div style="padding: {tab_p}; border-bottom: 3px solid {primary}; color: {primary}; font-weight: 600; font-size: {tab_f}; cursor: pointer;">Dashboard</div>
-<div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Reports</div>
-<div style="padding: {tab_p}; color: #6B7280; font-size: {tab_f}; cursor: pointer;">Settings</div>
-</div>
+
+<hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 25px;">
+
+<!-- CARDS PREVIEW -->
 <div style="display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap;">
 <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-<div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Total Users</div>
+<div style="font-size: {base_font - 2}px; color: #6B7280; margin-bottom: 5px;">Total Users Active</div>
 <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #1F2937;">1,284</div>
 </div>
 <div style="flex: 1; min-width: 150px; background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; border-top: 4px solid {primary}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
@@ -162,6 +162,8 @@ def show():
 <div style="font-size: {base_font * 1.8}px; font-weight: bold; color: #10B981;">Online</div>
 </div>
 </div>
+
+<!-- FORM PREVIEW -->
 <div style="background: white; padding: 20px; border-radius: {radius}px; border: 1px solid #E5E7EB; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
 <h3 style="color: {primary}; margin-top: 0; font-size: {base_font * 1.3}px;">Quick Action Form</h3>
 <label style="font-size: {base_font}px; color: #374151; display: block; margin-bottom: 5px;">Search Query</label>
@@ -170,6 +172,7 @@ def show():
 Submit Query (Primary Button)
 </button>
 </div>
+
 </div>
 </div>
 """
