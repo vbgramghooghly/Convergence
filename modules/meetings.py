@@ -106,10 +106,11 @@ def show():
         c6.metric("🟠 Needs Review", len(df_ap[df_ap["Tracker Flag"] == "🟠 FOR REVIEW"]))
         st.markdown("<br>", unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📈 SLA Performance", 
         "🗓️ Schedule Meeting", 
         "✍️ Proceedings & Attendance", 
+        "🖨️ Meeting Record Workspace",
         "🎯 Action Tracker & ATR", 
         "🖨️ Master Export", 
         "⏭️ Next Agenda Prep"
@@ -182,7 +183,7 @@ def show():
                                 meeting_data["district_id"] = block_obj["district_id"]
 
                             supabase.table("meetings").insert(meeting_data).execute()
-                            st.success("✅ Meeting notice dispatched successfully!")
+                            st.success("✅ Meeting notice dispatched successfully! Print package is auto-generated.")
                             st.rerun()
 
     # =====================================================================
@@ -319,9 +320,143 @@ def show():
                     st.rerun()
 
     # =====================================================================
-    # TAB 4: ADVANCED ACTION TRACKER & ATR
+    # TAB 4: MEETING RECORD WORKSPACE & PRINTING PACKAGE
     # =====================================================================
     with tab4:
+        st.markdown("#### 🖨️ Meeting Record Workspace & Print Packages")
+        st.caption("Select any historical or active meeting to generate instant print-ready documents, attendance sheets, and master files.")
+
+        if df_meetings.empty:
+            st.info("No meetings available for printing.")
+        else:
+            print_sel = st.selectbox(
+                "Select Meeting Record for Printing",
+                df_meetings["id"].tolist(),
+                format_func=lambda x: f"{df_meetings[df_meetings['id'] == x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id'] == x]['meeting_type'].values[0]} ({df_meetings[df_meetings['id'] == x]['status'].values[0]})",
+                key="print_meeting_selector"
+            )
+
+            p_mtg = df_meetings[df_meetings["id"] == print_sel].iloc[0]
+            p_aps = df_ap[df_ap['meeting_id'] == print_sel] if not df_ap.empty else pd.DataFrame()
+
+            # HTML Document Generator Helpers
+            org_label = "District Administration, Hooghly" if p_mtg.get('meeting_type') == 'District' else f"Block Development Office ({p_mtg.get('block_id', 'Block')})"
+            
+            # 1. Notice HTML
+            notice_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Meeting Notice</title><style>
+            body {{ font-family: 'Times New Roman', Times, serif; padding: 40px; font-size: 14px; color: #000; line-height: 1.6; }}
+            .header {{ text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 30px; }}
+            .title {{ font-size: 18px; font-weight: bold; text-transform: uppercase; margin-bottom: 5px; }}
+            .subtitle {{ font-size: 14px; font-weight: bold; }}
+            .footer {{ margin-top: 50px; display: flex; justify-content: space-between; page-break-inside: avoid; }}
+            @page {{ size: A4 portrait; margin: 20mm; }}
+            </style></head><body>
+            <div class="header">
+                <div class="title">VB-G RAM G CONVERGENCE PORTAL</div>
+                <div class="subtitle">{org_label}</div>
+                <div>Financial Year: {active_fy}</div>
+            </div>
+            <h3 style="text-align: center; text-decoration: underline;">MEETING NOTICE</h3>
+            <p><b>Date of Issue / Meeting Date:</b> {p_mtg.get('meeting_date', 'Not Recorded')}</p>
+            <p><b>Venue:</b> {p_mtg.get('venue', 'Not Recorded')}</p>
+            <p><b>Chairperson:</b> {p_mtg.get('chairperson', 'Not Recorded')}</p>
+            <p><b>Objective / Agenda:</b> {p_mtg.get('objective', 'Standard Convergence Review')}</p>
+            <br><p>The undersigned is directed to invite all concerned departmental representatives to attend the statutory convergence meeting at the scheduled venue and time.</p>
+            <div class="footer">
+                <div></div>
+                <div style="text-align: right;"><b>Chairperson / Nodal Officer</b><br>{org_label}</div>
+            </div>
+            <div style="font-size: 10px; margin-top: 80px; border-top: 1px solid #ccc; padding-top: 5px;">Meeting ID: {p_mtg.get('id')} | Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+            </body></html>"""
+
+            # 2. Attendance Register HTML
+            att_rows = ""
+            att_data = p_mtg.get("detailed_attendance") or []
+            if att_data:
+                for idx, att in enumerate(att_data, 1):
+                    rep = "Yes (Subordinate)" if att.get('attended_by_subordinate') else "No (Direct)"
+                    att_rows += f"<tr><td>{idx}</td><td>{att.get('label')}</td><td>Present</td><td>{rep}</td><td>-</td><td style='height:30px;'></td></tr>"
+            else:
+                invited = p_mtg.get("attendees") or []
+                for idx, uid in enumerate(invited, 1):
+                    lbl = unified_uid_to_label.get(uid, "Invited Department")
+                    att_rows += f"<tr><td>{idx}</td><td>{lbl}</td><td>Present / Absent</td><td>-</td><td>-</td><td style='height:30px;'></td></tr>"
+
+            attendance_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Attendance Register</title><style>
+            body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 12px; color: #000; }}
+            .header {{ text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+            th, td {{ border: 1px solid #000; padding: 8px; text-align: left; }}
+            th {{ background-color: #f2f2f2; }}
+            @page {{ size: A4 landscape; margin: 15mm; }}
+            </style></head><body>
+            <div class="header">
+                <h3>ATTENDANCE REGISTER — VB-G RAM G CONVERGENCE</h3>
+                <div>Meeting Date: {p_mtg.get('meeting_date')} | Venue: {p_mtg.get('venue')} | Chairperson: {p_mtg.get('chairperson')}</div>
+            </div>
+            <table>
+                <thead><tr><th>Sl. No.</th><th>Department / Wing</th><th>Status</th><th>Subordinate Representation</th><th>Remarks</th><th>Signature</th></tr></thead>
+                <tbody>{att_rows}</tbody>
+            </table>
+            <div style="font-size: 10px; margin-top: 40px;">Meeting ID: {p_mtg.get('id')} | Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+            </body></html>"""
+
+            # 3. Proceedings HTML
+            proc_rows = ""
+            if not p_aps.empty:
+                for idx, ap in enumerate(p_aps.iterrows(), 1):
+                    row = ap[1]
+                    proc_rows += f"<tr><td>{idx[0] if isinstance(idx, tuple) else idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td><td>{row.get('remarks', '')}</td></tr>"
+            else:
+                proc_rows = "<tr><td colspan='6' style='text-align:center;'>No resolutions recorded for this meeting.</td></tr>"
+
+            proceedings_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Proceedings</title><style>
+            body {{ font-family: 'Times New Roman', Times, serif; padding: 30px; font-size: 13px; color: #000; line-height: 1.5; }}
+            .header {{ text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+            th, td {{ border: 1px solid #000; padding: 6px; text-align: left; font-size: 11px; }}
+            th {{ background-color: #f2f2f2; }}
+            @page {{ size: A4 portrait; margin: 20mm; }}
+            </style></head><body>
+            <div class="header">
+                <h3>PROCEEDINGS OF THE STATUTORY CONVERGENCE MEETING</h3>
+                <div>{org_label} | Financial Year: {active_fy} | Date: {p_mtg.get('meeting_date')}</div>
+            </div>
+            <p><b>Chairperson:</b> {p_mtg.get('chairperson')}</p>
+            <p><b>Venue:</b> {p_mtg.get('venue')}</p>
+            <p><b>General Deliberations & Minutes:</b><br>{p_mtg.get('decisions', 'Not Recorded / Draft')}</p>
+            <h4>Mandated Resolutions & Action Points:</h4>
+            <table>
+                <thead><tr><th>No.</th><th>Department / Wing</th><th>Directive / Action Point</th><th>Deadline</th><th>Status</th><th>Remarks</th></tr></thead>
+                <tbody>{proc_rows}</tbody>
+            </table>
+            <div style="font-size: 10px; margin-top: 50px;">Meeting ID: {p_mtg.get('id')} | Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+            </body></html>"""
+
+            # 4. Complete Master File HTML (Combines all parts)
+            complete_file_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Complete Meeting File</title><style>
+            body {{ font-family: Arial, sans-serif; padding: 30px; font-size: 12px; color: #000; }}
+            .page-break {{ page-break-after: always; }}
+            @page {{ size: A4 portrait; margin: 15mm; }}
+            </style></head><body>
+            {notice_html}
+            <div class="page-break"></div>
+            {attendance_html}
+            <div class="page-break"></div>
+            {proceedings_html}
+            </body></html>"""
+
+            # Render Download / Print Buttons
+            col_pr1, col_pr2, col_pr3, col_pr4 = st.columns(4)
+            col_pr1.download_button("🖨️ Print Notice", data=notice_html, file_name=f"Meeting_Notice_{print_sel}.html", mime="text/html", use_container_width=True)
+            col_pr2.download_button("🖨️ Print Attendance", data=attendance_html, file_name=f"Attendance_Register_{print_sel}.html", mime="text/html", use_container_width=True)
+            col_pr3.download_button("🖨️ Print Proceedings", data=proceedings_html, file_name=f"Proceedings_{print_sel}.html", mime="text/html", use_container_width=True)
+            col_pr4.download_button("📦 Complete Meeting File", data=complete_file_html, file_name=f"Complete_Meeting_File_{print_sel}.html", mime="text/html", use_container_width=True, type="primary")
+
+    # =====================================================================
+    # TAB 5: ADVANCED ACTION TRACKER & ATR
+    # =====================================================================
+    with tab5:
         st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
         if df_ap.empty:
             st.info("No action items available.")
@@ -353,9 +488,9 @@ def show():
                         st.rerun()
 
     # =====================================================================
-    # TAB 5: MASTER EXPORT
+    # TAB 6: MASTER EXPORT
     # =====================================================================
-    with tab5:
+    with tab6:
         st.markdown("#### 🖨️ Export Resolution Register")
         if not df_ap.empty:
             st.download_button("📥 Download Master Tracker (Excel/CSV)", data=df_ap.to_csv(index=False).encode('utf-8'), file_name="meeting_resolutions_tracker.csv", mime="text/csv")
@@ -363,9 +498,9 @@ def show():
             st.info("No records available to export.")
 
     # =====================================================================
-    # TAB 6: AUTOMATED NEXT AGENDA PREP
+    # TAB 7: AUTOMATED NEXT AGENDA PREP
     # =====================================================================
-    with tab6:
+    with tab7:
         st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
         district_id = user.get("district_id")
         if not district_id:
