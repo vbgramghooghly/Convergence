@@ -33,11 +33,24 @@ theme = apply_global_theme()
 primary_color = theme.get("primary_color", "#0F4C81")
 base_font = theme.get("base_font_size", 14)
 
-# ---------- DYNAMIC SIDEBAR STYLING ----------
-# We only need CSS here for the sleek hover/select animations on the sidebar menu.
-# We dynamically inject the active primary_color and base_font from the theme.
+# ---------- GLOBAL CSS & DYNAMIC SIDEBAR STYLING ----------
+# Here we fix the disappearing sidebar toggle button by forcing the header to be visible,
+# while keeping the standard Streamlit tools hidden. We also style the sidebar menu dynamically.
 st.markdown(f"""
     <style>
+        /* --- FIX FOR DISAPPEARING SIDEBAR TOGGLE --- */
+        /* Force the header to be visible so the sidebar toggle button (>) NEVER disappears */
+        header[data-testid="stHeader"] {{
+            visibility: visible !important;
+            background-color: transparent !important;
+        }}
+        
+        /* Hide ONLY the specific right-side Streamlit tools (Deploy, GitHub, Options) */
+        .stAppToolbar, [data-testid="stToolbar"] {{
+            display: none !important;
+            visibility: hidden !important;
+        }}
+
         /* --- ULTRA-MODERN SAAS SIDEBAR NAVIGATION --- */
         [data-testid="stSidebar"] [role="radiogroup"] {{
             gap: 6px !important;
