@@ -17,13 +17,11 @@ def check_password():
         return True
 
     # ---------- STYLING FOR THE LANDING / LOGIN PAGE ----------
-    # Completely kill the sidebar and top header just for the login screen
+    # Completely kill the sidebar and top header for the login screen
     st.markdown("""
         <style>
-            [data-testid="collapsedControl"] { display: none !important; }
-            [data-testid="stSidebar"] { display: none !important; }
-            header[data-testid="stHeader"] { display: none !important; }
-            [data-testid="stToolbar"] { display: none !important; }
+            [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; width: 0px !important;}
+            header[data-testid="stHeader"], [data-testid="stToolbar"] { display: none !important; visibility: hidden !important; }
             
             .stApp { background: linear-gradient(135deg, #F0F4F8 0%, #D9E2EC 100%); }
             [data-testid="stForm"] {
@@ -42,7 +40,7 @@ def check_password():
 
     with col_left:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 class='portal-title'>📊 VB-G RAM G Convergence</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='portal-title'>🏛️ VB-G RAM G Convergence</h1>", unsafe_allow_html=True)
         st.markdown("<p class='portal-subtitle'>Unified District, Block, and Department Level Convergence Management Portal</p>", unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
