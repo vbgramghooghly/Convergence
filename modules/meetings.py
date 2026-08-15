@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 import base64
 import pandas as pd
 import streamlit as st
@@ -26,7 +26,7 @@ def show():
     # BREADCRUMB & HEADER
     st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Statutory Governance / Convergence Meetings</div>", unsafe_allow_html=True)
     st.markdown("<h2 style='margin-bottom: 0px; color: #0F4C81;'>🤝 Statutory Meeting Governance & Resolution Tracker</h2>", unsafe_allow_html=True)
-    st.caption(f"FY {active_fy} | Coordinate Committee Meetings, Record Proceedings, Track ATRs, and Generate Agendas.")
+    st.caption(f"FY {active_fy} | Coordinate Committee Meetings, Record Proceedings, Synchronize ATRs, and Generate Agendas.")
     st.markdown("---")
 
     # MASTER DATA LOOKUPS (Preserved)
@@ -56,30 +56,37 @@ def show():
         if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
         return f"{d_name} (Main)"
 
-    # DATA FETCHING (Preserved)
+    # DATA FETCHING (Preserved & Real-Time Sync Enabled)
     q_meetings = supabase.table("meetings").select("*").eq("financial_year", active_fy)
     if role in ["district", "department"]: q_meetings = q_meetings.eq("district_id", user["district_id"])
     elif role == "block": q_meetings = q_meetings.eq("block_id", user["block_id"])
     meetings = q_meetings.order("meeting_date", desc=True).execute().data or []
 
-    if role == "department" and meetings:
-        user_uid_main = f"{user.get('department_id')}_main"
-        user_uid_wing = f"{user.get('department_id')}_{user.get('wing_id')}" if user.get('wing_id') else user_uid_main
-        meetings = [m for m in meetings if (user_uid_main in (m.get('attendees') or [])) or (user_uid_wing in (m.get('attendees') or []))]
-
     df_meetings = pd.DataFrame(meetings) if meetings else pd.DataFrame()
     valid_meet_ids = [m['id'] for m in meetings]
 
-    ap_data = supabase.table("meeting_action_points").select("*").in_("meeting_id", valid_meet_ids).execute().data if valid_meet_ids else []
+    # Live un-cached pull of action points to enforce instant synchronization
+    ap_data = supabase.table("meeting_action_points").select("*").execute().data or []
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
     if not df_ap.empty:
+        # Secure Jurisdictional & Role Filtering
         if role == "department":
-            if user.get('wing_id'): df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
-            else: df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
+            if user.get('wing_id'): 
+                df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
+            else: 
+                df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
+        elif role == "block" and user.get("block_id"):
+            # Filter commitments originating from meetings in this block
+            block_meet_ids = [m['id'] for m in meetings if m.get('block_id') == user["block_id"]]
+            df_ap = df_ap[df_ap['meeting_id'].isin(block_meet_ids)]
+        elif role == "district" and user.get("district_id"):
+            dist_meet_ids = [m['id'] for m in meetings if m.get('district_id') == user["district_id"]]
+            df_ap = df_ap[df_ap['meeting_id'].isin(dist_meet_ids)]
 
         df_ap["Department / Wing"] = df_ap.apply(format_dept_display, axis=1)
-        df_ap["Origin Meeting"] = df_ap["meeting_id"].map({m["id"]: f"{m['meeting_date']} ({m['meeting_type']})" for m in meetings})
+        meeting_lookup_map = {m["id"]: f"{m['meeting_date']} ({m['meeting_type']})" for m in meetings}
+        df_ap["Origin Meeting"] = df_ap["meeting_id"].map(meeting_lookup_map).fillna("District/Block Meeting")
         df_ap["deadline"] = pd.to_datetime(df_ap["deadline"], errors="coerce")
 
         def get_flag(row):
@@ -98,7 +105,7 @@ def show():
     # EXECUTIVE GOVERNANCE KPI BAR
     if not df_ap.empty:
         c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("Total Resolutions", len(df_ap))
+        c1.metric("Total Commitments", len(df_ap))
         c2.metric("🟢 Closed", len(df_ap[df_ap["Tracker Flag"] == "🟢 CLOSED"]))
         c3.metric("🔵 On Track", len(df_ap[df_ap["Tracker Flag"] == "🔵 ON TRACK"]))
         c4.metric("🟡 Due Today", len(df_ap[df_ap["Tracker Flag"] == "🟡 DUE TODAY"]))
@@ -233,46 +240,15 @@ def show():
                                 st.success("✅ Attendance saved.")
                                 st.rerun()
 
-            # TARGET PROGRESS REVIEW
-            with st.expander("📊 B. Real-Time Target vs. Actual Progress Review", expanded=False):
-                q_targets = supabase.table("department_targets").select("*").eq("district_id", proc_mtg["district_id"])
-                try: q_targets = q_targets.eq("financial_year", active_fy)
-                except: pass
-
-                q_reg = supabase.table("convergence_register").select("department_id, activity_description, current_status").eq("district_id", proc_mtg["district_id"])
-                if proc_mtg["meeting_type"] == "Block": q_reg = q_reg.eq("block_id", proc_mtg["block_id"])
-                t_data = q_targets.execute().data
-                r_data = q_reg.execute().data
-
-                if t_data:
-                    df_t, df_r = pd.DataFrame(t_data), pd.DataFrame(r_data) if r_data else pd.DataFrame()
-                    comp_data = []
-                    for idx, row in df_t.iterrows():
-                        d_id, act = row['department_id'], row['activity']
-                        t_val = safe_int(row.get('desired_target', 0))
-                        
-                        e_count = 0
-                        if not df_r.empty:
-                            dept_r = df_r[df_r['department_id'] == d_id]
-                            if 'activity_description' in dept_r.columns and not dept_r.empty:
-                                mask = dept_r['activity_description'].apply(lambda x: str(act).lower() in str(x).lower() if pd.notna(x) else False)
-                                e_count = safe_int(mask.sum())
-
-                        ach_pct = (e_count / t_val * 100) if t_val > 0 else 0
-                        gap = t_val - e_count
-                        stat = "Achieved" if gap <= 0 else "Review" if ach_pct > 50 else "Critical Delay"
-                        comp_data.append({"Department": dept_map.get(d_id, "Unknown"), "Activity": act, "Target": t_val, "Achievement": e_count, "% Achieved": f"{ach_pct:.1f}%", "Status": stat})
-                    st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
-
-            # MINUTES & ASSIGN NEW ACTION POINTS
-            with st.expander("📝 C. Minutes & Resolution Directives", expanded=not is_locked):
+            # MINUTES & ASSIGN NEW ACTION POINTS (AUTOMATICALLY ROUTED TO DEPARTMENT WORKSPACE)
+            with st.expander("📝 B. Minutes & Resolution Directives", expanded=not is_locked):
                 general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", disabled=is_locked or role=="department")
                 if not is_locked and role != "department":
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
                         st.success("Draft minutes committed.")
 
-                    st.markdown("##### Assign Action Point / Directives")
+                    st.markdown("##### Assign Action Point / Directives (Auto-Syncs to Department Workspace)")
                     with st.container(border=True):
                         c_r1, c_r2 = st.columns(2)
                         res_dept_label = c_r1.selectbox("Assign Responsibility to*", dept_labels, key=f"r_dept_{proc_sel}")
@@ -292,7 +268,7 @@ def show():
                         res_deadline = c_r5.date_input("Target Deadline", date.today(), key=f"r_dl_{proc_sel}")
                         atr_req = st.checkbox("ATR Submission Required?", value=True, key=f"r_atr_{proc_sel}")
 
-                        if st.button("Commit Action Point", type="primary", key=f"btn_add_{proc_sel}"):
+                        if st.button("Commit Action Point & Sync", type="primary", key=f"btn_add_{proc_sel}"):
                             if not res_resolution.strip(): st.error("Resolution directive is mandatory.")
                             else:
                                 res_payload = {
@@ -303,12 +279,12 @@ def show():
                                 }
                                 try:
                                     supabase.table("meeting_action_points").insert(res_payload).execute()
-                                    st.success("✅ Directive recorded!")
+                                    st.success("✅ Directive recorded & automatically synced to Department login!")
                                     st.rerun()
                                 except Exception:
                                     res_payload["status"], res_payload["priority"] = res_status.lower().replace(" ", "_"), res_priority.lower()
                                     supabase.table("meeting_action_points").insert(res_payload).execute()
-                                    st.success("✅ Directive recorded!")
+                                    st.success("✅ Directive recorded & automatically synced to Department login!")
                                     st.rerun()
 
             # PROCEEDINGS LOCK (Preserved)
@@ -433,7 +409,7 @@ def show():
             <div style="font-size: 10px; margin-top: 50px;">Meeting ID: {p_mtg.get('id')} | Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
             </body></html>"""
 
-            # 4. Complete Master File HTML (Combines all parts)
+            # 4. Complete Master File HTML
             complete_file_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Complete Meeting File</title><style>
             body {{ font-family: Arial, sans-serif; padding: 30px; font-size: 12px; color: #000; }}
             .page-break {{ page-break-after: always; }}
@@ -454,10 +430,12 @@ def show():
             col_pr4.download_button("📦 Complete Meeting File", data=complete_file_html, file_name=f"Complete_Meeting_File_{print_sel}.html", mime="text/html", use_container_width=True, type="primary")
 
     # =====================================================================
-    # TAB 5: ADVANCED ACTION TRACKER & ATR
+    # TAB 5: ADVANCED ACTION TRACKER & ATR (CONTROLLED EDIT WORKFLOW)
     # =====================================================================
     with tab5:
         st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
+        st.caption("Centralized synchronization feed. District/Block administrators can correct commitment text, while Departments submit real-time ATR progress.")
+        
         if df_ap.empty:
             st.info("No action items available.")
         else:
@@ -471,10 +449,40 @@ def show():
 
             st.dataframe(filtered_df[["Origin Meeting", "Department / Wing", "action_point", "deadline", "Tracker Flag", "status", "remarks"]].sort_values("Tracker Flag"), use_container_width=True, hide_index=True)
 
-            st.markdown("##### ✏️ Submit ATR Update")
+            # CONTROLLED EDIT WORKFLOW FOR AUTHORIZED DISTRICT / BLOCK / SUPERADMIN USERS
+            if role in ["superadmin", "district", "block"]:
+                st.markdown("---")
+                st.markdown("##### ✏️ Authorized Correction of Original Commitment")
+                st.caption("District and Block administrators can correct incorrectly recorded action points with full audit logging.")
+                
+                with st.form("edit_commitment_form"):
+                    edit_ap_id = st.selectbox("Select Commitment to Correct", filtered_df['id'].tolist(), format_func=lambda x: f"[{filtered_df[filtered_df['id']==x]['Origin Meeting'].values[0]}] {filtered_df[filtered_df['id']==x]['action_point'].values[0][:50]}...", key="edit_commit_sel")
+                    
+                    target_row = filtered_df[filtered_df['id'] == edit_ap_id].iloc[0]
+                    new_action_text = st.text_area("Corrected Action Point / Directive*", value=target_row.get('action_point', ''))
+                    new_deadline = st.date_input("Corrected Deadline", value=pd.to_datetime(target_row.get('deadline')).date() if pd.notna(target_row.get('deadline')) else date.today())
+                    correction_reason = st.text_input("Reason for Correction (Audited)*", placeholder="e.g. Corrected as per signed physical proceedings file.")
+
+                    if st.form_submit_button("Confirm Commitment Correction", type="primary"):
+                        if not correction_reason.strip():
+                            st.error("⚠️ Mandatory Audit Reason: You must state why this commitment is being corrected.")
+                        else:
+                            update_payload = {
+                                "action_point": new_action_text,
+                                "deadline": str(new_deadline),
+                                "remarks": f"[Corrected by {role.upper()}: {correction_reason}] | {target_row.get('remarks', '')}"
+                            }
+                            supabase.table("meeting_action_points").update(update_payload).eq("id", edit_ap_id).execute()
+                            log_action(user.get('id'), f"CORRECTED meeting_action_points {edit_ap_id} - Reason: {correction_reason}")
+                            st.success("✅ Commitment successfully corrected and audited in real-time!")
+                            st.rerun()
+
+            # DEPARTMENT ATR SUBMISSION WORKFLOW
+            st.markdown("---")
+            st.markdown("##### 📝 Submit Department ATR Update")
             with st.form("global_update_atr"):
                 c_u1, c_u2 = st.columns(2)
-                ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist())
+                ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist(), key="atr_res_sel")
                 new_ap_status = c_u2.selectbox("Update Status", ["Not Started", "On Track", "Completed", "Not Feasible (Requires Review)", "Dropped"])
                 atr_remarks = st.text_area("ATR Findings / Justification (Required if Not Feasible)")
 
@@ -484,7 +492,8 @@ def show():
                     else:
                         try: supabase.table("meeting_action_points").update({"status": new_ap_status, "remarks": atr_remarks}).eq("id", ap_id).execute()
                         except: supabase.table("meeting_action_points").update({"status": new_ap_status.lower().replace(" ", "_"), "remarks": atr_remarks}).eq("id", ap_id).execute()
-                        st.success("✅ ATR submitted successfully.")
+                        log_action(user.get('id'), f"UPDATE ATR meeting_action_points {ap_id}")
+                        st.success("✅ ATR submitted and synchronized instantly across all enterprise views.")
                         st.rerun()
 
     # =====================================================================
