@@ -8,13 +8,11 @@ from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
 def show():
-    # 1. ENFORCE SECURITY & ACCESS RULES (Unchanged)
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
     role = user["role"]
     supabase = get_supabase()
 
-    # 2. GLOBAL THEME, HEADER & BREADCRUMB
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
@@ -23,9 +21,6 @@ def show():
     st.caption("Manage departmental officers, statutory committee members, and nodal points.")
     st.markdown("---")
 
-    # ==========================================
-    # 3. FETCH MASTER DATA (Unchanged Logic)
-    # ==========================================
     designations = supabase.table("designations").select("id, designation_name").eq("active", True).execute().data or []
     districts = supabase.table("districts").select("id, district_name").execute().data or []
     blocks = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
@@ -41,9 +36,6 @@ def show():
     OFFICE_LEVELS = ["State / Department", "District", "Sub Division", "Block", "Gram Panchayat"]
     COMMITTEE_ROLES = ["None", "Chairperson", "Co-Chairperson", "Member-Convener", "Member"]
 
-    # ==========================================
-    # 4. FETCH CONTACTS SCOPED BY ROLE
-    # ==========================================
     query = supabase.table("contacts").select(
         "*, designations(designation_name), districts(district_name),"
         " blocks(block_name), departments(department_name),"
@@ -60,7 +52,6 @@ def show():
     contacts_data = query.execute().data or []
     df = pd.DataFrame(contacts_data) if contacts_data else pd.DataFrame()
 
-    # KPI SUMMARY CARDS
     if not df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Officials Mapped", len(df))
@@ -69,15 +60,11 @@ def show():
         c4.metric("Committee Members", len(df[(df['district_committee_role'] != 'None') | (df['block_committee_role'] != 'None')]))
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # ==========================================
-    # 5. SECONDARY CONTEXTUAL NAVIGATION (TABS)
-    # ==========================================
     tab1, tab2 = st.tabs(["📋 Master Directory List", "🛠️ Manage Official Profiles"])
 
     # --- TAB 1: DIRECTORY LIST & EXPORT ---
     with tab1:
         if not df.empty:
-            # Format display dataframe (Unchanged logic)
             df["Designation"] = df["designations"].apply(lambda x: x.get("designation_name", "Unassigned") if isinstance(x, dict) else "Unassigned")
             df["District"] = df["districts"].apply(lambda x: x.get("district_name", "District Office") if isinstance(x, dict) else "District Office")
             df["Block"] = df["blocks"].apply(lambda x: x.get("block_name", "N/A") if isinstance(x, dict) else "N/A")
@@ -108,7 +95,6 @@ def show():
             display_df = df[["full_name", "office_level", "Designation", "Parent Dept", "Wing / Scheme", "Dist. Role", "Block Role", "Tagged Comm. Blocks", "contact_number", "email_id"]].copy()
             display_df.columns = ["Name", "Posting Level", "Designation", "Parent Dept", "Wing / Scheme", "Dist. Committee", "Block Committee", "Tagged Blocks", "Contact Number", "Email ID"]
 
-            # Quick Search
             search_query = st.text_input("🔍 Quick Search", placeholder="Search by name, designation, department, block...")
             if search_query:
                 mask = display_df.apply(lambda row: row.astype(str).str.contains(search_query, case=False, na=False).any(), axis=1)
@@ -116,11 +102,9 @@ def show():
             else:
                 filtered_df = display_df
 
-            # Display Data Grid
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # Export Options
             col_dl, col_pr, _ = st.columns([1.5, 1.8, 6.7])
             buffer = io.BytesIO()
             try:
@@ -141,6 +125,13 @@ def show():
         existing_record = {}
         target_contact_id = None
 
+        # FIXED HELPER FUNCTION TO AVOID ATTRIBUTE ERROR
+        def safe_contact_desig(c_obj):
+            desig_obj = c_obj.get('designations')
+            if isinstance(desig_obj, dict):
+                return desig_obj.get('designation_name', 'Unknown')
+            return 'Unknown'
+
         if role in ["superadmin", "district", "block"]:
             st.markdown("#### 🛠️ Master Directory Configuration")
             action = st.radio("Action", ["➕ Add New Official", "✏️ Edit Existing Official"], horizontal=True)
@@ -152,13 +143,12 @@ def show():
 
                 contact_list = query.execute().data
                 if contact_list:
-                    contact_opts = {c["id"]: f"{c['full_name']} - {c.get('designations', {}).get('designation_name', 'Unknown')}" for c in contact_list}
+                    contact_opts = {c["id"]: f"{c['full_name']} - {safe_contact_desig(c)}" for c in contact_list}
                     target_contact_id = st.selectbox("Select Official to Edit", options=list(contact_opts.keys()), format_func=lambda x: contact_opts[x])
                     existing_record = next((c for c in contact_list if c["id"] == target_contact_id), {})
                 else:
                     st.warning("No officials found in your jurisdiction.")
         else:
-            # Department Role - Manages only their department/wing personnel
             st.markdown(f"#### 🔄 Manage Department Personnel: **{dept_map.get(user.get('department_id'), 'Your Department')}**")
             dept_contacts_query = supabase.table("contacts").select("*, designations(designation_name)").eq("department_id", user["department_id"])
             if user.get("wing_id"): dept_contacts_query = dept_contacts_query.eq("wing_id", user["wing_id"])
@@ -171,18 +161,20 @@ def show():
             action = st.radio("Action", action_opts, horizontal=True)
 
             if action == "✏️ Edit / Delete Department Official" and dept_contacts:
-                contact_opts = {c["id"]: f"{c['full_name']} - {c.get('designations', {}).get('designation_name', 'Unknown')}" for c in dept_contacts}
+                contact_opts = {c["id"]: f"{c['full_name']} - {safe_contact_desig(c)}" for c in dept_contacts}
                 target_contact_id = st.selectbox("Select Official", options=list(contact_opts.keys()), format_func=lambda x: contact_opts[x])
                 existing_record = next((c for c in dept_contacts if c["id"] == target_contact_id), {})
                 
                 if st.button("🗑️ Delete This Contact Record", type="secondary"):
                     try:
-                        supabase.table("contacts").delete().eq("id", target_contact_id).execute()
-                        st.success("✅ Contact deleted successfully!")
-                        st.rerun()
+                        resp = supabase.table("contacts").delete().eq("id", target_contact_id).execute()
+                        if resp.count and resp.count > 0:
+                            st.success("✅ Contact deleted successfully!")
+                            st.rerun()
+                        else:
+                            st.error("🔴 Delete failed. Database security (RLS) prevented the action.")
                     except Exception as e: st.error(f"Error deleting contact: {e}")
 
-        # --- FORM (Unchanged Logic) ---
         with st.form("update_contact_form"):
             st.markdown("##### 1. Official Details")
             col1, col2 = st.columns(2)
@@ -318,9 +310,16 @@ def show():
                         "committee_blocks": comm_block_ids, "district_id": target_district_id, "block_id": target_block_id, "active": True,
                     }
                     try:
-                        if target_contact_id: supabase.table("contacts").update(payload).eq("id", target_contact_id).execute()
-                        else: supabase.table("contacts").insert(payload).execute()
-                        st.success("✅ Contact record saved successfully!")
-                        st.rerun()
+                        if target_contact_id: 
+                            resp = supabase.table("contacts").update(payload).eq("id", target_contact_id).execute()
+                            if resp.count and resp.count > 0:
+                                st.success("✅ Contact record updated successfully!")
+                                st.rerun()
+                            else:
+                                st.error("🔴 Update failed. Database security (RLS) prevented the update.")
+                        else: 
+                            supabase.table("contacts").insert(payload).execute()
+                            st.success("✅ Contact record saved successfully!")
+                            st.rerun()
                     except Exception as e:
                         st.error(f"Error saving contact details: {e}")
