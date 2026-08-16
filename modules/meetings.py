@@ -339,7 +339,14 @@ def show():
                     invite_dept_only = False
 
                     if all_matched:
-                        options = {c["id"]: f"{c['full_name']} | {c.get('designations', {}).get('designation_name', c.get('designation',''))}" for c in all_matched}
+                        def get_safe_desig_name(c):
+                            # FIX: Explicitly check if the object is a dict before calling .get()
+                            desig_obj = c.get('designations')
+                            if desig_obj and isinstance(desig_obj, dict):
+                                return desig_obj.get('designation_name', '')
+                            return c.get('designation', '')
+                        
+                        options = {c["id"]: f"{c['full_name']} | {get_safe_desig_name(c)}" for c in all_matched}
                         selected_contacts = c_sel.multiselect("Select Registered Officials", options=list(options.keys()), format_func=lambda x: options[x], key=f"sel_{uid}")
                         if not selected_contacts:
                             invite_dept_only = c_gen.checkbox("Invite Department Generally instead", value=True, key=f"gen_{uid}")
