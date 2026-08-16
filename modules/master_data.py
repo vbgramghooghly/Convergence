@@ -309,14 +309,34 @@ def show():
                 except Exception as e:
                     st.error(f"Failed to add FY: {e}")
 
-    # ======================== TAB 8: DESIGNATIONS & COMMITTEE MEMBERS ========================
+       # ======================== TAB 8: DESIGNATIONS & COMMITTEE MEMBERS ========================
     with tab8:
         st.subheader("🎓 Manage Designations & Statutory Committee Roles")
         st.caption("Designations flagged as statutory members will automatically be pre-selected when scheduling a District or Block meeting.")
         
-        if desig_data:
-            df_desig = pd.DataFrame(desig_data)
-            st.dataframe(df_desig[['id', 'designation_name', 'is_committee_member', 'committee_level', 'active']], use_container_width=True, hide_index=True)
+        # --- DIAGNOSTIC FETCH WITH ERROR HANDLING ---
+        try:
+            desig_data = supabase.table("designations").select("*").order("designation_name").execute().data
+            
+            # DEBUGGING TOOL (Remove this line after confirming it works)
+            st.write("🔍 Debug: Raw data fetched from Supabase:", desig_data) 
+
+            if desig_data:
+                df_desig = pd.DataFrame(desig_data)
+                st.dataframe(
+                    df_desig[['id', 'designation_name', 'is_committee_member', 'committee_level', 'active']], 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                # If we get here, desig_data is an empty list []
+                st.warning("⚠️ The database returned 0 records for 'designations'. This means either:")
+                st.info("1. The table is empty (Supabase shows it is not).\n2. **RLS (Row Level Security) is blocking the `select(*)` query.** You need to go to Supabase Dashboard → Authentication → Policies on the `designations` table and add a policy allowing `authenticated` users to `SELECT` rows.")
+                
+        except Exception as e:
+            st.error(f"❌ Database Error fetching designations: {e}")
+            desig_data = []
+        # ---------------------------------------------------
             
         with st.form("desig_form"):
             col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
