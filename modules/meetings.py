@@ -1,10 +1,25 @@
 from datetime import date, datetime
 import pandas as pd
+import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 from auth.auth import require_role, get_current_user
 from utils.db import get_supabase
 from utils.audit import log_action
+
+def sanitize_payload(obj):
+    """Deeply sanitizes payloads to convert NumPy types to native Python types, preventing JSON serialization crashes."""
+    if isinstance(obj, dict):
+        return {k: sanitize_payload(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_payload(i) for i in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif pd.isna(obj):
+        return None
+    return obj
 
 def safe_int(val):
     if pd.isna(val) or val is None or val == '': 
@@ -138,7 +153,7 @@ def show():
 
     if not df_ap.empty:
         # VISUAL HARD-DELETE: Purge Dropped/Cancelled commitments from the Global Feed entirely.
-        df_ap = df_ap[~df_ap['status'].str.lower().isin(['dropped', 'cancelled'])]
+        df_ap = df_ap[~df_ap['status'].astype(str).str.lower().isin(['dropped', 'cancelled', 'deleted'])]
 
     if not df_ap.empty:
         if role == "department":
@@ -236,24 +251,21 @@ def show():
         return ""
 
     # =====================================================================
-    # TAB ARCHITECTURE (PRINT TAB MOVED TO LAST)
+    # TAB ARCHITECTURE: EXPLICIT MAPPING
     # =====================================================================
     if role == "department":
-        tab1, tab4, tab6 = st.tabs(["📈 SLA Performance", "🎯 Action Tracker & ATR", "🖨️ Print Centre"])
-        tracker_tab = tab4
-        print_tab = tab6
+        tab_sla, tab_tracker, tab_print = st.tabs(["📈 SLA Performance", "🎯 Action Tracker & ATR", "🖨️ Print Centre"])
+        tab_sched = tab_proc = tab_agenda = None
     else:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        tab_sla, tab_sched, tab_proc, tab_tracker, tab_agenda, tab_print = st.tabs([
             "📈 SLA Performance", "🗓️ Schedule Notice", "✍️ Attendance & Proceedings", 
             "🎯 Action Tracker & ATR", "⏭️ Next Agenda Prep", "🖨️ Print Centre"
         ])
-        tracker_tab = tab4
-        print_tab = tab6
 
     # =====================================================================
     # TAB 1: SLA PERFORMANCE DASHBOARD
     # =====================================================================
-    with tab1:
+    with tab_sla:
         if df_ap.empty:
             st.info(f"No meeting commitments recorded for FY {active_fy}.")
         else:
@@ -271,10 +283,10 @@ def show():
                 st.dataframe(mtg_perf, use_container_width=True, hide_index=True)
 
     # =====================================================================
-    # TAB 2: SCHEDULE MEETING (MIXED-MODE INVITATIONS)
+    # TAB 2: SCHEDULE MEETING
     # =====================================================================
-    if role != "department":
-        with tab2:
+    if tab_sched:
+        with tab_sched:
             st.markdown("#### 🗓️ Schedule Convergence Committee Meeting")
             st.caption("Mixed-Mode: Invite specific officials if registered, or generally invite the Department/Wing. You can also add first-time officials on the fly.")
             
@@ -382,7 +394,7 @@ def show():
                                                 "district_id": target_district_id, "block_id": new_off["block_id"], 
                                                 "contact_number": n_mobile, "email_id": n_email, "active": True
                                             }
-                                            supabase.table("contacts").insert(payload).execute()
+                                            supabase.table("contacts").insert(sanitize_payload(payload)).execute()
                                             set_msg("success", f"Official {n_name} saved to directory and added to meeting.")
                                         except Exception as e:
                                             set_msg("warning", f"Could not save to directory ({e}), but official added to this meeting successfully.")
@@ -410,7 +422,7 @@ def show():
                             "district_id": target_district_id, "block_id": target_block_id
                         }
                         try:
-                            supabase.table("meetings").insert(meeting_data).execute()
+                            supabase.table("meetings").insert(sanitize_payload(meeting_data)).execute()
                             st.session_state.temp_officials = [] 
                             set_msg("success", "✅ Meeting notice dispatched successfully! Packages auto-generated.")
                         except Exception as e:
@@ -420,8 +432,8 @@ def show():
     # =====================================================================
     # TAB 3: PROCEEDINGS, ATTENDANCE & VERIFIED LOCKING
     # =====================================================================
-    if role != "department":
-        with tab3:
+    if tab_proc:
+        with tab_proc:
             display_persisted_msg() # Render robust session messages
             
             st.markdown("#### ✍️ Record Minutes, Attendance & Assign Directives")
@@ -475,7 +487,6 @@ def show():
                                     display_text = f"**{off.get('name')}** — {off.get('designation')} | {off.get('department')}"
                                     if off.get('wing'): display_text += f" ({off['wing']})"
                                     is_present = st.checkbox(display_text, value=(off.get("attendance") != "Absent"), key=f"att_{off.get('contact_id', off.get('name'))}_{proc_sel}")
-                                    # EXPLICIT OVERRIDE: Eliminates "Pending" status entirely
                                     updated_attendance_payload.append({**off, "attendance": "Present" if is_present else "Absent"})
                             
                             if dept_att:
@@ -505,19 +516,28 @@ def show():
                                                 "type": "individual", "name": s_name, "designation": s_desig, "department": s_dept,
                                                 "posting_level": "Substitute", "wing": "", "mobile": "", "email": "", "attendance": "Present (Substitute)"
                                             })
-                                            supabase.table("meetings").update({"detailed_attendance": updated_attendance_payload}).eq("id", proc_sel).execute()
-                                            st.rerun()
+                                            try:
+                                                supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", proc_sel).execute()
+                                                st.rerun()
+                                            except Exception as sub_err:
+                                                set_msg("error", f"🔴 Failed to add substitute. Error: {str(sub_err)}")
+                                                st.rerun()
 
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("Save Combined Attendance Register", type="primary"):
                                 try:
-                                    supabase.table("meetings").update({"detailed_attendance": updated_attendance_payload}).eq("id", proc_sel).execute()
+                                    supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", proc_sel).execute()
                                     verify = supabase.table("meetings").select("detailed_attendance").eq("id", proc_sel).execute()
                                     if verify.data and verify.data[0].get("detailed_attendance"):
-                                        has_pending = any(a.get("attendance") == "Pending" for a in verify.data[0]["detailed_attendance"])
-                                        if not has_pending: set_msg("success", "🟢 Attendance Register saved successfully.")
-                                        else: set_msg("warning", "🟡 Attendance saved, but some entries are still pending. Attendance requires completion before proceedings can be finalized.")
-                                    else: set_msg("error", "🔴 Attendance Register could not be verified after saving.")
+                                        # Strict validation: Only "Present", "Absent", "Present (Substitute)" are allowed.
+                                        valid_statuses = ["Present", "Absent", "Present (Substitute)"]
+                                        has_pending = any(a.get("attendance") not in valid_statuses for a in verify.data[0]["detailed_attendance"])
+                                        if not has_pending: 
+                                            set_msg("success", "🟢 Attendance Register saved successfully.")
+                                        else: 
+                                            set_msg("warning", "🟡 Attendance saved, but some entries lack valid status. Please re-verify.")
+                                    else: 
+                                        set_msg("error", "🔴 Attendance Register could not be verified after saving.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Failed to save attendance: {str(e)}")
                                 st.rerun()
@@ -528,7 +548,7 @@ def show():
                     general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", height=150)
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         try:
-                            supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
+                            supabase.table("meetings").update({"decisions": sanitize_payload(general_minutes)}).eq("id", proc_sel).execute()
                             verify = supabase.table("meetings").select("decisions").eq("id", proc_sel).execute()
                             if verify.data and verify.data[0].get("decisions") == general_minutes:
                                 set_msg("success", f"🟢 Meeting minutes saved successfully.\nStatus: Draft. You may continue editing the proceedings.")
@@ -570,21 +590,24 @@ def show():
                                 set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
                             else:
                                 res_payload = {
-                                    "meeting_id": proc_sel, "department_id": selected_opt['dept_id'],
-                                    "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
-                                    "district_id": proc_mtg.get("district_id"), # Enforce RLS visibility for departments
-                                    "block_id": proc_mtg.get("block_id"),
-                                    "action_point": f"[{res_scheme}] {res_resolution.strip()}", "deadline": str(res_deadline), 
+                                    "meeting_id": safe_int(proc_sel), 
+                                    "department_id": safe_int(selected_opt['dept_id']),
+                                    "wing_id": safe_int(selected_opt['wing_id']) if selected_opt['wing_id'] else None,
+                                    "district_id": safe_int(proc_mtg.get("district_id")) if pd.notna(proc_mtg.get("district_id")) else None, 
+                                    "block_id": safe_int(proc_mtg.get("block_id")) if pd.notna(proc_mtg.get("block_id")) else None,
+                                    "action_point": f"[{res_scheme}] {res_resolution.strip()}", 
+                                    "deadline": str(res_deadline), 
                                     "status": res_status, "priority": res_priority,
                                     "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                 }
                                 try:
-                                    res = supabase.table("meeting_action_points").insert(res_payload).execute()
+                                    # Use the deep sanitizer to fix int64 serialization issues
+                                    clean_payload = sanitize_payload(res_payload)
+                                    res = supabase.table("meeting_action_points").insert(clean_payload).execute()
                                     if res.data and len(res.data) > 0:
                                         v_id = res.data[0]['id']
-                                        # Strict Verification Read by Department to guarantee sync
-                                        v_check_query = supabase.table("meeting_action_points").select("id").eq("id", v_id).eq("department_id", selected_opt['dept_id'])
-                                        if selected_opt['wing_id']: v_check_query = v_check_query.eq("wing_id", selected_opt['wing_id'])
+                                        v_check_query = supabase.table("meeting_action_points").select("id").eq("id", v_id).eq("department_id", safe_int(selected_opt['dept_id']))
+                                        if selected_opt['wing_id']: v_check_query = v_check_query.eq("wing_id", safe_int(selected_opt['wing_id']))
                                         else: v_check_query = v_check_query.is_("wing_id", "null")
                                         
                                         v_check = v_check_query.execute()
@@ -592,16 +615,7 @@ def show():
                                         else: set_msg("error", "🔴 Action Point was not synchronized to the concerned Department/Wing.\nCommitment: ✓ Saved\nDepartment Sync: ✗ Failed")
                                     else: set_msg("error", "🔴 Action Point could not be saved.")
                                 except Exception as e:
-                                    # Fallback schema handling if district_id/block_id column missing in meeting_action_points
-                                    if "district_id" in str(e) or "block_id" in str(e):
-                                        res_payload.pop("district_id", None)
-                                        res_payload.pop("block_id", None)
-                                        try:
-                                            res = supabase.table("meeting_action_points").insert(res_payload).execute()
-                                            set_msg("success", f"🟢 Action Point recorded (minimal) and successfully synchronized to {selected_opt['label']}.")
-                                        except Exception as e2: set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e2)}")
-                                    else:
-                                        set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
+                                    set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
                             st.rerun()
 
                     st.markdown("---")
@@ -617,7 +631,9 @@ def show():
                             fresh_mtg = supabase.table("meetings").select("*").eq("id", proc_sel).execute().data[0]
                             att_check = fresh_mtg.get("detailed_attendance") or []
                             proceedings_check = fresh_mtg.get("decisions") or ""
-                            has_pending = any(a.get("attendance") == "Pending" for a in att_check)
+                            
+                            valid_statuses = ["Present", "Absent", "Present (Substitute)"]
+                            has_pending = any(a.get("attendance") not in valid_statuses for a in att_check)
                                     
                             if not att_check or has_pending:
                                 set_msg("error", "🔴 Attendance register has pending items or has not been saved. Please save attendance before completing proceedings.")
@@ -625,7 +641,7 @@ def show():
                                 set_msg("error", "🔴 Meeting proceedings are required before finalization. Do not lock an empty meeting.")
                             else:
                                 try:
-                                    supabase.table("meetings").update({"status": "Convened", "decisions": proceedings_check}).eq("id", proc_sel).execute()
+                                    supabase.table("meetings").update({"status": "Convened", "decisions": sanitize_payload(proceedings_check)}).eq("id", proc_sel).execute()
                                     verify = supabase.table("meetings").select("status").eq("id", proc_sel).execute().data
                                     if verify and verify[0]["status"] == "Convened":
                                         set_msg("success", "🟢 Meeting proceedings completed successfully.\n🔒 Meeting Register locked successfully.")
@@ -640,138 +656,142 @@ def show():
                             st.rerun()
 
     # =====================================================================
-    # TAB 4: ADVANCED ACTION TRACKER & ATR (WITH AUDITABLE CORRECTION/DELETION)
+    # TAB 4: ADVANCED ACTION TRACKER & ATR
     # =====================================================================
-    tracker_tab = tab4 if role != "department" else tab1 # Adjusted based on role map
-    with tracker_tab:
-        st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
-        display_persisted_msg()
+    if tab_tracker:
+        with tab_tracker:
+            st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
+            display_persisted_msg()
 
-        if df_ap.empty:
-            st.info("No action items available.")
-        else:
-            search_query = st.text_input("🔍 Search Resolution No, Action Point, Department, etc.", "")
+            if df_ap.empty:
+                st.info("No action items available.")
+            else:
+                search_query = st.text_input("🔍 Search Resolution No, Action Point, Department, etc.", "")
 
-            c_f1, c_f2 = st.columns(2)
-            f_dept = c_f1.selectbox("Filter Department", ["All"] + dept_labels)
-            f_flag = c_f2.selectbox("Filter SLA Flag", ["All", "🟢 CLOSED", "🔴 OVERDUE", "🟡 DUE TODAY", "🔵 ON TRACK", "🟠 FOR REVIEW", "⚪ NOT STARTED"])
+                c_f1, c_f2 = st.columns(2)
+                f_dept = c_f1.selectbox("Filter Department", ["All"] + dept_labels)
+                f_flag = c_f2.selectbox("Filter SLA Flag", ["All", "🟢 CLOSED", "🔴 OVERDUE", "🟡 DUE TODAY", "🔵 ON TRACK", "🟠 FOR REVIEW", "⚪ NOT STARTED"])
 
-            filtered_df = df_ap.copy()
-            if f_dept != "All": filtered_df = filtered_df[filtered_df["Department / Wing"] == f_dept]
-            if f_flag != "All": filtered_df = filtered_df[filtered_df["Tracker Flag"] == f_flag]
-            if search_query:
-                search_mask = filtered_df.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
-                filtered_df = filtered_df[search_mask]
+                filtered_df = df_ap.copy()
+                if f_dept != "All": filtered_df = filtered_df[filtered_df["Department / Wing"] == f_dept]
+                if f_flag != "All": filtered_df = filtered_df[filtered_df["Tracker Flag"] == f_flag]
+                if search_query:
+                    search_mask = filtered_df.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
+                    filtered_df = filtered_df[search_mask]
 
-            display_df = filtered_df[["Resolution No.", "Origin Meeting", "Department / Wing", "action_point", "deadline", "Tracker Flag", "status", "remarks"]].sort_values("Tracker Flag")
-            
-            st.dataframe(
-                display_df, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "action_point": st.column_config.TextColumn("Action Point / Directive", width="large"),
-                    "Resolution No.": st.column_config.TextColumn("Resolution No.", width="medium")
-                }
-            )
+                display_df = filtered_df[["Resolution No.", "Origin Meeting", "Department / Wing", "action_point", "deadline", "Tracker Flag", "status", "remarks"]].sort_values("Tracker Flag")
+                
+                st.dataframe(
+                    display_df, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "action_point": st.column_config.TextColumn("Action Point / Directive", width="large"),
+                        "Resolution No.": st.column_config.TextColumn("Resolution No.", width="medium")
+                    }
+                )
 
-            if role in ["superadmin", "district", "block"]:
+                if role in ["superadmin", "district", "block"]:
+                    st.markdown("---")
+                    st.markdown("##### ⚙️ Authorized Correction & Cancellation Workspace")
+                    st.caption("Identify, correct, or cancel a resolution. All actions are strictly audited and synced.")
+
+                    res_options = filtered_df['id'].tolist()
+                    def format_res_label(x):
+                        row = filtered_df[filtered_df['id'] == x].iloc[0]
+                        return f"{row['Resolution No.']} | {row['Origin Meeting']} | {row['Department / Wing']} | {str(row['action_point'])[:60]}..."
+
+                    selected_ap_id = st.selectbox("Step 1 — Identify Resolution", res_options, format_func=format_res_label)
+
+                    if selected_ap_id:
+                        target_row = filtered_df[filtered_df['id'] == selected_ap_id].iloc[0]
+
+                        with st.container(border=True):
+                            st.markdown(f"**Selected Resolution Details**")
+                            st.markdown(f"**Resolution No.:** {target_row['Resolution No.']}")
+                            st.markdown(f"**Origin Meeting:** {target_row['Origin Meeting']}")
+                            st.markdown(f"**Department/Wing:** {target_row['Department / Wing']}")
+                            st.markdown(f"**Original Action Point:**\n> {target_row['action_point']}")
+                            st.markdown(f"**Original Deadline:** {target_row['deadline'].strftime('%d-%m-%Y') if pd.notna(target_row['deadline']) else 'N/A'}")
+                            st.markdown(f"**Current Status:** {target_row['status']}")
+
+                        action_type = st.radio("Step 2 — Select Action", ["✏️ Correct Commitment", "🗑️ Cancel / Delete Commitment"], horizontal=True)
+
+                        if action_type == "✏️ Correct Commitment":
+                            with st.form("edit_commitment_form"):
+                                st.markdown("Step 3 — Correct")
+                                new_dept_label = st.selectbox("Department/Wing", dept_labels, index=dept_labels.index(target_row['Department / Wing']) if target_row['Department / Wing'] in dept_labels else 0)
+                                new_action_text = st.text_area("Corrected Action Point / Directive*", value=target_row.get('action_point', ''))
+                                new_deadline = st.date_input("Corrected Deadline", value=pd.to_datetime(target_row.get('deadline')).date() if pd.notna(target_row.get('deadline')) else date.today())
+                                correction_reason = st.text_input("Reason for Correction (Audited)*", placeholder="e.g. Typographical error, Correction as per proceeding")
+
+                                if st.form_submit_button("Confirm Correction", type="primary"):
+                                    if not correction_reason.strip():
+                                        st.error("⚠️ Mandatory Audit Reason is required to modify a convened resolution.")
+                                    elif not new_action_text.strip():
+                                        st.error("⚠️ Action point text cannot be empty.")
+                                    else:
+                                        selected_opt = next(opt for opt in unified_depts if opt['label'] == new_dept_label)
+                                        update_payload = {
+                                            "department_id": safe_int(selected_opt['dept_id']),
+                                            "wing_id": safe_int(selected_opt['wing_id']) if selected_opt['wing_id'] else None,
+                                            "action_point": new_action_text,
+                                            "deadline": str(new_deadline),
+                                            "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
+                                        }
+                                        try:
+                                            supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", selected_ap_id).execute()
+                                            log_action(user.get('id'), f"CORRECTED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
+                                            set_msg("success", f"✅ Resolution {target_row['Resolution No.']} successfully corrected and synchronized!")
+                                        except Exception as e:
+                                            set_msg("error", f"❌ Failed to correct resolution: {str(e)}")
+                                        st.rerun()
+
+                        elif action_type == "🗑️ Cancel / Delete Commitment":
+                            with st.form("delete_commitment_form"):
+                                st.markdown("Step 3 — Delete")
+                                st.warning(f"⚠️ This action will cancel Resolution **{target_row['Resolution No.']}** and remove it from active tracking. The Department will no longer see it.")
+                                delete_reason = st.text_input("Reason for Cancellation (Audited)*", placeholder="e.g. Duplicate entry, Administrative cancellation")
+                                
+                                if st.form_submit_button("Confirm Delete", type="primary"):
+                                    if not delete_reason.strip():
+                                        st.error("⚠️ Mandatory Audit Reason is required to delete a resolution.")
+                                    else:
+                                        try:
+                                            update_payload = {
+                                                "status": "Dropped",
+                                                "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"
+                                            }
+                                            supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", selected_ap_id).execute()
+                                            log_action(user.get('id'), f"CANCELLED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
+                                            set_msg("success", f"✅ Resolution {target_row['Resolution No.']} deleted successfully and removed from Department view.")
+                                        except Exception as e:
+                                            set_msg("error", f"❌ Failed to delete resolution: {str(e)}")
+                                        st.rerun()
+
                 st.markdown("---")
-                st.markdown("##### ⚙️ Authorized Correction & Cancellation Workspace")
-                st.caption("Identify, correct, or cancel a resolution. All actions are strictly audited and synced.")
+                st.markdown("##### 📝 Submit Department ATR Update")
+                with st.form("global_update_atr"):
+                    c_u1, c_u2 = st.columns(2)
+                    ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist(), format_func=lambda x: f"{filtered_df[filtered_df['id'] == x].iloc[0]['Resolution No.']} | {str(filtered_df[filtered_df['id'] == x].iloc[0]['action_point'])[:50]}...")
+                    new_ap_status = c_u2.selectbox("Update Status", ["Not Started", "On Track", "Completed", "Not Feasible (Requires Review)", "Dropped"])
+                    atr_remarks = st.text_area("ATR Findings / Justification")
 
-                res_options = filtered_df['id'].tolist()
-                def format_res_label(x):
-                    row = filtered_df[filtered_df['id'] == x].iloc[0]
-                    return f"{row['Resolution No.']} | {row['Origin Meeting']} | {row['Department / Wing']} | {str(row['action_point'])[:60]}..."
-
-                selected_ap_id = st.selectbox("Step 1 — Identify Resolution", res_options, format_func=format_res_label)
-
-                if selected_ap_id:
-                    target_row = filtered_df[filtered_df['id'] == selected_ap_id].iloc[0]
-
-                    with st.container(border=True):
-                        st.markdown(f"**Selected Resolution Details**")
-                        st.markdown(f"**Resolution No.:** {target_row['Resolution No.']}")
-                        st.markdown(f"**Origin Meeting:** {target_row['Origin Meeting']}")
-                        st.markdown(f"**Department/Wing:** {target_row['Department / Wing']}")
-                        st.markdown(f"**Original Action Point:**\n> {target_row['action_point']}")
-                        st.markdown(f"**Original Deadline:** {target_row['deadline'].strftime('%d-%m-%Y') if pd.notna(target_row['deadline']) else 'N/A'}")
-                        st.markdown(f"**Current Status:** {target_row['status']}")
-
-                    action_type = st.radio("Step 2 — Select Action", ["✏️ Correct Commitment", "🗑️ Cancel / Delete Commitment"], horizontal=True)
-
-                    if action_type == "✏️ Correct Commitment":
-                        with st.form("edit_commitment_form"):
-                            st.markdown("Step 3 — Correct")
-                            new_dept_label = st.selectbox("Department/Wing", dept_labels, index=dept_labels.index(target_row['Department / Wing']) if target_row['Department / Wing'] in dept_labels else 0)
-                            new_action_text = st.text_area("Corrected Action Point / Directive*", value=target_row.get('action_point', ''))
-                            new_deadline = st.date_input("Corrected Deadline", value=pd.to_datetime(target_row.get('deadline')).date() if pd.notna(target_row.get('deadline')) else date.today())
-                            correction_reason = st.text_input("Reason for Correction (Audited)*", placeholder="e.g. Typographical error, Correction as per proceeding")
-
-                            if st.form_submit_button("Confirm Correction", type="primary"):
-                                if not correction_reason.strip():
-                                    st.error("⚠️ Mandatory Audit Reason is required to modify a convened resolution.")
-                                elif not new_action_text.strip():
-                                    st.error("⚠️ Action point text cannot be empty.")
-                                else:
-                                    selected_opt = next(opt for opt in unified_depts if opt['label'] == new_dept_label)
-                                    update_payload = {
-                                        "department_id": selected_opt['dept_id'],
-                                        "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
-                                        "action_point": new_action_text, "deadline": str(new_deadline),
-                                        "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
-                                    }
-                                    try:
-                                        supabase.table("meeting_action_points").update(update_payload).eq("id", selected_ap_id).execute()
-                                        log_action(user.get('id'), f"CORRECTED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
-                                        set_msg("success", f"✅ Resolution {target_row['Resolution No.']} successfully corrected and synchronized!")
-                                    except Exception as e:
-                                        set_msg("error", f"❌ Failed to correct resolution: {str(e)}")
-                                    st.rerun()
-
-                    elif action_type == "🗑️ Cancel / Delete Commitment":
-                        with st.form("delete_commitment_form"):
-                            st.markdown("Step 3 — Delete")
-                            st.warning(f"⚠️ This action will cancel Resolution **{target_row['Resolution No.']}** and remove it from active tracking. The Department will no longer see it.")
-                            delete_reason = st.text_input("Reason for Cancellation (Audited)*", placeholder="e.g. Duplicate entry, Administrative cancellation")
-                            
-                            if st.form_submit_button("Confirm Delete", type="primary"):
-                                if not delete_reason.strip():
-                                    st.error("⚠️ Mandatory Audit Reason is required to delete a resolution.")
-                                else:
-                                    try:
-                                        update_payload = {"status": "Dropped", "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"}
-                                        supabase.table("meeting_action_points").update(update_payload).eq("id", selected_ap_id).execute()
-                                        log_action(user.get('id'), f"CANCELLED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
-                                        set_msg("success", f"✅ Resolution {target_row['Resolution No.']} deleted successfully and removed from Department view.")
-                                    except Exception as e:
-                                        set_msg("error", f"❌ Failed to delete resolution: {str(e)}")
-                                    st.rerun()
-
-            st.markdown("---")
-            st.markdown("##### 📝 Submit Department ATR Update")
-            with st.form("global_update_atr"):
-                c_u1, c_u2 = st.columns(2)
-                ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist(), format_func=lambda x: f"{filtered_df[filtered_df['id'] == x].iloc[0]['Resolution No.']} | {str(filtered_df[filtered_df['id'] == x].iloc[0]['action_point'])[:50]}...")
-                new_ap_status = c_u2.selectbox("Update Status", ["Not Started", "On Track", "Completed", "Not Feasible (Requires Review)", "Dropped"])
-                atr_remarks = st.text_area("ATR Findings / Justification")
-
-                if st.form_submit_button("Submit ATR Update", type="primary"):
-                    if new_ap_status == "Not Feasible (Requires Review)" and not atr_remarks.strip():
-                        st.error("⚠️ Mandatory Justification required for Not Feasible.")
-                    else:
-                        try: supabase.table("meeting_action_points").update({"status": new_ap_status, "remarks": atr_remarks}).eq("id", ap_id).execute()
-                        except: supabase.table("meeting_action_points").update({"status": new_ap_status.lower().replace(" ", "_"), "remarks": atr_remarks}).eq("id", ap_id).execute()
-                        log_action(user.get('id'), f"UPDATE ATR meeting_action_points {ap_id}")
-                        set_msg("success", "✅ ATR submitted successfully.")
-                        st.rerun()
+                    if st.form_submit_button("Submit ATR Update", type="primary"):
+                        if new_ap_status == "Not Feasible (Requires Review)" and not atr_remarks.strip():
+                            st.error("⚠️ Mandatory Justification required for Not Feasible.")
+                        else:
+                            try: supabase.table("meeting_action_points").update({"status": sanitize_payload(new_ap_status), "remarks": sanitize_payload(atr_remarks)}).eq("id", ap_id).execute()
+                            except: supabase.table("meeting_action_points").update({"status": sanitize_payload(new_ap_status.lower().replace(" ", "_")), "remarks": sanitize_payload(atr_remarks)}).eq("id", ap_id).execute()
+                            log_action(user.get('id'), f"UPDATE ATR meeting_action_points {ap_id}")
+                            set_msg("success", "✅ ATR submitted successfully.")
+                            st.rerun()
 
     # =====================================================================
     # TAB 5: AUTOMATED NEXT AGENDA PREP
     # =====================================================================
-    if role != "department":
-        with tab5:
+    if tab_agenda:
+        with tab_agenda:
             st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
             district_id = user.get("district_id")
             if not district_id:
@@ -798,29 +818,29 @@ def show():
                     st.success("🎉 No overdue items detected.")
 
     # =====================================================================
-    # TAB 6: DIRECT PRINT CENTRE (NATIVE PRINT DIALOG)
+    # TAB 6: DIRECT PRINT CENTRE (NATIVE PRINT DIALOG) - ALWAYS LAST
     # =====================================================================
-    print_tab = tab6 if role != "department" else tab3 # Fallback role tab
-    with print_tab:
-        st.markdown("#### 🖨️ Meeting Print Centre")
-        st.caption("Select a meeting and the document type. The system generates an immediate preview and opens your browser's native print dialog.")
+    if tab_print:
+        with tab_print:
+            st.markdown("#### 🖨️ Meeting Print Centre")
+            st.caption("Select a meeting and the document type. The system generates an immediate preview and opens your browser's native print dialog.")
 
-        if df_meetings.empty:
-            st.info("No meetings available for printing.")
-        else:
-            c_p1, c_p2 = st.columns([2, 1])
-            print_sel = c_p1.selectbox(
-                "1. Select Meeting Record",
-                df_meetings["id"].tolist(),
-                format_func=lambda x: f"{df_meetings[df_meetings['id'] == x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id'] == x]['meeting_type'].values[0]} ({df_meetings[df_meetings['id'] == x]['status'].values[0]})"
-            )
-            doc_type = c_p2.selectbox(
-                "2. Select Document to Print",
-                ["Meeting Notice & Invited List", "Attendance Register", "Proceedings & Resolutions", "Complete Meeting File"]
-            )
+            if df_meetings.empty:
+                st.info("No meetings available for printing.")
+            else:
+                c_p1, c_p2 = st.columns([2, 1])
+                print_sel = c_p1.selectbox(
+                    "1. Select Meeting Record",
+                    df_meetings["id"].tolist(),
+                    format_func=lambda x: f"{df_meetings[df_meetings['id'] == x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id'] == x]['meeting_type'].values[0]} ({df_meetings[df_meetings['id'] == x]['status'].values[0]})"
+                )
+                doc_type = c_p2.selectbox(
+                    "2. Select Document to Print",
+                    ["Meeting Notice & Invited List", "Attendance Register", "Proceedings & Resolutions", "Complete Meeting File"]
+                )
 
-            p_mtg = df_meetings[df_meetings["id"] == print_sel].iloc[0]
-            p_aps = df_ap[df_ap['meeting_id'] == print_sel] if not df_ap.empty else pd.DataFrame()
-            
-            html_output = generate_meeting_html(p_mtg, p_aps, doc_type)
-            if html_output: render_print_preview(html_output)
+                p_mtg = df_meetings[df_meetings["id"] == print_sel].iloc[0]
+                p_aps = df_ap[df_ap['meeting_id'] == print_sel] if not df_ap.empty else pd.DataFrame()
+                
+                html_output = generate_meeting_html(p_mtg, p_aps, doc_type)
+                if html_output: render_print_preview(html_output)
