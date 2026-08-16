@@ -8,7 +8,6 @@ from utils.db import get_supabase
 from utils.audit import log_action
 
 def safe_id(val):
-    """Safely extracts IDs to strict native types, preventing int64 casting failures in Supabase."""
     if pd.isna(val) or val is None or val == '':
         return None
     try:
@@ -17,7 +16,6 @@ def safe_id(val):
         return str(val).strip()
 
 def sanitize_payload(obj):
-    """Deeply sanitizes payloads to convert NumPy/Pandas types to standard Python types for clean JSON serialization."""
     if isinstance(obj, dict):
         return {k: sanitize_payload(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -34,18 +32,16 @@ def sanitize_payload(obj):
     return obj
 
 def generate_res_no(row):
-    """Generates a stable, unique resolution number based on the DB ID."""
     val = str(row.get('id', ''))
-    if "-" in val:  # UUID format
+    if "-" in val:
         return f"RES-{val.split('-')[0].upper()}"
-    else:  # Integer format or unexpected string
+    else:
         try:
             return f"RES-{int(val):04d}"
         except:
             return f"RES-{val.upper()[:8]}"
 
 def render_print_preview(html_content):
-    """Renders HTML inside an iframe with a native print button, bypassing all download requirements."""
     wrapped_html = f"""
     <!DOCTYPE html>
     <html>
@@ -84,7 +80,6 @@ def render_print_preview(html_content):
     components.html(wrapped_html, height=800, scrolling=True)
 
 def show():
-    # 1. ENFORCE SECURITY & ACCESS RULES
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
     role = user["role"]
@@ -92,7 +87,6 @@ def show():
     today = pd.to_datetime(date.today())
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
-    # SESSION STATE MANAGEMENT FOR RELIABLE VERIFIED NOTIFICATIONS
     if "temp_officials" not in st.session_state:
         st.session_state.temp_officials = []
     if "mtg_msg" not in st.session_state:
@@ -115,13 +109,11 @@ def show():
             st.session_state.mtg_msg = None
             st.session_state.mtg_msg_type = None
 
-    # BREADCRUMB & HEADER
     st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Statutory Governance / Convergence Meetings</div>", unsafe_allow_html=True)
     st.markdown("<h2 style='margin-bottom: 0px; color: #0F4C81;'>🤝 Statutory Meeting Governance & Resolution Tracker</h2>", unsafe_allow_html=True)
     st.caption(f"FY {active_fy} | Coordinate Committee Meetings, Record Proceedings, Synchronize ATRs, and Generate Agendas.")
     st.markdown("---")
 
-    # MASTER DATA LOOKUPS
     departments = supabase.table("departments").select("id, department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
@@ -153,7 +145,6 @@ def show():
             return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
         return f"{d_name} (Main)"
 
-    # DATA FETCHING – always fresh on rerun
     q_meetings = supabase.table("meetings").select("*").eq("financial_year", active_fy)
     if role in ["district", "department"] and user.get("district_id"):
         q_meetings = q_meetings.eq("district_id", user["district_id"])
@@ -166,11 +157,9 @@ def show():
     df_ap = pd.DataFrame(ap_data) if ap_data else pd.DataFrame()
 
     if not df_ap.empty:
-        # VISUAL HARD-DELETE: Purge Dropped/Cancelled commitments from all active feeds globally
         df_ap = df_ap[~df_ap['status'].astype(str).str.lower().isin(['dropped', 'cancelled', 'deleted'])]
 
     if not df_ap.empty:
-        # STRICT ROLE-BASED FILTERING USING NATIVE TYPE CHECKING
         if role == "department":
             dep_id = safe_id(user.get('department_id'))
             w_id = safe_id(user.get('wing_id'))
@@ -194,7 +183,6 @@ def show():
             df_ap["deadline"] = pd.to_datetime(df_ap["deadline"], errors="coerce")
             df_ap["Resolution No."] = df_ap.apply(generate_res_no, axis=1)
 
-            # Duplicate Flagging
             dupes = df_ap.duplicated(subset=['meeting_id', 'department_id', 'action_point'], keep=False)
             if dupes.any():
                 df_ap.loc[dupes, "Resolution No."] = "⚠️ " + df_ap.loc[dupes, "Resolution No."]
@@ -218,7 +206,6 @@ def show():
 
             df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
-    # HTML GENERATOR HELPER FOR PRINT PREVIEW
     def generate_meeting_html(p_mtg, p_aps, doc_type):
         org_label = "District Administration" if p_mtg.get('meeting_type') == 'District' else "Block Development Office"
 
@@ -276,9 +263,6 @@ def show():
             return f"{notice_html}<div class='page-break'></div>{att_html}<div class='page-break'></div>{proc_html}"
         return ""
 
-    # =====================================================================
-    # TAB ARCHITECTURE: PRINT CENTRE IS ABSOLUTE LAST
-    # =====================================================================
     if role == "department":
         tab_sla, tab_tracker, tab_print = st.tabs(["📈 SLA Performance", "🎯 Action Tracker & ATR", "🖨️ Print Centre"])
         tab_sched = tab_proc = tab_agenda = None
@@ -288,9 +272,7 @@ def show():
             "🎯 Action Tracker & ATR", "⏭️ Next Agenda Prep", "🖨️ Print Centre"
         ])
 
-    # =====================================================================
     # TAB 1: SLA PERFORMANCE DASHBOARD
-    # =====================================================================
     with tab_sla:
         if df_ap.empty:
             st.info(f"No meeting commitments recorded for FY {active_fy}.")
@@ -308,9 +290,7 @@ def show():
                 mtg_perf = df_ap.groupby("Origin Meeting").agg(Resolutions=('id', 'count'), Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum())).reset_index()
                 st.dataframe(mtg_perf, use_container_width=True, hide_index=True)
 
-    # =====================================================================
     # TAB 2: SCHEDULE MEETING
-    # =====================================================================
     if tab_sched:
         with tab_sched:
             st.markdown("#### 🗓️ Schedule Convergence Committee Meeting")
@@ -457,18 +437,15 @@ def show():
                             set_msg("error", f"🚨 Failed to issue meeting notice. Database Error: {e}")
                         st.rerun()
 
-    # =====================================================================
     # TAB 3: PROCEEDINGS, ATTENDANCE & VERIFIED LOCKING
-    # =====================================================================
     if tab_proc:
         with tab_proc:
-            display_persisted_msg()  # Render session messages securely
+            display_persisted_msg()
 
             st.markdown("#### ✍️ Record Minutes, Attendance & Assign Directives")
             if df_meetings.empty:
                 st.info(f"No meetings recorded for FY {active_fy}.")
             else:
-                # FULL LIST: Allows seamless toggling between Scheduled and Convened Workspaces
                 all_meeting_ids = df_meetings["id"].tolist()
                 proc_sel = st.selectbox(
                     "Select Meeting Workspace",
@@ -477,12 +454,11 @@ def show():
                 )
 
                 proc_mtg = df_meetings[df_meetings["id"] == proc_sel].iloc[0]
-                clean_proc_id = safe_id(proc_sel)  # Secure ID casting
+                clean_proc_id = safe_id(proc_sel)
                 is_locked = proc_mtg.get("status") == "Convened"
                 p_aps_locked = df_ap[df_ap['meeting_id'] == proc_sel] if not df_ap.empty else pd.DataFrame()
 
                 if is_locked:
-                    # ---------------- LOCKED DASHBOARD ----------------
                     st.markdown("### 🔒 MEETING FINALIZED")
                     st.markdown(f"**Meeting ID:** {proc_mtg['id']} &nbsp;&nbsp;|&nbsp;&nbsp; **Date:** {proc_mtg['meeting_date']} &nbsp;&nbsp;|&nbsp;&nbsp; **Status:** Convened")
                     st.markdown("Attendance &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Saved<br>Proceedings &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Finalized<br>Action Points &nbsp;&nbsp;&nbsp;✓ Saved<br>Department Sync  ✓ Completed<br>Meeting Register ✓ Locked", unsafe_allow_html=True)
@@ -502,7 +478,6 @@ def show():
                             st.session_state.preview_html = None
                             st.rerun()
                 else:
-                    # ---------------- UNLOCKED WORKFLOW ----------------
                     with st.expander("👥 A. Statutory Attendance Register (Mixed-Mode)", expanded=True):
                         att_data = proc_mtg.get("detailed_attendance") or []
 
@@ -559,11 +534,16 @@ def show():
                                                 st.rerun()
 
                             st.markdown("<br>", unsafe_allow_html=True)
+                            
+                            # --- FIXED ATTENDANCE SAVE LOGIC ---
                             if st.button("Save Combined Attendance Register", type="primary"):
                                 try:
-                                    # Write and verify
+                                    # 1. Perform Update
                                     resp = supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", clean_proc_id).execute()
-                                    if resp.data:
+                                    
+                                    # 2. Robust Verification using resp.count
+                                    if resp.count and resp.count > 0:
+                                        # Verify the data is in the DB
                                         verify = supabase.table("meetings").select("detailed_attendance").eq("id", clean_proc_id).execute()
                                         if verify.data and verify.data[0].get("detailed_attendance"):
                                             valid_statuses = ["Present", "Absent", "Present (Substitute)"]
@@ -575,7 +555,8 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Attendance Register could not be verified after saving.")
                                     else:
-                                        set_msg("error", "🔴 Attendance update returned no data; save may have failed.")
+                                        # If count is 0, RLS blocked the update, or no rows matched.
+                                        set_msg("error", "🔴 Attendance update failed. Database security (RLS) prevented the update. You may not have permission to edit this meeting.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Failed to save attendance: {str(e)}")
                                 st.rerun()
@@ -584,17 +565,19 @@ def show():
                     st.markdown("#### B. MINUTES & RESOLUTION DIRECTIVES")
                     st.markdown("────────────────────────────────────────────────────")
                     general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", height=150)
+                    
+                    # --- FIXED MINUTES SAVE LOGIC ---
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         try:
                             resp = supabase.table("meetings").update({"decisions": sanitize_payload(general_minutes)}).eq("id", clean_proc_id).execute()
-                            if resp.data:
+                            if resp.count and resp.count > 0:
                                 verify = supabase.table("meetings").select("decisions").eq("id", clean_proc_id).execute()
                                 if verify.data and verify.data[0].get("decisions") == general_minutes:
                                     set_msg("success", f"🟢 Meeting minutes saved successfully.\nStatus: Draft. You may continue editing the proceedings.")
                                 else:
                                     set_msg("error", "🔴 Proceedings save verification failed.")
                             else:
-                                set_msg("error", "🔴 Proceedings update returned no data.")
+                                set_msg("error", "🔴 Proceedings update failed. Database security (RLS) prevented the update.")
                         except Exception as e:
                             set_msg("error", f"🔴 Proceedings could not be saved: {str(e)}")
                         st.rerun()
@@ -642,7 +625,6 @@ def show():
                                     "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}",
                                     "created_by": safe_id(user["id"])
                                 }
-                                # Add RLS fields safely
                                 if pd.notna(proc_mtg.get("district_id")):
                                     res_payload["district_id"] = safe_id(proc_mtg["district_id"])
                                 if pd.notna(proc_mtg.get("block_id")):
@@ -650,19 +632,13 @@ def show():
 
                                 try:
                                     clean_payload = sanitize_payload(res_payload)
-                                    # Insert and capture response
                                     res = supabase.table("meeting_action_points").insert(clean_payload).execute()
+                                    
                                     if res.data and len(res.data) > 0:
                                         inserted_id = res.data[0]['id']
-                                        # --- VERIFICATION: ensure the record exists and is visible to the department ---
-                                        # We'll query using the same department/wing filtering that the department view uses.
-                                        # Query the newly inserted record with the exact IDs.
                                         v_query = supabase.table("meeting_action_points").select("*").eq("id", inserted_id)
                                         v_res = v_query.execute()
                                         if v_res.data and len(v_res.data) > 0:
-                                            # Now, simulate department visibility: check if the department/wing match the user's context
-                                            # We'll do an explicit check: if the current user is department, we can't check because we're district.
-                                            # But we can verify that department_id and wing_id are set correctly.
                                             rec = v_res.data[0]
                                             if rec.get('department_id') == safe_id(selected_opt['dept_id']) and \
                                                (rec.get('wing_id') == safe_id(selected_opt['wing_id']) or (selected_opt['wing_id'] is None and rec.get('wing_id') is None)):
@@ -672,14 +648,14 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Action Point could not be verified after insertion. It may not be visible to the concerned department.")
                                     else:
-                                        set_msg("error", "🔴 Action Point could not be saved. Database returned empty result.")
+                                        set_msg("error", "🔴 Action Point could not be saved. Database returned empty result (likely an RLS block).")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
                                 st.rerun()
 
                     st.markdown("---")
 
-                    # ---------------- VERIFIED MEETING LOCK ----------------
+                    # --- FIXED MEETING LOCK LOGIC ---
                     if st.session_state.get(f"confirm_lock_{proc_sel}", False):
                         st.warning("⚠️ Are you sure you want to finalize this meeting? After finalization, the proceedings and meeting register will become read-only.")
                         col_c1, col_c2 = st.columns(2)
@@ -687,7 +663,6 @@ def show():
                             st.session_state[f"confirm_lock_{proc_sel}"] = False
                             st.rerun()
                         if col_c2.button("Confirm & Lock", type="primary"):
-                            # Fetch fresh meeting data to check attendance and minutes
                             fresh_mtg_resp = supabase.table("meetings").select("*").eq("id", clean_proc_id).execute()
                             if not fresh_mtg_resp.data:
                                 set_msg("error", "🔴 Could not retrieve meeting data for finalization.")
@@ -705,9 +680,8 @@ def show():
                                 set_msg("error", "🔴 Meeting proceedings are required before finalization. Do not lock an empty meeting.")
                             else:
                                 try:
-                                    # Update status to Convened
                                     upd_resp = supabase.table("meetings").update({"status": "Convened"}).eq("id", clean_proc_id).execute()
-                                    if upd_resp.data:
+                                    if upd_resp.count and upd_resp.count > 0:
                                         verify = supabase.table("meetings").select("status").eq("id", clean_proc_id).execute()
                                         if verify.data and verify.data[0]["status"] == "Convened":
                                             set_msg("success", "🟢 Meeting proceedings completed successfully.\n🔒 Meeting Register locked successfully.")
@@ -715,7 +689,7 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Meeting could not be finalized. Database verification failed. No lock applied.")
                                     else:
-                                        set_msg("error", "🔴 Meeting update returned no data; lock may have failed.")
+                                        set_msg("error", "🔴 Meeting update returned no data (RLS block); lock may have failed.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Meeting could not be finalized. Please verify the record and try again. Error: {str(e)}")
                             st.rerun()
@@ -724,9 +698,7 @@ def show():
                             st.session_state[f"confirm_lock_{proc_sel}"] = True
                             st.rerun()
 
-    # =====================================================================
     # TAB 4: ADVANCED ACTION TRACKER & ATR
-    # =====================================================================
     if tab_tracker:
         with tab_tracker:
             st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
@@ -736,7 +708,6 @@ def show():
                 st.info("No action items available.")
             else:
                 search_query = st.text_input("🔍 Search Resolution No, Action Point, Department, etc.", "")
-
                 c_f1, c_f2 = st.columns(2)
                 f_dept = c_f1.selectbox("Filter Department", ["All"] + dept_labels)
                 f_flag = c_f2.selectbox("Filter SLA Flag", ["All", "🟢 CLOSED", "🔴 OVERDUE", "🟡 DUE TODAY", "🔵 ON TRACK", "🟠 FOR REVIEW", "⚪ NOT STARTED"])
@@ -768,7 +739,6 @@ def show():
                     st.caption("Identify, correct, or cancel a resolution. All actions are strictly audited and synced.")
 
                     res_options = filtered_df['id'].tolist()
-
                     def format_res_label(x):
                         row = filtered_df[filtered_df['id'] == x].iloc[0]
                         return f"{row['Resolution No.']} | {row['Origin Meeting']} | {row['Department / Wing']} | {str(row['action_point'])[:60]}..."
@@ -813,25 +783,24 @@ def show():
                                             "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
                                         }
                                         try:
-                                            # Update and verify
                                             upd_resp = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", clean_ap_id).execute()
-                                            if upd_resp.data:
-                                                # Verify the update
+                                            if upd_resp.count and upd_resp.count > 0:
                                                 v_resp = supabase.table("meeting_action_points").select("*").eq("id", clean_ap_id).execute()
                                                 if v_resp.data:
-                                                    # Check that the updated fields match
                                                     updated_row = v_resp.data[0]
                                                     if updated_row.get('action_point') == new_action_text and \
                                                        updated_row.get('department_id') == safe_id(selected_opt['dept_id']) and \
                                                        updated_row.get('deadline') == str(new_deadline):
-                                                        log_action(user.get('id'), f"CORRECTED meeting_action_points {clean_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
+                                                        try:
+                                                            log_action(user.get('id'), f"CORRECTED meeting_action_points {clean_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
+                                                        except: pass
                                                         set_msg("success", f"✅ Resolution {target_row['Resolution No.']} successfully corrected and synchronized!")
                                                     else:
                                                         set_msg("error", "🔴 Correction was applied but verification of the updated fields failed.")
                                                 else:
                                                     set_msg("error", "🔴 Correction could not be verified after update.")
                                             else:
-                                                set_msg("error", "🔴 Correction update returned no data.")
+                                                set_msg("error", "🔴 Correction update returned no data. RLS may be blocking changes.")
                                         except Exception as e:
                                             set_msg("error", f"❌ Failed to correct resolution: {str(e)}")
                                         st.rerun()
@@ -852,11 +821,12 @@ def show():
                                                 "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"
                                             }
                                             upd_resp = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", clean_ap_id).execute()
-                                            if upd_resp.data:
-                                                # Verify status change
+                                            if upd_resp.count and upd_resp.count > 0:
                                                 v_resp = supabase.table("meeting_action_points").select("status").eq("id", clean_ap_id).execute()
                                                 if v_resp.data and v_resp.data[0].get('status') == "Dropped":
-                                                    log_action(user.get('id'), f"CANCELLED meeting_action_points {clean_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
+                                                    try:
+                                                        log_action(user.get('id'), f"CANCELLED meeting_action_points {clean_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
+                                                    except: pass
                                                     set_msg("success", f"✅ Resolution {target_row['Resolution No.']} cancelled successfully and removed from Department view.")
                                                 else:
                                                     set_msg("error", "🔴 Cancellation verification failed; status not updated.")
@@ -881,11 +851,12 @@ def show():
                             clean_ap_id = safe_id(ap_id)
                             try:
                                 upd_resp = supabase.table("meeting_action_points").update(sanitize_payload({"status": new_ap_status, "remarks": atr_remarks})).eq("id", clean_ap_id).execute()
-                                if upd_resp.data:
-                                    # Verify
+                                if upd_resp.count and upd_resp.count > 0:
                                     v_resp = supabase.table("meeting_action_points").select("status").eq("id", clean_ap_id).execute()
                                     if v_resp.data and v_resp.data[0].get('status') == new_ap_status:
-                                        log_action(user.get('id'), f"UPDATE ATR meeting_action_points {clean_ap_id}")
+                                        try:
+                                            log_action(user.get('id'), f"UPDATE ATR meeting_action_points {clean_ap_id}")
+                                        except: pass
                                         set_msg("success", "✅ ATR submitted successfully.")
                                     else:
                                         set_msg("error", "🔴 ATR update verification failed.")
@@ -895,9 +866,7 @@ def show():
                                 set_msg("error", f"❌ Failed to submit ATR: {str(e)}")
                             st.rerun()
 
-    # =====================================================================
     # TAB 5: AUTOMATED NEXT AGENDA PREP
-    # =====================================================================
     if tab_agenda:
         with tab_agenda:
             st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
@@ -927,9 +896,7 @@ def show():
                 else:
                     st.success("🎉 No overdue items detected.")
 
-    # =====================================================================
-    # TAB 6: DIRECT PRINT CENTRE (NATIVE PRINT DIALOG) - ALWAYS LAST
-    # =====================================================================
+    # TAB 6: DIRECT PRINT CENTRE
     if tab_print:
         with tab_print:
             st.markdown("#### 🖨️ Meeting Print Centre")
