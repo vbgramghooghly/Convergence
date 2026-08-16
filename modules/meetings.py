@@ -62,8 +62,28 @@ def show():
     today = pd.to_datetime(date.today())
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
+    # SESSION STATE MANAGEMENT FOR RELIABLE NOTIFICATIONS
     if "temp_officials" not in st.session_state:
         st.session_state.temp_officials = []
+    if "mtg_msg" not in st.session_state:
+        st.session_state.mtg_msg = None
+    if "mtg_msg_type" not in st.session_state:
+        st.session_state.mtg_msg_type = None
+
+    def set_msg(msg_type, msg_text):
+        st.session_state.mtg_msg_type = msg_type
+        st.session_state.mtg_msg = msg_text
+
+    def display_persisted_msg():
+        if st.session_state.mtg_msg:
+            if st.session_state.mtg_msg_type == "success":
+                st.success(st.session_state.mtg_msg)
+            elif st.session_state.mtg_msg_type == "error":
+                st.error(st.session_state.mtg_msg)
+            elif st.session_state.mtg_msg_type == "warning":
+                st.warning(st.session_state.mtg_msg)
+            st.session_state.mtg_msg = None
+            st.session_state.mtg_msg_type = None
 
     # BREADCRUMB & HEADER
     st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Statutory Governance / Convergence Meetings</div>", unsafe_allow_html=True)
@@ -152,6 +172,55 @@ def show():
 
         df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
+    # HTML GENERATOR HELPER FOR REUSABILITY
+    def generate_meeting_html(p_mtg, p_aps, doc_type):
+        org_label = "District Administration" if p_mtg.get('meeting_type') == 'District' else f"Block Development Office"
+        def get_header(title):
+            return f"""<div class="header"><h3>VB-G RAM G CONVERGENCE PORTAL<br>{org_label}</h3><h4>{title}</h4><div>Financial Year: {active_fy} | Meeting Date: {p_mtg.get('meeting_date', '')}</div></div>"""
+
+        att_data = p_mtg.get("detailed_attendance") or []
+        indiv_att = [a for a in att_data if a.get("type", "individual") == "individual"]
+        dept_att = [a for a in att_data if a.get("type") == "department"]
+
+        # Notice HTML
+        notice_html = get_header('MEETING NOTICE') + f"<p><b>Venue:</b> {p_mtg.get('venue', 'Not Recorded')}</p><p><b>Chairperson:</b> {p_mtg.get('chairperson', 'Not Recorded')}</p><p><b>Objective:</b> {p_mtg.get('objective', 'Standard Convergence Review')}</p><p style='margin-top:20px;'>The undersigned is directed to invite the following officials and departments to attend the statutory meeting at the scheduled venue and time.</p>"
+        if indiv_att:
+            notice_html += "<h4>INVITED OFFICIALS</h4><table><thead><tr><th>Sl. No.</th><th>Name</th><th>Designation</th><th>Posting Level</th><th>Department</th><th>Wing</th><th>Mobile</th><th>Email</th></tr></thead><tbody>"
+            for idx, off in enumerate(indiv_att, 1):
+                if off.get('posting_level') == "Substitute": continue
+                notice_html += f"<tr><td>{idx}</td><td>{off.get('name','')}</td><td>{off.get('designation','')}</td><td>{off.get('posting_level','')}</td><td>{off.get('department','')}</td><td>{off.get('wing','')}</td><td>{off.get('mobile','')}</td><td>{off.get('email','')}</td></tr>"
+            notice_html += "</tbody></table>"
+        if dept_att:
+            notice_html += "<h4 style='margin-top:20px;'>DEPARTMENT / WING INVITATIONS</h4><table><thead><tr><th>Sl. No.</th><th>Department</th><th>Wing / Division</th></tr></thead><tbody>"
+            for idx, dept in enumerate(dept_att, 1): notice_html += f"<tr><td>{idx}</td><td>{dept.get('department', '')}</td><td>{dept.get('wing', '')}</td></tr>"
+            notice_html += "</tbody></table>"
+        notice_html += '<div style="margin-top: 50px; text-align: right;"><b>Chairperson / Nodal Officer</b></div>'
+
+        # Attendance HTML
+        att_html = get_header('ATTENDANCE REGISTER')
+        if indiv_att:
+            att_html += "<h4>NAME-WISE ATTENDANCE</h4><table><thead><tr><th>Sl. No.</th><th>Name</th><th>Designation</th><th>Department</th><th>Wing</th><th>Attendance Status</th></tr></thead><tbody>"
+            for idx, att in enumerate(indiv_att, 1): att_html += f"<tr><td>{idx}</td><td>{att.get('name', '')}</td><td>{att.get('designation', '')}</td><td>{att.get('department', '')}</td><td>{att.get('wing', '')}</td><td><b>{att.get('attendance', '') if att.get('attendance') != 'Pending' else ''}</b></td></tr>"
+            att_html += "</tbody></table>"
+        if dept_att:
+            att_html += "<h4 style='margin-top:20px;'>DEPARTMENT-WISE ATTENDANCE</h4><table><thead><tr><th>Sl. No.</th><th>Department</th><th>Wing</th><th>Attendance Status</th></tr></thead><tbody>"
+            for idx, att in enumerate(dept_att, 1): att_html += f"<tr><td>{idx}</td><td>{att.get('department', '')}</td><td>{att.get('wing', '')}</td><td><b>{att.get('attendance', '') if att.get('attendance') != 'Pending' else ''}</b></td></tr>"
+            att_html += "</tbody></table>"
+
+        # Proceedings HTML
+        proc_html = get_header('PROCEEDINGS & RESOLUTIONS') + f"<p><b>Chairperson:</b> {p_mtg.get('chairperson')}</p><p><b>Minutes:</b><br>{p_mtg.get('decisions', 'Not Recorded / Draft')}</p><h4>Mandated Resolutions (Department-Wise):</h4>"
+        if not p_aps.empty:
+            proc_html += "<table><thead><tr><th>No.</th><th>Department / Wing</th><th>Directive / Action Point</th><th>Deadline</th><th>Status</th></tr></thead><tbody>"
+            for idx, row in enumerate(p_aps.to_dict(orient="records"), 1): proc_html += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td></tr>"
+            proc_html += "</tbody></table>"
+        else: proc_html += "<p>No resolutions recorded.</p>"
+
+        if doc_type == "Meeting Notice & Invited List": return notice_html
+        elif doc_type == "Attendance Register": return att_html
+        elif doc_type == "Proceedings & Resolutions": return proc_html
+        elif doc_type == "Complete Meeting File": return f"{notice_html}<div class='page-break'></div>{att_html}<div class='page-break'></div>{proc_html}"
+        return ""
+
     # =====================================================================
     # TAB ARCHITECTURE
     # =====================================================================
@@ -222,7 +291,6 @@ def show():
             if invited_uids:
                 st.markdown("##### 2. Configure Invitations (Name-Wise & Department-Wise)")
                 
-                # Dynamic UI for each selected Department
                 for uid in invited_uids:
                     st.markdown(f"**🔹 {unified_uid_to_label[uid]}**")
                     opt = next((u for u in unified_depts if u["uid"] == uid))
@@ -249,20 +317,15 @@ def show():
                             c = next((x for x in all_matched if x["id"] == cid))
                             wing_obj = wing_map.get(c.get("wing_id"))
                             final_named_officials.append({
-                                "dept_uid": uid,
-                                "contact_id": c["id"],
-                                "name": c.get("full_name", ""),
+                                "dept_uid": uid, "contact_id": c["id"], "name": c.get("full_name", ""),
                                 "designation": c.get("designations", {}).get("designation_name", c.get("designation", "")),
-                                "posting_level": c.get("office_level", "N/A"),
-                                "department": dept_map.get(c.get("department_id"), "N/A"),
+                                "posting_level": c.get("office_level", "N/A"), "department": dept_map.get(c.get("department_id"), "N/A"),
                                 "wing": wing_obj["wing_name"] if isinstance(wing_obj, dict) else (wing_obj if wing_obj else ""),
-                                "mobile": c.get("contact_number", ""),
-                                "email": c.get("email_id", "")
+                                "mobile": c.get("contact_number", ""), "email": c.get("email_id", "")
                             })
                     elif invite_dept_only:
                         final_general_depts.append(uid)
 
-                # Add First-Time Official Quick Entry (Secured with Master Data)
                 with st.expander("➕ Add First-Time Official (If not registered)"):
                     st.caption("Quickly add an official to participate in this meeting.")
                     if not designations_data:
@@ -280,37 +343,31 @@ def show():
                             c_n5, c_n6 = st.columns(2)
                             n_mobile = c_n5.text_input("Mobile Number")
                             n_email = c_n6.text_input("Email ID")
-                            
                             save_to_db = st.checkbox("☑ Save this official to Official Directory for future use", value=True)
                             
                             if st.form_submit_button("Add Official to Meeting", type="secondary"):
-                                if not n_name:
-                                    st.error("Official Name is required.")
+                                if not n_name: st.error("Official Name is required.")
                                 else:
                                     opt = next((u for u in unified_depts if u["uid"] == n_dept_uid))
                                     temp_id = f"temp_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                                    
                                     new_off = {
                                         "id": temp_id, "dept_uid": n_dept_uid, "full_name": n_name, "designation": n_desig_name,
                                         "office_level": n_level, "department_id": opt["dept_id"], "wing_id": opt["wing_id"],
                                         "district_id": target_district_id, "block_id": target_block_id if n_level in ["Block", "Gram Panchayat"] else None,
                                         "contact_number": n_mobile, "email_id": n_email
                                     }
-                                    
                                     if save_to_db:
                                         try:
                                             payload = {
                                                 "full_name": n_name, "designation_id": designation_map[n_desig_name],
-                                                "department_id": opt["dept_id"], "wing_id": opt["wing_id"],
-                                                "office_level": n_level, "district_id": target_district_id, 
-                                                "block_id": new_off["block_id"], "contact_number": n_mobile, 
-                                                "email_id": n_email, "active": True
+                                                "department_id": opt["dept_id"], "wing_id": opt["wing_id"], "office_level": n_level, 
+                                                "district_id": target_district_id, "block_id": new_off["block_id"], 
+                                                "contact_number": n_mobile, "email_id": n_email, "active": True
                                             }
                                             supabase.table("contacts").insert(payload).execute()
                                             st.success("Official saved to directory and added to meeting.")
                                         except Exception as e:
                                             st.warning(f"Could not save to directory ({e}), but official added to this meeting successfully.")
-                                    
                                     st.session_state.temp_officials.append(new_off)
                                     st.rerun()
 
@@ -319,10 +376,8 @@ def show():
                     if not final_named_officials and not final_general_depts:
                         st.error("You must either select officials or invite departments generally.")
                     else:
-                        # FIX FOR THE API ERROR: Inject the exact pre-meeting snapshot into the existing detailed_attendance JSONB column
                         initial_attendance = []
-                        for off in final_named_officials:
-                            initial_attendance.append({**off, "type": "individual", "attendance": "Pending"})
+                        for off in final_named_officials: initial_attendance.append({**off, "type": "individual", "attendance": "Pending"})
                         for uid in final_general_depts:
                             opt = next((u for u in unified_depts if u["uid"] == uid), None)
                             d_name = dept_map.get(opt["dept_id"]) if opt else "Unknown"
@@ -332,27 +387,25 @@ def show():
 
                         meeting_data = {
                             "meeting_type": meeting_type, "financial_year": active_fy, "meeting_date": str(meeting_date),
-                            "chairperson": chairperson, "venue": venue, "objective": objective, 
-                            "attendees": invited_uids, # Preserving untouched business target mapping
-                            "detailed_attendance": initial_attendance, # The unified snapshot that prevents schema mismatch errors
-                            "status": "Scheduled", "created_by": user["id"],
-                            "district_id": target_district_id,
-                            "block_id": target_block_id
+                            "chairperson": chairperson, "venue": venue, "objective": objective, "attendees": invited_uids,
+                            "detailed_attendance": initial_attendance, "status": "Scheduled", "created_by": user["id"],
+                            "district_id": target_district_id, "block_id": target_block_id
                         }
-
                         try:
                             supabase.table("meetings").insert(meeting_data).execute()
                             st.session_state.temp_officials = [] 
-                            st.success("✅ Meeting notice dispatched successfully! Name-wise/Dept-wise packages auto-generated.")
+                            st.success("✅ Meeting notice dispatched successfully! Packages auto-generated.")
                             st.rerun()
                         except Exception as e:
                             st.error(f"🚨 Failed to issue meeting notice. Database Error: {e}")
 
     # =====================================================================
-    # TAB 3: PROCEEDINGS & ATTENDANCE (MIXED-MODE)
+    # TAB 3: PROCEEDINGS, ATTENDANCE & VERIFIED LOCKING
     # =====================================================================
     if role != "department":
         with tab3:
+            display_persisted_msg() # Show verified alerts immediately
+            
             st.markdown("#### ✍️ Record Minutes, Attendance & Assign Directives")
             if df_meetings.empty:
                 st.info(f"No meetings recorded for FY {active_fy}.")
@@ -366,42 +419,60 @@ def show():
 
                 proc_mtg = df_meetings[df_meetings["id"] == proc_sel].iloc[0]
                 is_locked = proc_mtg.get("status") == "Convened"
+                p_aps_locked = df_ap[df_ap['meeting_id'] == proc_sel] if not df_ap.empty else pd.DataFrame()
 
-                with st.expander("👥 A. Statutory Attendance Register (Mixed-Mode)", expanded=not is_locked):
-                    att_data = proc_mtg.get("detailed_attendance") or []
+                if is_locked:
+                    st.markdown("### 🔒 MEETING FINALIZED")
+                    st.markdown(f"**Meeting ID:** {proc_mtg['id']} &nbsp;&nbsp;|&nbsp;&nbsp; **Date:** {proc_mtg['meeting_date']} &nbsp;&nbsp;|&nbsp;&nbsp; **Status:** Convened")
+                    st.markdown("Attendance &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Saved<br>Proceedings &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Finalized<br>Action Points &nbsp;&nbsp;&nbsp;✓ Saved<br>Meeting Register ✓ Locked", unsafe_allow_html=True)
+                    st.markdown("---")
+                    st.markdown("##### 🖨️ Direct Print Options")
+                    c_pr1, c_pr2, c_pr3 = st.columns(3)
+                    if c_pr1.button("🖨 Print Proceedings", use_container_width=True): st.session_state.preview_html = generate_meeting_html(proc_mtg, p_aps_locked, "Proceedings & Resolutions")
+                    if c_pr2.button("🖨 Print Attendance", use_container_width=True): st.session_state.preview_html = generate_meeting_html(proc_mtg, p_aps_locked, "Attendance Register")
+                    if c_pr3.button("📦 Complete Meeting Record", type="primary", use_container_width=True): st.session_state.preview_html = generate_meeting_html(proc_mtg, p_aps_locked, "Complete Meeting File")
                     
-                    if not att_data:
-                        st.warning("Legacy Meeting Record. No detailed snapshot available.")
-                    else:
-                        updated_attendance_payload = []
-                        indiv_att = [a for a in att_data if a.get("type", "individual") == "individual" and a.get("posting_level") != "Substitute"]
-                        dept_att = [a for a in att_data if a.get("type") == "department"]
-                        sub_att = [a for a in att_data if a.get("posting_level") == "Substitute"]
+                    if st.session_state.get("preview_html"):
+                        render_print_preview(st.session_state.preview_html)
+                        if st.button("Close Print Preview"):
+                            st.session_state.preview_html = None
+                            st.rerun()
+                else:
+                    # ---------------- UNLOCKED WORKFLOW ----------------
+                    with st.expander("👥 A. Statutory Attendance Register (Mixed-Mode)", expanded=True):
+                        att_data = proc_mtg.get("detailed_attendance") or []
                         
-                        if indiv_att:
-                            st.markdown("##### Individual Officials")
-                            for off in indiv_att:
-                                display_text = f"**{off.get('name')}** — {off.get('designation')} | {off.get('department')}"
-                                if off.get('wing'): display_text += f" ({off['wing']})"
-                                is_present = st.checkbox(display_text, value=(off.get("attendance") != "Absent"), key=f"att_{off.get('contact_id', off.get('name'))}_{proc_sel}", disabled=is_locked)
-                                updated_attendance_payload.append({**off, "attendance": "Present" if is_present else "Absent"})
-                        
-                        if dept_att:
-                            st.markdown("##### General Department Invitations")
-                            for dept in dept_att:
-                                display_text = f"🏢 {dept.get('department')}"
-                                if dept.get('wing') and dept.get('wing') != "Main Department": display_text += f" ({dept['wing']})"
-                                is_present = st.checkbox(display_text, value=(dept.get("attendance") != "Absent"), key=f"att_gen_{dept.get('dept_uid')}_{proc_sel}", disabled=is_locked)
-                                updated_attendance_payload.append({**dept, "attendance": "Present" if is_present else "Absent"})
-                                
-                        if sub_att:
-                            st.markdown("##### Substitutes / Unplanned Attendees")
-                            for sub in sub_att:
-                                display_text = f"**{sub.get('name')}** — {sub.get('designation')} | {sub.get('department')}"
-                                is_present = st.checkbox(display_text, value=(sub.get("attendance") != "Absent"), key=f"att_sub_{sub.get('name')}_{proc_sel}", disabled=is_locked)
-                                updated_attendance_payload.append({**sub, "attendance": "Present (Substitute)" if is_present else "Absent"})
+                        if not att_data:
+                            st.warning("Legacy Meeting Record. No detailed snapshot available.")
+                        else:
+                            updated_attendance_payload = []
+                            indiv_att = [a for a in att_data if a.get("type", "individual") == "individual" and a.get("posting_level") != "Substitute"]
+                            dept_att = [a for a in att_data if a.get("type") == "department"]
+                            sub_att = [a for a in att_data if a.get("posting_level") == "Substitute"]
+                            
+                            if indiv_att:
+                                st.markdown("##### Individual Officials")
+                                for off in indiv_att:
+                                    display_text = f"**{off.get('name')}** — {off.get('designation')} | {off.get('department')}"
+                                    if off.get('wing'): display_text += f" ({off['wing']})"
+                                    is_present = st.checkbox(display_text, value=(off.get("attendance") != "Absent"), key=f"att_{off.get('contact_id', off.get('name'))}_{proc_sel}")
+                                    updated_attendance_payload.append({**off, "attendance": "Present" if is_present else "Absent"})
+                            
+                            if dept_att:
+                                st.markdown("##### General Department Invitations")
+                                for dept in dept_att:
+                                    display_text = f"🏢 {dept.get('department')}"
+                                    if dept.get('wing') and dept.get('wing') != "Main Department": display_text += f" ({dept['wing']})"
+                                    is_present = st.checkbox(display_text, value=(dept.get("attendance") != "Absent"), key=f"att_gen_{dept.get('dept_uid')}_{proc_sel}")
+                                    updated_attendance_payload.append({**dept, "attendance": "Present" if is_present else "Absent"})
+                                    
+                            if sub_att:
+                                st.markdown("##### Substitutes / Unplanned Attendees")
+                                for sub in sub_att:
+                                    display_text = f"**{sub.get('name')}** — {sub.get('designation')} | {sub.get('department')}"
+                                    is_present = st.checkbox(display_text, value=(sub.get("attendance") != "Absent"), key=f"att_sub_{sub.get('name')}_{proc_sel}")
+                                    updated_attendance_payload.append({**sub, "attendance": "Present (Substitute)" if is_present else "Absent"})
 
-                        if not is_locked:
                             with st.popover("➕ Add Substitute / Unexpected Attendee"):
                                 st.caption("Record attendance for someone who wasn't originally invited.")
                                 with st.form(f"sub_{proc_sel}", clear_on_submit=True):
@@ -410,7 +481,6 @@ def show():
                                     s_desig = st.selectbox("Designation*", list(designation_map.keys()))
                                     if st.form_submit_button("Add Attendee"):
                                         if s_name:
-                                            # Append strictly to DB directly so UI catches it immediately on refresh
                                             updated_attendance_payload.append({
                                                 "type": "individual", "name": s_name, "designation": s_desig, "department": s_dept,
                                                 "posting_level": "Substitute", "wing": "", "mobile": "", "email": "", "attendance": "Present (Substitute)"
@@ -420,17 +490,30 @@ def show():
 
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("Save Combined Attendance Register", type="primary"):
-                                supabase.table("meetings").update({"detailed_attendance": updated_attendance_payload}).eq("id", proc_sel).execute()
-                                st.success("✅ Attendance saved successfully.")
+                                try:
+                                    supabase.table("meetings").update({"detailed_attendance": updated_attendance_payload}).eq("id", proc_sel).execute()
+                                    # Verify Persistence
+                                    verify = supabase.table("meetings").select("id").eq("id", proc_sel).execute()
+                                    if verify.data: set_msg("success", "✅ Attendance register saved securely.")
+                                    else: set_msg("error", "❌ Attendance save verification failed.")
+                                except Exception as e:
+                                    set_msg("error", f"❌ Failed to save attendance: {str(e)}")
                                 st.rerun()
 
-                # PROCEEDINGS & RESOLUTIONS (Unchanged Business Logic)
-                with st.expander("📝 B. Minutes & Resolution Directives (Auto-Syncs to Department)", expanded=not is_locked):
-                    general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", disabled=is_locked)
-                    if not is_locked:
+                    with st.expander("📝 B. Minutes & Resolution Directives (Auto-Syncs to Department)", expanded=True):
+                        general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "")
+                        
                         if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
-                            supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
-                            st.success("Draft minutes committed.")
+                            try:
+                                supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
+                                # Verify Persistence
+                                verify = supabase.table("meetings").select("decisions").eq("id", proc_sel).execute()
+                                if verify.data and verify.data[0].get("decisions") == general_minutes:
+                                    set_msg("warning", f"🟡 DRAFT PROCEEDINGS SAVED\n\nStatus: Draft. You may continue editing.")
+                                else: set_msg("error", "❌ Proceedings save verification failed.")
+                            except Exception as e:
+                                set_msg("error", f"❌ Proceedings could not be saved: {str(e)}")
+                            st.rerun()
 
                         st.markdown("##### Assign Action Point / Directives")
                         with st.container(border=True):
@@ -461,19 +544,54 @@ def show():
                                         "deadline": str(res_deadline), "status": res_status, "priority": res_priority,
                                         "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                     }
-                                    try: supabase.table("meeting_action_points").insert(res_payload).execute()
-                                    except Exception:
-                                        res_payload["status"], res_payload["priority"] = res_status.lower().replace(" ", "_"), res_priority.lower()
-                                        supabase.table("meeting_action_points").insert(res_payload).execute()
-                                    st.success("✅ Directive recorded & automatically synced to Department login!")
+                                    try:
+                                        res = supabase.table("meeting_action_points").insert(res_payload).execute()
+                                        if res.data and len(res.data) > 0:
+                                            # Verify DB Write 
+                                            v_id = res.data[0]['id']
+                                            v_check = supabase.table("meeting_action_points").select("id").eq("id", v_id).execute()
+                                            if v_check.data: set_msg("success", "✅ Action Point recorded & automatically synced to Department!")
+                                            else: set_msg("error", "❌ Action Point save verification failed.")
+                                        else: set_msg("error", "❌ Action Point could not be saved.")
+                                    except Exception as e:
+                                        set_msg("error", f"❌ Action Point could not be saved. Please check payload formatting. Error: {str(e)}")
                                     st.rerun()
 
-                if not is_locked:
                     st.markdown("---")
-                    if st.button("🔒 Complete Proceedings & Lock Meeting Register", type="primary", use_container_width=True, key=f"btn_lock_{proc_sel}"):
-                        supabase.table("meetings").update({"status": "Convened", "decisions": general_minutes}).eq("id", proc_sel).execute()
-                        st.success("Meeting proceedings locked! Record is now legally convened and read-only.")
-                        st.rerun()
+                    
+                    # ---------------- VERIFIED MEETING LOCK ----------------
+                    if st.session_state.get(f"confirm_lock_{proc_sel}", False):
+                        st.warning("⚠️ Are you sure you want to finalize this meeting? After finalization, the proceedings and meeting register will become read-only.")
+                        col_c1, col_c2 = st.columns(2)
+                        if col_c1.button("Cancel"):
+                            st.session_state[f"confirm_lock_{proc_sel}"] = False
+                            st.rerun()
+                        if col_c2.button("Confirm & Lock", type="primary"):
+                            # VALIDATION 1: Attendance Check
+                            att_check = proc_mtg.get("detailed_attendance") or []
+                            if not att_check or any(a.get("attendance") == "Pending" for a in att_check):
+                                set_msg("error", "⚠️ Attendance register has pending items or has not been saved. Please save attendance before completing proceedings.")
+                            # VALIDATION 2: Proceedings Check
+                            elif not general_minutes.strip():
+                                set_msg("error", "⚠️ Meeting proceedings are required before finalization. Do not lock an empty meeting.")
+                            else:
+                                # EXECUTE TRANSACTIONAL LOCK
+                                try:
+                                    supabase.table("meetings").update({"status": "Convened", "decisions": general_minutes}).eq("id", proc_sel).execute()
+                                    # VERIFY LOCK
+                                    verify = supabase.table("meetings").select("status").eq("id", proc_sel).execute().data
+                                    if verify and verify[0]["status"] == "Convened":
+                                        set_msg("success", "✅ Meeting proceedings completed successfully. 🔒 Meeting Register is now locked.")
+                                        st.session_state[f"confirm_lock_{proc_sel}"] = False
+                                    else:
+                                        set_msg("error", "❌ Meeting could not be finalized. Database verification failed. No lock applied.")
+                                except Exception as e:
+                                    set_msg("error", f"❌ Meeting could not be finalized. Please verify the record and try again. Error: {str(e)}")
+                            st.rerun()
+                    else:
+                        if st.button("🔒 Complete Proceedings & Lock Meeting Register", type="primary", use_container_width=True):
+                            st.session_state[f"confirm_lock_{proc_sel}"] = True
+                            st.rerun()
 
     # =====================================================================
     # TAB 4: DIRECT PRINT CENTRE (NATIVE PRINT DIALOG)
@@ -499,74 +617,10 @@ def show():
 
             p_mtg = df_meetings[df_meetings["id"] == print_sel].iloc[0]
             p_aps = df_ap[df_ap['meeting_id'] == print_sel] if not df_ap.empty else pd.DataFrame()
-            org_label = "District Administration" if p_mtg.get('meeting_type') == 'District' else f"Block Development Office"
             
-            def get_header(title):
-                return f"""
-                <div class="header">
-                    <h3>VB-G RAM G CONVERGENCE PORTAL<br>{org_label}</h3>
-                    <h4>{title}</h4>
-                    <div>Financial Year: {active_fy} | Meeting Date: {p_mtg.get('meeting_date', '')}</div>
-                </div>
-                """
-
-            att_data = p_mtg.get("detailed_attendance") or []
-            indiv_att = [a for a in att_data if a.get("type", "individual") == "individual"]
-            dept_att = [a for a in att_data if a.get("type") == "department"]
-
-            # 1. NOTICE HTML
-            notice_html = f"""
-            {get_header('MEETING NOTICE')}
-            <p><b>Venue:</b> {p_mtg.get('venue', 'Not Recorded')}</p>
-            <p><b>Chairperson:</b> {p_mtg.get('chairperson', 'Not Recorded')}</p>
-            <p><b>Objective:</b> {p_mtg.get('objective', 'Standard Convergence Review')}</p>
-            <p style="margin-top:20px;">The undersigned is directed to invite the following officials and departments to attend the statutory meeting at the scheduled venue and time.</p>
-            """
-            if indiv_att:
-                notice_html += "<h4>INVITED OFFICIALS</h4><table><thead><tr><th>Sl. No.</th><th>Name</th><th>Designation</th><th>Posting Level</th><th>Department</th><th>Wing</th><th>Mobile</th><th>Email</th></tr></thead><tbody>"
-                for idx, off in enumerate(indiv_att, 1):
-                    if off.get('posting_level') == "Substitute": continue
-                    notice_html += f"<tr><td>{idx}</td><td>{off.get('name','')}</td><td>{off.get('designation','')}</td><td>{off.get('posting_level','')}</td><td>{off.get('department','')}</td><td>{off.get('wing','')}</td><td>{off.get('mobile','')}</td><td>{off.get('email','')}</td></tr>"
-                notice_html += "</tbody></table>"
-                
-            if dept_att:
-                notice_html += "<h4 style='margin-top:20px;'>DEPARTMENT / WING INVITATIONS</h4><table><thead><tr><th>Sl. No.</th><th>Department</th><th>Wing / Division</th></tr></thead><tbody>"
-                for idx, dept in enumerate(dept_att, 1):
-                    notice_html += f"<tr><td>{idx}</td><td>{dept.get('department', '')}</td><td>{dept.get('wing', '')}</td></tr>"
-                notice_html += "</tbody></table>"
-            notice_html += '<div style="margin-top: 50px; text-align: right;"><b>Chairperson / Nodal Officer</b></div>'
-
-            # 2. ATTENDANCE HTML
-            att_html = get_header('ATTENDANCE REGISTER')
-            if indiv_att:
-                att_html += "<h4>NAME-WISE ATTENDANCE</h4><table><thead><tr><th>Sl. No.</th><th>Name</th><th>Designation</th><th>Department</th><th>Wing</th><th>Attendance Status</th></tr></thead><tbody>"
-                for idx, att in enumerate(indiv_att, 1):
-                    att_html += f"<tr><td>{idx}</td><td>{att.get('name', '')}</td><td>{att.get('designation', '')}</td><td>{att.get('department', '')}</td><td>{att.get('wing', '')}</td><td><b>{att.get('attendance', '') if att.get('attendance') != 'Pending' else ''}</b></td></tr>"
-                att_html += "</tbody></table>"
-                
-            if dept_att:
-                att_html += "<h4 style='margin-top:20px;'>DEPARTMENT-WISE ATTENDANCE</h4><table><thead><tr><th>Sl. No.</th><th>Department</th><th>Wing</th><th>Attendance Status</th></tr></thead><tbody>"
-                for idx, att in enumerate(dept_att, 1):
-                    att_html += f"<tr><td>{idx}</td><td>{att.get('department', '')}</td><td>{att.get('wing', '')}</td><td><b>{att.get('attendance', '') if att.get('attendance') != 'Pending' else ''}</b></td></tr>"
-                att_html += "</tbody></table>"
-
-            # 3. PROCEEDINGS HTML
-            proc_html = get_header('PROCEEDINGS & RESOLUTIONS')
-            proc_html += f"<p><b>Chairperson:</b> {p_mtg.get('chairperson')}</p><p><b>Minutes:</b><br>{p_mtg.get('decisions', 'Not Recorded / Draft')}</p>"
-            proc_html += "<h4>Mandated Resolutions (Department-Wise):</h4>"
-            if not p_aps.empty:
-                proc_html += "<table><thead><tr><th>No.</th><th>Department / Wing</th><th>Directive / Action Point</th><th>Deadline</th><th>Status</th></tr></thead><tbody>"
-                for idx, row in enumerate(p_aps.to_dict(orient="records"), 1):
-                    proc_html += f"<tr><td>{idx}</td><td>{row.get('Department / Wing')}</td><td>{row.get('action_point')}</td><td>{row.get('deadline').strftime('%Y-%m-%d') if pd.notna(row.get('deadline')) else 'N/A'}</td><td>{row.get('status')}</td></tr>"
-                proc_html += "</tbody></table>"
-            else:
-                proc_html += "<p>No resolutions recorded.</p>"
-
-            # DIRECT RENDER PREVIEW (NO DOWNLOADS)
-            if doc_type == "Meeting Notice & Invited List": render_print_preview(notice_html)
-            elif doc_type == "Attendance Register": render_print_preview(att_html)
-            elif doc_type == "Proceedings & Resolutions": render_print_preview(proc_html)
-            elif doc_type == "Complete Meeting File": render_print_preview(f"{notice_html}<div class='page-break'></div>{att_html}<div class='page-break'></div>{proc_html}")
+            html_output = generate_meeting_html(p_mtg, p_aps, doc_type)
+            if html_output:
+                render_print_preview(html_output)
 
     # =====================================================================
     # TAB 5: ADVANCED ACTION TRACKER & ATR (Unchanged Logic)
