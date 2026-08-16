@@ -77,7 +77,8 @@ def check_password():
                         user_id = auth_response.user.id
                         users_data = supabase.table("users").select("*").eq("id", user_id).execute().data
 
-                        if not users_data: st.error("❌ Profile not found.")
+                        if not users_data: 
+                            st.error("❌ Profile not found.")
                         else:
                             user_profile = users_data[0]
                             if not user_profile.get("active", True):
@@ -96,8 +97,10 @@ def get_current_user():
     return st.session_state.get("user", None)
 
 def logout():
-    try: get_supabase().auth.sign_out()
-    except Exception: pass 
+    try: 
+        get_supabase().auth.sign_out()
+    except Exception: 
+        pass 
     st.session_state.authenticated = False
     st.session_state.user = None
     st.session_state.current_page = None
