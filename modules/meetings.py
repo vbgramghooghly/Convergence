@@ -62,7 +62,7 @@ def show():
     today = pd.to_datetime(date.today())
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
-    # SESSION STATE MANAGEMENT FOR RELIABLE NOTIFICATIONS
+    # SESSION STATE MANAGEMENT FOR RELIABLE NOTIFICATIONS (PERSISTS ACROSS RERUNS)
     if "temp_officials" not in st.session_state:
         st.session_state.temp_officials = []
     if "mtg_msg" not in st.session_state:
@@ -422,6 +422,7 @@ def show():
                 p_aps_locked = df_ap[df_ap['meeting_id'] == proc_sel] if not df_ap.empty else pd.DataFrame()
 
                 if is_locked:
+                    # ---------------- LOCKED DASHBOARD ----------------
                     st.markdown("### 🔒 MEETING FINALIZED")
                     st.markdown(f"**Meeting ID:** {proc_mtg['id']} &nbsp;&nbsp;|&nbsp;&nbsp; **Date:** {proc_mtg['meeting_date']} &nbsp;&nbsp;|&nbsp;&nbsp; **Status:** Convened")
                     st.markdown("Attendance &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Saved<br>Proceedings &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;✓ Finalized<br>Action Points &nbsp;&nbsp;&nbsp;✓ Saved<br>Meeting Register ✓ Locked", unsafe_allow_html=True)
@@ -492,9 +493,12 @@ def show():
                             if st.button("Save Combined Attendance Register", type="primary"):
                                 try:
                                     supabase.table("meetings").update({"detailed_attendance": updated_attendance_payload}).eq("id", proc_sel).execute()
-                                    # Verify Persistence
-                                    verify = supabase.table("meetings").select("id").eq("id", proc_sel).execute()
-                                    if verify.data: set_msg("success", "✅ Attendance register saved securely.")
+                                    # Strict Verification Read
+                                    verify = supabase.table("meetings").select("detailed_attendance").eq("id", proc_sel).execute()
+                                    if verify.data and verify.data[0].get("detailed_attendance"):
+                                        has_pending = any(a.get("attendance") == "Pending" for a in verify.data[0]["detailed_attendance"])
+                                        if not has_pending: set_msg("success", "✅ Attendance Register saved successfully.")
+                                        else: set_msg("warning", "⚠️ Attendance saved, but some entries are still pending.")
                                     else: set_msg("error", "❌ Attendance save verification failed.")
                                 except Exception as e:
                                     set_msg("error", f"❌ Failed to save attendance: {str(e)}")
@@ -506,10 +510,10 @@ def show():
                         if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                             try:
                                 supabase.table("meetings").update({"decisions": general_minutes}).eq("id", proc_sel).execute()
-                                # Verify Persistence
+                                # Strict Verification Read
                                 verify = supabase.table("meetings").select("decisions").eq("id", proc_sel).execute()
                                 if verify.data and verify.data[0].get("decisions") == general_minutes:
-                                    set_msg("warning", f"🟡 DRAFT PROCEEDINGS SAVED\n\nStatus: Draft. You may continue editing.")
+                                    set_msg("warning", f"🟡 DRAFT PROCEEDINGS SAVED\n\nStatus: Draft. You may continue editing the proceedings.")
                                 else: set_msg("error", "❌ Proceedings save verification failed.")
                             except Exception as e:
                                 set_msg("error", f"❌ Proceedings could not be saved: {str(e)}")
@@ -540,21 +544,36 @@ def show():
                                 else:
                                     res_payload = {
                                         "meeting_id": proc_sel, "department_id": selected_opt['dept_id'],
-                                        "wing_id": selected_opt['wing_id'], "action_point": f"[{res_scheme}] {res_resolution.strip()}",
+                                        "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None, # Enforce null casting for relational integrity
+                                        "action_point": f"[{res_scheme}] {res_resolution.strip()}",
                                         "deadline": str(res_deadline), "status": res_status, "priority": res_priority,
                                         "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                     }
+                                    # Add contextual hierarchy if schema supports it safely
+                                    res_payload["district_id"] = proc_mtg.get("district_id")
+                                    if proc_mtg.get("block_id"): res_payload["block_id"] = proc_mtg.get("block_id")
+                                    
                                     try:
                                         res = supabase.table("meeting_action_points").insert(res_payload).execute()
                                         if res.data and len(res.data) > 0:
-                                            # Verify DB Write 
+                                            # Strict Verification Read by Department (Ensures Synchronization Works)
                                             v_id = res.data[0]['id']
-                                            v_check = supabase.table("meeting_action_points").select("id").eq("id", v_id).execute()
-                                            if v_check.data: set_msg("success", "✅ Action Point recorded & automatically synced to Department!")
-                                            else: set_msg("error", "❌ Action Point save verification failed.")
+                                            v_check = supabase.table("meeting_action_points").select("id").eq("department_id", selected_opt['dept_id']).eq("id", v_id).execute()
+                                            if v_check.data: set_msg("success", "✅ Action Point recorded & successfully synchronized to Department!")
+                                            else: set_msg("error", "❌ Action Point saved but synchronization verification failed.")
                                         else: set_msg("error", "❌ Action Point could not be saved.")
                                     except Exception as e:
-                                        set_msg("error", f"❌ Action Point could not be saved. Please check payload formatting. Error: {str(e)}")
+                                        # Fallback to minimal payload if schema strictly rejects additional keys
+                                        res_payload_minimal = {
+                                            "meeting_id": proc_sel, "department_id": selected_opt['dept_id'], "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
+                                            "action_point": f"[{res_scheme}] {res_resolution.strip()}", "deadline": str(res_deadline),
+                                            "status": res_status, "priority": res_priority, "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
+                                        }
+                                        try:
+                                            res = supabase.table("meeting_action_points").insert(res_payload_minimal).execute()
+                                            set_msg("success", "✅ Action Point recorded (minimal) & successfully synchronized to Department!")
+                                        except Exception as e2:
+                                            set_msg("error", f"❌ Action Point could not be saved. Error: {str(e2)}")
                                     st.rerun()
 
                     st.markdown("---")
@@ -567,21 +586,30 @@ def show():
                             st.session_state[f"confirm_lock_{proc_sel}"] = False
                             st.rerun()
                         if col_c2.button("Confirm & Lock", type="primary"):
-                            # VALIDATION 1: Attendance Check
-                            att_check = proc_mtg.get("detailed_attendance") or []
-                            if not att_check or any(a.get("attendance") == "Pending" for a in att_check):
+                            # STRICT VALIDATION 1: Fresh Database Read
+                            fresh_mtg = supabase.table("meetings").select("*").eq("id", proc_sel).execute().data[0]
+                            att_check = fresh_mtg.get("detailed_attendance") or []
+                            proceedings_check = fresh_mtg.get("decisions") or ""
+                            
+                            has_pending = False
+                            for a in att_check:
+                                if a.get("attendance") == "Pending":
+                                    has_pending = True
+                                    break
+                                    
+                            if not att_check or has_pending:
                                 set_msg("error", "⚠️ Attendance register has pending items or has not been saved. Please save attendance before completing proceedings.")
-                            # VALIDATION 2: Proceedings Check
-                            elif not general_minutes.strip():
+                            elif not proceedings_check.strip():
                                 set_msg("error", "⚠️ Meeting proceedings are required before finalization. Do not lock an empty meeting.")
                             else:
                                 # EXECUTE TRANSACTIONAL LOCK
                                 try:
-                                    supabase.table("meetings").update({"status": "Convened", "decisions": general_minutes}).eq("id", proc_sel).execute()
-                                    # VERIFY LOCK
+                                    supabase.table("meetings").update({"status": "Convened", "decisions": proceedings_check}).eq("id", proc_sel).execute()
+                                    
+                                    # VERIFY LOCK FROM DATABASE
                                     verify = supabase.table("meetings").select("status").eq("id", proc_sel).execute().data
                                     if verify and verify[0]["status"] == "Convened":
-                                        set_msg("success", "✅ Meeting proceedings completed successfully. 🔒 Meeting Register is now locked.")
+                                        set_msg("success", "✅ Meeting proceedings completed successfully.\n🔒 Meeting Register is now locked.")
                                         st.session_state[f"confirm_lock_{proc_sel}"] = False
                                     else:
                                         set_msg("error", "❌ Meeting could not be finalized. Database verification failed. No lock applied.")
@@ -623,7 +651,7 @@ def show():
                 render_print_preview(html_output)
 
     # =====================================================================
-    # TAB 5: ADVANCED ACTION TRACKER & ATR (Unchanged Logic)
+    # TAB 5: ADVANCED ACTION TRACKER & ATR
     # =====================================================================
     tracker_tab = tab5 if role == "department" else tab5
     with tracker_tab:
@@ -681,7 +709,7 @@ def show():
                         st.rerun()
 
     # =====================================================================
-    # TAB 6: AUTOMATED NEXT AGENDA PREP (Unchanged Logic)
+    # TAB 6: AUTOMATED NEXT AGENDA PREP
     # =====================================================================
     if role != "department":
         with tab6:
