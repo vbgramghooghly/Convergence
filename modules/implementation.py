@@ -6,12 +6,8 @@ from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
 
-# ==========================================
-# PERFORMANCE OPTIMIZATION: CACHE MASTER DATA
-# ==========================================
 @st.cache_data(ttl=600)
 def fetch_master_data():
-    """Caches static master data to improve enterprise performance."""
     supabase = get_supabase()
     departments = supabase.table("departments").select("id,department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
@@ -22,7 +18,6 @@ def fetch_master_data():
     return departments, wings, districts, blocks, activities, act_dept_mapping
 
 def safe_parse_date(date_val):
-    """Safely parses dates from the database without overwriting."""
     if pd.isna(date_val) or not date_val:
         return None
     try:
@@ -33,19 +28,16 @@ def safe_parse_date(date_val):
         return None
 
 def show():
-    # 1. ENFORCE SECURITY & ACCESS RULES (Unchanged)
     require_role('superadmin', 'district', 'block', 'department')
     user = get_current_user()
     role = user['role']
     supabase = get_supabase()
     
-    # 2. GLOBAL HEADER & BREADCRUMB
     st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Execution & Governance / Progress Monitoring</div>", unsafe_allow_html=True)
     st.markdown("<h2 style='margin-bottom: 0px; color: #0F4C81;'>🚀 Implementation & Target Monitoring</h2>", unsafe_allow_html=True)
     st.caption("Plan annual targets, execute physical progress, and resolve statutory meeting commitments.")
     st.markdown("---")
 
-    # 3. LOAD OPTIMIZED DATA
     departments, wings, districts, blocks, activities, act_dept_mapping = fetch_master_data()
     
     dept_map = {d['id']: d['department_name'] for d in departments}
@@ -53,18 +45,10 @@ def show():
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
 
-    # ======================== SECONDARY CONTEXTUAL NAVIGATION ========================
-    tab1, tab2, tab3 = st.tabs([
-        "🎯 Department Targets (Planning)", 
-        "🏗️ Implementation Progress (Execution)", 
-        "🤝 Meeting Commitments (Sync)"
-    ])
+    tab1, tab2, tab3 = st.tabs(["🎯 Department Targets (Planning)", "🏗️ Implementation Progress (Execution)", "🤝 Meeting Commitments (Sync)"])
 
-    # =====================================================================
-    # TAB 1: DEPARTMENT TARGETS (Annual Planning)
-    # =====================================================================
+    # TAB 1: DEPARTMENT TARGETS
     with tab1:
-        # Fetch Target Data for KPIs and Tables (Unchanged Logic)
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
             query_t = query_t.eq("department_id", user.get('department_id')).eq("district_id", user.get('district_id'))
@@ -76,7 +60,6 @@ def show():
         data_t = query_t.execute().data
         df_t = pd.DataFrame(data_t) if data_t else pd.DataFrame()
 
-        # KPI SUMMARY CARDS
         if not df_t.empty:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total Activities Targeted", len(df_t))
@@ -90,10 +73,9 @@ def show():
         with col_t2:
             st.markdown("#### 📝 Add / Update Target")
             if role == 'block':
-                st.info("Target setting is managed at the District/Department level. You can view targets on the left.")
+                st.info("Target setting is managed at the District/Department level.")
             else:
                 with st.container(border=True):
-                    # --- DEPARTMENT / WING CONTEXT LOGIC (Unchanged) ---
                     active_dept_id, active_wing_id, dist_id = None, None, None
 
                     if role == 'department':
@@ -104,7 +86,6 @@ def show():
                             display_text = f"{dept_name} ➔ {wing_map[active_wing_id]['wing_name']}"
                         else:
                             display_text = f"{dept_name} (Main Department)"
-                            
                         st.markdown(f"<span style='color:#64748B; font-size:12px;'>DEPARTMENT / WING</span><br>**{display_text}**", unsafe_allow_html=True)
                         dist_sel = list(t_dist_dict.keys())[0] if t_dist_dict else None
                         dist_id = user.get('district_id')
@@ -114,17 +95,14 @@ def show():
                         for w in wings:
                             p_name = dept_map.get(w['department_id'], "Unknown Department")
                             dept_options.append({"label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]", "dept_id": w['department_id'], "wing_id": w['id']})
-                        
                         dept_options = sorted(dept_options, key=lambda x: x['label'])
                         dept_labels = [opt['label'] for opt in dept_options]
-                        
                         sel_dept_label = st.selectbox("Department / Wing*", dept_labels)
                         selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
                         active_dept_id, active_wing_id = selected_opt['dept_id'], selected_opt['wing_id']
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                    # Form Inputs
                     project_head_options = [
                         "AWC (Anganwadi Center)", "Plantation", "Water Conservation & Harvesting",
                         "Solid/Liquid Waste Management", "Rural Infrastructure", "Livelihood & Agriculture", "Other (Specify Custom)"
@@ -176,12 +154,14 @@ def show():
                                 if existing:
                                     target_id = existing[0]['id']
                                     supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
-                                    log_action(user.get('id'), f"UPDATE department_targets {target_id}")
+                                    try: log_action(user.get('id'), f"UPDATE department_targets {target_id}")
+                                    except: pass
                                     st.success("Target updated successfully!")
                                 else:
                                     result = supabase.table("department_targets").insert(target_record).execute()
                                     new_target_id = result.data[0]['id']
-                                    log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
+                                    try: log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
+                                    except: pass
                                     st.success("Target added successfully!")
                                 st.rerun()
                             except Exception as e:
@@ -218,9 +198,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # =====================================================================
-    # TAB 2: IMPLEMENTATION PROGRESS (Field Execution)
-    # =====================================================================
+    # TAB 2: IMPLEMENTATION PROGRESS
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         
@@ -297,16 +275,21 @@ def show():
                                     "actual_completion_date": str(act_date) if act_date else None, "remarks": remarks
                                 }
                                 try:
-                                    supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
-                                    history_payload = {
-                                        "convergence_id": selected_act_id, "status": new_status, 
-                                        "physical_achievement": phys_ach, "financial_achievement": fin_ach, 
-                                        "persondays_generated": persondays_gen, "remarks": f"MIS Code: {mis_code_val} | {remarks}"
-                                    }
-                                    supabase.table("progress_updates").insert(history_payload).execute()
-                                    log_action(user.get('id'), f"UPDATE convergence_register {selected_act_id}")
-                                    st.success("✅ Progress and MIS mapping updated successfully!")
-                                    st.rerun()
+                                    # Fix: Use `.count` to check RLS permissions
+                                    resp = supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
+                                    if resp.count and resp.count > 0:
+                                        history_payload = {
+                                            "convergence_id": selected_act_id, "status": new_status, 
+                                            "physical_achievement": phys_ach, "financial_achievement": fin_ach, 
+                                            "persondays_generated": persondays_gen, "remarks": f"MIS Code: {mis_code_val} | {remarks}"
+                                        }
+                                        supabase.table("progress_updates").insert(history_payload).execute()
+                                        try: log_action(user.get('id'), f"UPDATE convergence_register {selected_act_id}")
+                                        except: pass
+                                        st.success("✅ Progress and MIS mapping updated successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("🔴 Update failed. Database security (RLS) prevented the update.")
                                 except Exception as e:
                                     st.error(f"Error saving progress: {e}")
 
@@ -329,9 +312,7 @@ def show():
                     except Exception:
                         st.warning("Could not load history timeline.")
 
-    # =====================================================================
-    # TAB 3: MEETING COMMITMENTS (Enterprise Synchronized Feed)
-    # =====================================================================
+    # TAB 3: MEETING COMMITMENTS
     with tab3:
         st.markdown("#### 🤝 Synchronized Departmental Meeting Commitments")
         st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
@@ -401,12 +382,14 @@ def show():
                                 st.error("⚠️ **Validation Error:** You must provide a clear reason in 'Remarks' when flagging an activity as Not Feasible so the Chairperson can review it.")
                             else:
                                 payload = {"status": sync_status, "remarks": sync_remarks}
-                                supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
-                                log_action(user.get('id'), f"UPDATE meeting_action_points {sync_id}")
-                                st.success("✅ Master meeting record updated instantly across all dashboards!")
-                                st.rerun()
-                else:
-                    st.success("🎉 All meeting commitments have been fully completed or closed!")
+                                resp = supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
+                                if resp.count and resp.count > 0:
+                                    try: log_action(user.get('id'), f"UPDATE meeting_action_points {sync_id}")
+                                    except: pass
+                                    st.success("✅ Master meeting record updated instantly across all dashboards!")
+                                    st.rerun()
+                                else:
+                                    st.error("🔴 Update blocked by database security (RLS).")
             else:
                 st.info("No meeting commitments found for your department jurisdiction.")
         else:
