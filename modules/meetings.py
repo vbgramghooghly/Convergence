@@ -7,6 +7,16 @@ from auth.auth import require_role, get_current_user
 from utils.db import get_supabase
 from utils.audit import log_action
 
+def safe_id(val):
+    """Safely extracts IDs, preventing numpy int64 bugs that cause Supabase to silently update 0 rows."""
+    if val is None or val == '': return None
+    try:
+        if pd.isna(val): return None
+    except: pass
+    if isinstance(val, (np.integer, np.int64, np.int32)): return int(val)
+    if isinstance(val, float) and val.is_integer(): return int(val)
+    return val
+
 def sanitize_payload(obj):
     """Deeply sanitizes payloads to convert NumPy types to native Python types, preventing JSON serialization crashes."""
     if isinstance(obj, dict):
@@ -17,17 +27,10 @@ def sanitize_payload(obj):
         return int(obj)
     elif isinstance(obj, (np.floating, np.float64, np.float32)):
         return float(obj)
-    elif pd.isna(obj):
-        return None
+    try:
+        if pd.isna(obj): return None
+    except: pass
     return obj
-
-def safe_int(val):
-    if pd.isna(val) or val is None or val == '': 
-        return 0
-    try: 
-        return int(float(val))
-    except (ValueError, TypeError): 
-        return 0
 
 def generate_res_no(row):
     """Generates a stable, unique resolution number based on the DB ID."""
@@ -517,7 +520,7 @@ def show():
                                                 "posting_level": "Substitute", "wing": "", "mobile": "", "email": "", "attendance": "Present (Substitute)"
                                             })
                                             try:
-                                                supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", proc_sel).execute()
+                                                supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", safe_id(proc_sel)).execute()
                                                 st.rerun()
                                             except Exception as sub_err:
                                                 set_msg("error", f"🔴 Failed to add substitute. Error: {str(sub_err)}")
@@ -526,18 +529,21 @@ def show():
                             st.markdown("<br>", unsafe_allow_html=True)
                             if st.button("Save Combined Attendance Register", type="primary"):
                                 try:
-                                    supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", proc_sel).execute()
-                                    verify = supabase.table("meetings").select("detailed_attendance").eq("id", proc_sel).execute()
-                                    if verify.data and verify.data[0].get("detailed_attendance"):
-                                        # Strict validation: Only "Present", "Absent", "Present (Substitute)" are allowed.
-                                        valid_statuses = ["Present", "Absent", "Present (Substitute)"]
-                                        has_pending = any(a.get("attendance") not in valid_statuses for a in verify.data[0]["detailed_attendance"])
-                                        if not has_pending: 
-                                            set_msg("success", "🟢 Attendance Register saved successfully.")
+                                    update_res = supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", safe_id(proc_sel)).execute()
+                                    if not update_res.data:
+                                        set_msg("error", "🔴 Update failed. Zero rows affected. Check database connectivity or permissions.")
+                                    else:
+                                        verify = supabase.table("meetings").select("detailed_attendance").eq("id", safe_id(proc_sel)).execute()
+                                        if verify.data and verify.data[0].get("detailed_attendance"):
+                                            # Strict validation: Only valid resolutions allowed, completely removing "Pending" threat.
+                                            valid_statuses = ["Present", "Absent", "Present (Substitute)"]
+                                            has_pending = any(a.get("attendance") not in valid_statuses for a in verify.data[0]["detailed_attendance"])
+                                            if not has_pending: 
+                                                set_msg("success", "🟢 Attendance Register saved successfully.")
+                                            else: 
+                                                set_msg("warning", "🟡 Attendance saved, but some entries lack valid status. Please re-verify.")
                                         else: 
-                                            set_msg("warning", "🟡 Attendance saved, but some entries lack valid status. Please re-verify.")
-                                    else: 
-                                        set_msg("error", "🔴 Attendance Register could not be verified after saving.")
+                                            set_msg("error", "🔴 Attendance Register could not be verified after saving.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Failed to save attendance: {str(e)}")
                                 st.rerun()
@@ -548,11 +554,14 @@ def show():
                     general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", height=150)
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         try:
-                            supabase.table("meetings").update({"decisions": sanitize_payload(general_minutes)}).eq("id", proc_sel).execute()
-                            verify = supabase.table("meetings").select("decisions").eq("id", proc_sel).execute()
-                            if verify.data and verify.data[0].get("decisions") == general_minutes:
-                                set_msg("success", f"🟢 Meeting minutes saved successfully.\nStatus: Draft. You may continue editing the proceedings.")
-                            else: set_msg("error", "🔴 Proceedings save verification failed.")
+                            proc_res = supabase.table("meetings").update({"decisions": sanitize_payload(general_minutes)}).eq("id", safe_id(proc_sel)).execute()
+                            if not proc_res.data:
+                                set_msg("error", "🔴 Proceedings save failed. Zero rows affected.")
+                            else:
+                                verify = supabase.table("meetings").select("decisions").eq("id", safe_id(proc_sel)).execute()
+                                if verify.data and verify.data[0].get("decisions") == general_minutes:
+                                    set_msg("success", f"🟢 Meeting minutes saved successfully.\nStatus: Draft. You may continue editing the proceedings.")
+                                else: set_msg("error", "🔴 Proceedings save verification failed.")
                         except Exception as e:
                             set_msg("error", f"🔴 Proceedings could not be saved: {str(e)}")
                         st.rerun()
@@ -590,30 +599,30 @@ def show():
                                 set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
                             else:
                                 res_payload = {
-                                    "meeting_id": safe_int(proc_sel), 
-                                    "department_id": safe_int(selected_opt['dept_id']),
-                                    "wing_id": safe_int(selected_opt['wing_id']) if selected_opt['wing_id'] else None,
-                                    "district_id": safe_int(proc_mtg.get("district_id")) if pd.notna(proc_mtg.get("district_id")) else None, 
-                                    "block_id": safe_int(proc_mtg.get("block_id")) if pd.notna(proc_mtg.get("block_id")) else None,
+                                    "meeting_id": safe_id(proc_sel), 
+                                    "department_id": safe_id(selected_opt['dept_id']),
+                                    "wing_id": safe_id(selected_opt['wing_id']),
+                                    "district_id": safe_id(proc_mtg.get("district_id")), 
+                                    "block_id": safe_id(proc_mtg.get("block_id")),
                                     "action_point": f"[{res_scheme}] {res_resolution.strip()}", 
                                     "deadline": str(res_deadline), 
                                     "status": res_status, "priority": res_priority,
-                                    "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
+                                    "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}",
+                                    "created_by": safe_id(user["id"])
                                 }
                                 try:
-                                    # Use the deep sanitizer to fix int64 serialization issues
                                     clean_payload = sanitize_payload(res_payload)
                                     res = supabase.table("meeting_action_points").insert(clean_payload).execute()
                                     if res.data and len(res.data) > 0:
                                         v_id = res.data[0]['id']
-                                        v_check_query = supabase.table("meeting_action_points").select("id").eq("id", v_id).eq("department_id", safe_int(selected_opt['dept_id']))
-                                        if selected_opt['wing_id']: v_check_query = v_check_query.eq("wing_id", safe_int(selected_opt['wing_id']))
+                                        v_check_query = supabase.table("meeting_action_points").select("id").eq("id", v_id).eq("department_id", safe_id(selected_opt['dept_id']))
+                                        if selected_opt['wing_id']: v_check_query = v_check_query.eq("wing_id", safe_id(selected_opt['wing_id']))
                                         else: v_check_query = v_check_query.is_("wing_id", "null")
                                         
                                         v_check = v_check_query.execute()
                                         if v_check.data: set_msg("success", f"🟢 Action Point recorded and successfully synchronized to {selected_opt['label']}.")
                                         else: set_msg("error", "🔴 Action Point was not synchronized to the concerned Department/Wing.\nCommitment: ✓ Saved\nDepartment Sync: ✗ Failed")
-                                    else: set_msg("error", "🔴 Action Point could not be saved.")
+                                    else: set_msg("error", "🔴 Action Point could not be saved. Database returned empty result.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
                             st.rerun()
@@ -628,7 +637,7 @@ def show():
                             st.session_state[f"confirm_lock_{proc_sel}"] = False
                             st.rerun()
                         if col_c2.button("Confirm & Lock", type="primary"):
-                            fresh_mtg = supabase.table("meetings").select("*").eq("id", proc_sel).execute().data[0]
+                            fresh_mtg = supabase.table("meetings").select("*").eq("id", safe_id(proc_sel)).execute().data[0]
                             att_check = fresh_mtg.get("detailed_attendance") or []
                             proceedings_check = fresh_mtg.get("decisions") or ""
                             
@@ -641,12 +650,15 @@ def show():
                                 set_msg("error", "🔴 Meeting proceedings are required before finalization. Do not lock an empty meeting.")
                             else:
                                 try:
-                                    supabase.table("meetings").update({"status": "Convened", "decisions": sanitize_payload(proceedings_check)}).eq("id", proc_sel).execute()
-                                    verify = supabase.table("meetings").select("status").eq("id", proc_sel).execute().data
-                                    if verify and verify[0]["status"] == "Convened":
-                                        set_msg("success", "🟢 Meeting proceedings completed successfully.\n🔒 Meeting Register locked successfully.")
-                                        st.session_state[f"confirm_lock_{proc_sel}"] = False
-                                    else: set_msg("error", "🔴 Meeting could not be finalized. Database verification failed. No lock applied.")
+                                    lock_res = supabase.table("meetings").update({"status": "Convened", "decisions": sanitize_payload(proceedings_check)}).eq("id", safe_id(proc_sel)).execute()
+                                    if not lock_res.data:
+                                        set_msg("error", "🔴 Lock failed. Zero rows affected.")
+                                    else:
+                                        verify = supabase.table("meetings").select("status").eq("id", safe_id(proc_sel)).execute().data
+                                        if verify and verify[0]["status"] == "Convened":
+                                            set_msg("success", "🟢 Meeting proceedings completed successfully.\n🔒 Meeting Register locked successfully.")
+                                            st.session_state[f"confirm_lock_{proc_sel}"] = False
+                                        else: set_msg("error", "🔴 Meeting could not be finalized. Database verification failed. No lock applied.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Meeting could not be finalized. Please verify the record and try again. Error: {str(e)}")
                             st.rerun()
@@ -733,16 +745,19 @@ def show():
                                     else:
                                         selected_opt = next(opt for opt in unified_depts if opt['label'] == new_dept_label)
                                         update_payload = {
-                                            "department_id": safe_int(selected_opt['dept_id']),
-                                            "wing_id": safe_int(selected_opt['wing_id']) if selected_opt['wing_id'] else None,
+                                            "department_id": safe_id(selected_opt['dept_id']),
+                                            "wing_id": safe_id(selected_opt['wing_id']),
                                             "action_point": new_action_text,
                                             "deadline": str(new_deadline),
                                             "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
                                         }
                                         try:
-                                            supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", selected_ap_id).execute()
-                                            log_action(user.get('id'), f"CORRECTED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
-                                            set_msg("success", f"✅ Resolution {target_row['Resolution No.']} successfully corrected and synchronized!")
+                                            edit_res = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", safe_id(selected_ap_id)).execute()
+                                            if not edit_res.data:
+                                                set_msg("error", "❌ Failed to correct resolution. Zero rows affected.")
+                                            else:
+                                                log_action(user.get('id'), f"CORRECTED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) - Reason: {correction_reason}")
+                                                set_msg("success", f"✅ Resolution {target_row['Resolution No.']} successfully corrected and synchronized!")
                                         except Exception as e:
                                             set_msg("error", f"❌ Failed to correct resolution: {str(e)}")
                                         st.rerun()
@@ -762,9 +777,12 @@ def show():
                                                 "status": "Dropped",
                                                 "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"
                                             }
-                                            supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", selected_ap_id).execute()
-                                            log_action(user.get('id'), f"CANCELLED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
-                                            set_msg("success", f"✅ Resolution {target_row['Resolution No.']} deleted successfully and removed from Department view.")
+                                            del_res = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", safe_id(selected_ap_id)).execute()
+                                            if not del_res.data:
+                                                set_msg("error", "❌ Failed to delete resolution. Zero rows affected.")
+                                            else:
+                                                log_action(user.get('id'), f"CANCELLED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
+                                                set_msg("success", f"✅ Resolution {target_row['Resolution No.']} deleted successfully and removed from Department view.")
                                         except Exception as e:
                                             set_msg("error", f"❌ Failed to delete resolution: {str(e)}")
                                         st.rerun()
@@ -781,10 +799,15 @@ def show():
                         if new_ap_status == "Not Feasible (Requires Review)" and not atr_remarks.strip():
                             st.error("⚠️ Mandatory Justification required for Not Feasible.")
                         else:
-                            try: supabase.table("meeting_action_points").update({"status": sanitize_payload(new_ap_status), "remarks": sanitize_payload(atr_remarks)}).eq("id", ap_id).execute()
-                            except: supabase.table("meeting_action_points").update({"status": sanitize_payload(new_ap_status.lower().replace(" ", "_")), "remarks": sanitize_payload(atr_remarks)}).eq("id", ap_id).execute()
-                            log_action(user.get('id'), f"UPDATE ATR meeting_action_points {ap_id}")
-                            set_msg("success", "✅ ATR submitted successfully.")
+                            atr_res = supabase.table("meeting_action_points").update(sanitize_payload({"status": new_ap_status, "remarks": atr_remarks})).eq("id", safe_id(ap_id)).execute()
+                            if not atr_res.data:
+                                atr_res = supabase.table("meeting_action_points").update(sanitize_payload({"status": new_ap_status.lower().replace(" ", "_"), "remarks": atr_remarks})).eq("id", safe_id(ap_id)).execute()
+                            
+                            if atr_res.data:
+                                log_action(user.get('id'), f"UPDATE ATR meeting_action_points {ap_id}")
+                                set_msg("success", "✅ ATR submitted successfully.")
+                            else:
+                                set_msg("error", "❌ Failed to submit ATR. Zero rows affected.")
                             st.rerun()
 
     # =====================================================================
