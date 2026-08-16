@@ -16,7 +16,7 @@ def safe_int(val):
 
 def generate_res_no(row):
     """Generates a stable, unique resolution number based on the DB ID."""
-    val = str(row['id'])
+    val = str(row.get('id', ''))
     if "-" in val: # UUID format
         return f"RES-{val.split('-')[0].upper()}"
     else: # Integer format or unexpected string
@@ -299,6 +299,7 @@ def show():
 
             if invited_uids:
                 st.markdown("##### 2. Configure Invitations (Name-Wise & Department-Wise)")
+                
                 for uid in invited_uids:
                     st.markdown(f"**🔹 {unified_uid_to_label[uid]}**")
                     opt = next((u for u in unified_depts if u["uid"] == uid))
@@ -513,6 +514,7 @@ def show():
 
                     st.markdown("---")
                     st.markdown("#### B. MINUTES & RESOLUTION DIRECTIVES")
+                    st.markdown("────────────────────────────────────────────────────")
                     general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", height=150)
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         try:
@@ -525,7 +527,7 @@ def show():
                             set_msg("error", f"🔴 Proceedings could not be saved: {str(e)}")
                         st.rerun()
 
-                    st.markdown("---")
+                    st.markdown("────────────────────────────────────────────────────")
                     st.markdown("#### ASSIGN ACTION POINT / DIRECTIVE")
                     
                     current_aps = p_aps_locked
@@ -534,46 +536,51 @@ def show():
                         st.dataframe(current_aps[["Resolution No.", "Department / Wing", "action_point", "deadline", "status"]], use_container_width=True, hide_index=True)
                         st.markdown("**+ Add Another Action Point**")
 
-                    c_r1, c_r2 = st.columns(2)
-                    res_dept_label = c_r1.selectbox("Responsibility Department / Wing *", dept_labels, key=f"r_dept_{proc_sel}")
-                    selected_opt = next(opt for opt in unified_depts if opt['label'] == res_dept_label)
-                    
-                    mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_opt['dept_id']]
-                    valid_act_names = ["General / Administrative"] + [a['activity_name'] for a in activities_data if a['id'] in mapped_act_ids]
-                    res_scheme = c_r2.selectbox("Scheme Linkage", valid_act_names, key=f"r_sch_{proc_sel}")
+                    with st.container(border=True):
+                        c_r1, c_r2 = st.columns(2)
+                        res_dept_label = c_r1.selectbox("Responsibility Department / Wing *", dept_labels, key=f"r_dept_{proc_sel}")
+                        selected_opt = next(opt for opt in unified_depts if opt['label'] == res_dept_label)
+                        
+                        mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == selected_opt['dept_id']]
+                        valid_act_names = ["General / Administrative"] + [a['activity_name'] for a in activities_data if a['id'] in mapped_act_ids]
+                        res_scheme = c_r2.selectbox("Scheme Linkage", valid_act_names, key=f"r_sch_{proc_sel}")
 
-                    res_issue = st.text_input("Discussion Point / Agenda Subject *", key=f"r_iss_{proc_sel}")
-                    res_resolution = st.text_area("Resolution / Mandated Directive *", key=f"r_res_{proc_sel}")
-                    res_outcome = st.text_input("Expected Milestone Outcome", key=f"r_out_{proc_sel}")
+                        res_issue = st.text_input("Discussion Point / Agenda Subject *", key=f"r_iss_{proc_sel}")
+                        res_resolution = st.text_area("Resolution / Mandated Directive *", key=f"r_res_{proc_sel}")
+                        res_outcome = st.text_input("Expected Milestone Outcome", key=f"r_out_{proc_sel}")
 
-                    c_r3, c_r4, c_r5 = st.columns(3)
-                    res_status = c_r3.selectbox("Initial Status *", ["Not Started", "On Track"], key=f"r_stat_{proc_sel}")
-                    res_priority = c_r4.selectbox("Priority", ["High", "Medium", "Low"], index=1, key=f"r_pri_{proc_sel}")
-                    res_deadline = c_r5.date_input("Target Deadline *", date.today(), key=f"r_dl_{proc_sel}")
-                    atr_req = st.checkbox("ATR Submission Required?", value=True, key=f"r_atr_{proc_sel}")
+                        c_r3, c_r4, c_r5 = st.columns(3)
+                        res_status = c_r3.selectbox("Initial Status *", ["Not Started", "On Track"], key=f"r_stat_{proc_sel}")
+                        res_priority = c_r4.selectbox("Priority", ["High", "Medium", "Low"], index=1, key=f"r_pri_{proc_sel}")
+                        res_deadline = c_r5.date_input("Target Deadline *", date.today(), key=f"r_dl_{proc_sel}")
+                        atr_req = st.checkbox("ATR Submission Required?", value=True, key=f"r_atr_{proc_sel}")
 
-                    if st.button("COMMIT & AUTO-SYNC", type="primary", key=f"btn_add_{proc_sel}"):
-                        if not res_resolution.strip() or not res_issue.strip(): 
-                            set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
-                        else:
-                            res_payload = {
-                                "meeting_id": proc_sel, "department_id": selected_opt['dept_id'],
-                                "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
-                                "action_point": f"[{res_scheme}] {res_resolution.strip()}", "deadline": str(res_deadline), 
-                                "status": res_status, "priority": res_priority,
-                                "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
-                            }
-                            try:
-                                res = supabase.table("meeting_action_points").insert(res_payload).execute()
-                                if res.data and len(res.data) > 0:
-                                    v_id = res.data[0]['id']
-                                    v_check = supabase.table("meeting_action_points").select("id").eq("department_id", selected_opt['dept_id']).eq("id", v_id).execute()
-                                    if v_check.data: set_msg("success", f"🟢 Action Point recorded and successfully synchronized to {selected_opt['label']}.")
-                                    else: set_msg("error", "🔴 Action Point saved but synchronization verification failed.")
-                                else: set_msg("error", "🔴 Action Point could not be saved.")
-                            except Exception as e:
-                                set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
-                        st.rerun()
+                        if st.button("COMMIT & AUTO-SYNC", type="primary", key=f"btn_add_{proc_sel}"):
+                            if not res_resolution.strip() or not res_issue.strip(): 
+                                set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
+                            else:
+                                res_payload = {
+                                    "meeting_id": proc_sel, "department_id": selected_opt['dept_id'],
+                                    "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
+                                    "action_point": f"[{res_scheme}] {res_resolution.strip()}", "deadline": str(res_deadline), 
+                                    "status": res_status, "priority": res_priority,
+                                    "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
+                                }
+                                try:
+                                    res = supabase.table("meeting_action_points").insert(res_payload).execute()
+                                    if res.data and len(res.data) > 0:
+                                        v_id = res.data[0]['id']
+                                        v_check_query = supabase.table("meeting_action_points").select("id").eq("id", v_id).eq("department_id", selected_opt['dept_id'])
+                                        if selected_opt['wing_id']: v_check_query = v_check_query.eq("wing_id", selected_opt['wing_id'])
+                                        else: v_check_query = v_check_query.is_("wing_id", "null")
+                                        
+                                        v_check = v_check_query.execute()
+                                        if v_check.data: set_msg("success", f"🟢 Action Point recorded and successfully synchronized to {selected_opt['label']}.")
+                                        else: set_msg("error", "🔴 Action Point was not synchronized to the concerned Department/Wing.\nCommitment: ✓ Saved\nDepartment Sync: ✗ Failed")
+                                    else: set_msg("error", "🔴 Action Point could not be saved.")
+                                except Exception as e:
+                                    set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
+                            st.rerun()
 
                     st.markdown("---")
                     
@@ -682,7 +689,7 @@ def show():
                 res_options = filtered_df['id'].tolist()
                 def format_res_label(x):
                     row = filtered_df[filtered_df['id'] == x].iloc[0]
-                    return f"{row['Resolution No.']} | {row['Origin Meeting']} | {row['Department / Wing']} | {row['action_point'][:50]}..."
+                    return f"{row['Resolution No.']} | {row['Origin Meeting']} | {row['Department / Wing']} | {str(row['action_point'])[:60]}..."
 
                 selected_ap_id = st.selectbox("Step 1 — Identify Resolution", res_options, format_func=format_res_label)
 
@@ -703,6 +710,8 @@ def show():
                     if action_type == "✏️ Correct Commitment":
                         with st.form("edit_commitment_form"):
                             st.markdown("Step 3 — Correct")
+                            
+                            new_dept_label = st.selectbox("Department/Wing", dept_labels, index=dept_labels.index(target_row['Department / Wing']) if target_row['Department / Wing'] in dept_labels else 0)
                             new_action_text = st.text_area("Corrected Action Point / Directive*", value=target_row.get('action_point', ''))
                             new_deadline = st.date_input("Corrected Deadline", value=pd.to_datetime(target_row.get('deadline')).date() if pd.notna(target_row.get('deadline')) else date.today())
                             correction_reason = st.text_input("Reason for Correction (Audited)*", placeholder="e.g. Typographical error, Correction as per proceeding")
@@ -713,7 +722,10 @@ def show():
                                 elif not new_action_text.strip():
                                     st.error("⚠️ Action point text cannot be empty.")
                                 else:
+                                    selected_opt = next(opt for opt in unified_depts if opt['label'] == new_dept_label)
                                     update_payload = {
+                                        "department_id": selected_opt['dept_id'],
+                                        "wing_id": selected_opt['wing_id'] if selected_opt['wing_id'] else None,
                                         "action_point": new_action_text,
                                         "deadline": str(new_deadline),
                                         "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
@@ -730,15 +742,20 @@ def show():
                         with st.form("delete_commitment_form"):
                             st.markdown("Step 3 — Delete")
                             st.warning(f"⚠️ This action will cancel Resolution **{target_row['Resolution No.']}** and remove it from active tracking. The Department will no longer see it.")
-                            delete_reason = st.text_input("Reason for Deletion (Audited)*", placeholder="e.g. Duplicate entry, Administrative cancellation")
+                            delete_reason = st.text_input("Reason for Cancellation (Audited)*", placeholder="e.g. Duplicate entry, Administrative cancellation")
                             
                             if st.form_submit_button("Confirm Delete", type="primary"):
                                 if not delete_reason.strip():
                                     st.error("⚠️ Mandatory Audit Reason is required to delete a resolution.")
                                 else:
                                     try:
-                                        supabase.table("meeting_action_points").delete().eq("id", selected_ap_id).execute()
-                                        log_action(user.get('id'), f"DELETED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Action: {target_row['action_point']} | Reason: {delete_reason}")
+                                        # Soft delete via status change for audit retention
+                                        update_payload = {
+                                            "status": "Dropped",
+                                            "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"
+                                        }
+                                        supabase.table("meeting_action_points").update(update_payload).eq("id", selected_ap_id).execute()
+                                        log_action(user.get('id'), f"CANCELLED meeting_action_points {selected_ap_id} (Res No: {target_row['Resolution No.']}) | Reason: {delete_reason}")
                                         set_msg("success", f"✅ Resolution {target_row['Resolution No.']} deleted successfully and removed from Department view.")
                                     except Exception as e:
                                         set_msg("error", f"❌ Failed to delete resolution: {str(e)}")
@@ -748,7 +765,7 @@ def show():
             st.markdown("##### 📝 Submit Department ATR Update")
             with st.form("global_update_atr"):
                 c_u1, c_u2 = st.columns(2)
-                ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist(), format_func=lambda x: f"{filtered_df[filtered_df['id'] == x].iloc[0]['Resolution No.']} | {filtered_df[filtered_df['id'] == x].iloc[0]['action_point'][:50]}...")
+                ap_id = c_u1.selectbox("Select Resolution", filtered_df["id"].tolist(), format_func=lambda x: f"{filtered_df[filtered_df['id'] == x].iloc[0]['Resolution No.']} | {str(filtered_df[filtered_df['id'] == x].iloc[0]['action_point'])[:50]}...")
                 new_ap_status = c_u2.selectbox("Update Status", ["Not Started", "On Track", "Completed", "Not Feasible (Requires Review)", "Dropped"])
                 atr_remarks = st.text_area("ATR Findings / Justification")
 
