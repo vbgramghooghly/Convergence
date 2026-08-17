@@ -213,7 +213,7 @@ def show():
                                 "department_id": active_dept_id,
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
-                                "financial_year_id": selected_fy_target_id, # Uses the ID directly
+                                "financial_year_id": selected_fy_target_id,
                                 "project_head": project_head.strip(),
                                 "activity": activity,
                                 "asset_count": asset_count,
