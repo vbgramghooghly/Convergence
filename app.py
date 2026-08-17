@@ -11,28 +11,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ---------- CHECK FOR PUBLIC PAGES ----------
-query_params = st.query_params
-page = query_params.get("page", "")
-
-if page == "register":
-    from auth.auth import render_registration_page
-    render_registration_page()
-    st.stop()
-elif page == "verify":
-    from auth.auth import handle_verification
-    handle_verification()
-    st.stop()
-elif page == "reset":
-    from auth.auth import check_password
-    # The reset page is rendered inside check_password() when phase='reset'
-    # We just need to ensure the phase is set
-    st.session_state.login_phase = "reset"
-    if not check_password():
-        st.stop()
-    # If it returns True (shouldn't happen here), but we stop anyway
-    st.stop()
-
 # ---------- AUTHENTICATION ----------
 from auth.auth import check_password, logout, get_current_user
 
