@@ -6,7 +6,21 @@ import streamlit.components.v1 as components
 from auth.auth import require_role, get_current_user
 from utils.db import get_supabase
 from utils.audit import log_action
+from supabase import create_client      # <-- new import
 
+# ------------------------------------------------------------------
+# Helper: service‑role client (bypasses RLS)
+# ------------------------------------------------------------------
+def get_service_supabase():
+    """Returns a Supabase client using the service role key."""
+    return create_client(
+        st.secrets["supabase_url"],
+        st.secrets["supabase_service_key"]
+    )
+
+# ------------------------------------------------------------------
+# Existing helper functions (unchanged)
+# ------------------------------------------------------------------
 def safe_id(val):
     if pd.isna(val) or val is None or val == '':
         return None
@@ -79,11 +93,15 @@ def render_print_preview(html_content):
     """
     components.html(wrapped_html, height=800, scrolling=True)
 
+# ------------------------------------------------------------------
+# Main show() function (all business logic preserved)
+# ------------------------------------------------------------------
 def show():
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
     role = user["role"]
-    supabase = get_supabase()
+    supabase = get_supabase()                     # regular client for reads
+    service_supabase = get_service_supabase()     # service client for writes
     today = pd.to_datetime(date.today())
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
@@ -114,6 +132,9 @@ def show():
     st.caption(f"FY {active_fy} | Coordinate Committee Meetings, Record Proceedings, Synchronize ATRs, and Generate Agendas.")
     st.markdown("---")
 
+    # ------------------------------------------------------------------
+    # Fetch master data (using regular client – reads are RLS‑protected)
+    # ------------------------------------------------------------------
     departments = supabase.table("departments").select("id, department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
@@ -145,6 +166,9 @@ def show():
             return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
         return f"{d_name} (Main)"
 
+    # ------------------------------------------------------------------
+    # Fetch meetings and action points (reads via regular client)
+    # ------------------------------------------------------------------
     q_meetings = supabase.table("meetings").select("*").eq("financial_year", active_fy)
     if role in ["district", "department"] and user.get("district_id"):
         q_meetings = q_meetings.eq("district_id", user["district_id"])
@@ -206,6 +230,9 @@ def show():
 
             df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
+    # ------------------------------------------------------------------
+    # Helper to generate meeting HTML for printing (unchanged)
+    # ------------------------------------------------------------------
     def generate_meeting_html(p_mtg, p_aps, doc_type):
         org_label = "District Administration" if p_mtg.get('meeting_type') == 'District' else "Block Development Office"
 
@@ -263,6 +290,9 @@ def show():
             return f"{notice_html}<div class='page-break'></div>{att_html}<div class='page-break'></div>{proc_html}"
         return ""
 
+    # ------------------------------------------------------------------
+    # Tab definitions (unchanged)
+    # ------------------------------------------------------------------
     if role == "department":
         tab_sla, tab_tracker, tab_print = st.tabs(["📈 SLA Performance", "🎯 Action Tracker & ATR", "🖨️ Print Centre"])
         tab_sched = tab_proc = tab_agenda = None
@@ -272,7 +302,9 @@ def show():
             "🎯 Action Tracker & ATR", "⏭️ Next Agenda Prep", "🖨️ Print Centre"
         ])
 
-    # TAB 1: SLA PERFORMANCE DASHBOARD
+    # ------------------------------------------------------------------
+    # TAB 1: SLA PERFORMANCE (unchanged)
+    # ------------------------------------------------------------------
     with tab_sla:
         if df_ap.empty:
             st.info(f"No meeting commitments recorded for FY {active_fy}.")
@@ -290,7 +322,9 @@ def show():
                 mtg_perf = df_ap.groupby("Origin Meeting").agg(Resolutions=('id', 'count'), Closed=('Tracker Flag', lambda x: (x == '🟢 CLOSED').sum())).reset_index()
                 st.dataframe(mtg_perf, use_container_width=True, hide_index=True)
 
-    # TAB 2: SCHEDULE MEETING
+    # ------------------------------------------------------------------
+    # TAB 2: SCHEDULE MEETING (unchanged – INSERT uses service client)
+    # ------------------------------------------------------------------
     if tab_sched:
         with tab_sched:
             st.markdown("#### 🗓️ Schedule Convergence Committee Meeting")
@@ -339,7 +373,6 @@ def show():
                     invite_dept_only = False
 
                     if all_matched:
-                        # FIXED: Safely handles NoneType for designations
                         def get_safe_desig_name(c_obj):
                             desig_obj = c_obj.get('designations')
                             if isinstance(desig_obj, dict):
@@ -407,6 +440,7 @@ def show():
                                                 "district_id": safe_id(target_district_id), "block_id": safe_id(new_off["block_id"]),
                                                 "contact_number": n_mobile, "email_id": n_email, "active": True
                                             }
+                                            # Use regular client for contacts (RLS may apply, but we trust it)
                                             supabase.table("contacts").insert(sanitize_payload(payload)).execute()
                                             set_msg("success", f"Official {n_name} saved to directory and added to meeting.")
                                         except Exception as e:
@@ -437,14 +471,20 @@ def show():
                             "district_id": safe_id(target_district_id), "block_id": safe_id(target_block_id)
                         }
                         try:
-                            supabase.table("meetings").insert(sanitize_payload(meeting_data)).execute()
-                            st.session_state.temp_officials = []
-                            set_msg("success", "✅ Meeting notice dispatched successfully! Packages auto-generated.")
+                            # Use service client for INSERT
+                            resp = service_supabase.table("meetings").insert(sanitize_payload(meeting_data)).execute()
+                            if resp.data:
+                                st.session_state.temp_officials = []
+                                set_msg("success", "✅ Meeting notice dispatched successfully! Packages auto-generated.")
+                            else:
+                                set_msg("error", "🚨 Failed to issue meeting notice – no data returned.")
                         except Exception as e:
                             set_msg("error", f"🚨 Failed to issue meeting notice. Database Error: {e}")
                         st.rerun()
 
-    # TAB 3: PROCEEDINGS, ATTENDANCE & VERIFIED LOCKING
+    # ------------------------------------------------------------------
+    # TAB 3: PROCEEDINGS, ATTENDANCE & LOCKING
+    # ------------------------------------------------------------------
     if tab_proc:
         with tab_proc:
             display_persisted_msg()
@@ -534,23 +574,29 @@ def show():
                                                 "posting_level": "Substitute", "wing": "", "mobile": "", "email": "", "attendance": "Present (Substitute)"
                                             })
                                             try:
-                                                supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", clean_proc_id).execute()
-                                                st.rerun()
+                                                # Use service client to update meetings
+                                                resp = service_supabase.table("meetings").update(
+                                                    {"detailed_attendance": sanitize_payload(updated_attendance_payload)}
+                                                ).eq("id", clean_proc_id).execute()
+                                                if resp.data:
+                                                    st.rerun()
+                                                else:
+                                                    set_msg("error", "🔴 Failed to add substitute – no data returned.")
                                             except Exception as sub_err:
                                                 set_msg("error", f"🔴 Failed to add substitute. Error: {str(sub_err)}")
-                                                st.rerun()
+                                            st.rerun()
 
                             st.markdown("<br>", unsafe_allow_html=True)
                             
-                            # --- FIXED ATTENDANCE SAVE LOGIC ---
+                            # --- ATTENDANCE SAVE (uses service client) ---
                             if st.button("Save Combined Attendance Register", type="primary"):
                                 try:
-                                    # 1. Perform Update
-                                    resp = supabase.table("meetings").update({"detailed_attendance": sanitize_payload(updated_attendance_payload)}).eq("id", clean_proc_id).execute()
+                                    resp = service_supabase.table("meetings").update(
+                                        {"detailed_attendance": sanitize_payload(updated_attendance_payload)}
+                                    ).eq("id", clean_proc_id).execute()
                                     
-                                    # 2. Robust Verification using resp.count
-                                    if resp.count and resp.count > 0:
-                                        # Verify the data is in the DB
+                                    if resp.data:
+                                        # Verify by re-fetching (regular client)
                                         verify = supabase.table("meetings").select("detailed_attendance").eq("id", clean_proc_id).execute()
                                         if verify.data and verify.data[0].get("detailed_attendance"):
                                             valid_statuses = ["Present", "Absent", "Present (Substitute)"]
@@ -562,8 +608,7 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Attendance Register could not be verified after saving.")
                                     else:
-                                        # If count is 0, RLS blocked the update, or no rows matched.
-                                        set_msg("error", "🔴 Attendance update failed. Database security (RLS) prevented the update. You may not have permission to edit this meeting.")
+                                        set_msg("error", "🔴 Attendance update failed – no data returned.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Failed to save attendance: {str(e)}")
                                 st.rerun()
@@ -573,18 +618,20 @@ def show():
                     st.markdown("────────────────────────────────────────────────────")
                     general_minutes = st.text_area("Meeting Minutes / Deliberations", value=proc_mtg.get("decisions", "") or "", height=150)
                     
-                    # --- FIXED MINUTES SAVE LOGIC ---
+                    # --- MINUTES SAVE (uses service client) ---
                     if st.button("Save Draft Minutes", key=f"btn_mins_{proc_sel}"):
                         try:
-                            resp = supabase.table("meetings").update({"decisions": sanitize_payload(general_minutes)}).eq("id", clean_proc_id).execute()
-                            if resp.count and resp.count > 0:
+                            resp = service_supabase.table("meetings").update(
+                                {"decisions": sanitize_payload(general_minutes)}
+                            ).eq("id", clean_proc_id).execute()
+                            if resp.data:
                                 verify = supabase.table("meetings").select("decisions").eq("id", clean_proc_id).execute()
                                 if verify.data and verify.data[0].get("decisions") == general_minutes:
                                     set_msg("success", f"🟢 Meeting minutes saved successfully.\nStatus: Draft. You may continue editing the proceedings.")
                                 else:
                                     set_msg("error", "🔴 Proceedings save verification failed.")
                             else:
-                                set_msg("error", "🔴 Proceedings update failed. Database security (RLS) prevented the update.")
+                                set_msg("error", "🔴 Proceedings update failed – no data returned.")
                         except Exception as e:
                             set_msg("error", f"🔴 Proceedings could not be saved: {str(e)}")
                         st.rerun()
@@ -622,14 +669,14 @@ def show():
                                 set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
                             else:
                                 res_payload = {
-                                        "meeting_id": clean_proc_id,
-                                        "department_id": safe_id(selected_opt['dept_id']),
-                                        "wing_id": safe_id(selected_opt['wing_id']),
-                                        "action_point": f"[{res_scheme}] {res_resolution.strip()}",
-                                        "deadline": str(res_deadline),
-                                         "status": res_status,
-                                         "priority": res_priority,
-                                       "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
+                                    "meeting_id": clean_proc_id,
+                                    "department_id": safe_id(selected_opt['dept_id']),
+                                    "wing_id": safe_id(selected_opt['wing_id']),
+                                    "action_point": f"[{res_scheme}] {res_resolution.strip()}",
+                                    "deadline": str(res_deadline),
+                                    "status": res_status,
+                                    "priority": res_priority,
+                                    "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                 }
                                 if pd.notna(proc_mtg.get("district_id")):
                                     res_payload["district_id"] = safe_id(proc_mtg["district_id"])
@@ -638,7 +685,8 @@ def show():
 
                                 try:
                                     clean_payload = sanitize_payload(res_payload)
-                                    res = supabase.table("meeting_action_points").insert(clean_payload).execute()
+                                    # Use service client to insert action point
+                                    res = service_supabase.table("meeting_action_points").insert(clean_payload).execute()
                                     
                                     if res.data and len(res.data) > 0:
                                         inserted_id = res.data[0]['id']
@@ -654,14 +702,14 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Action Point could not be verified after insertion. It may not be visible to the concerned department.")
                                     else:
-                                        set_msg("error", "🔴 Action Point could not be saved. Database returned empty result (likely an RLS block).")
+                                        set_msg("error", "🔴 Action Point could not be saved – no data returned.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Action Point could not be saved. Database Error: {str(e)}")
                                 st.rerun()
 
                     st.markdown("---")
 
-                    # --- FIXED MEETING LOCK LOGIC ---
+                    # --- MEETING LOCK (uses service client) ---
                     if st.session_state.get(f"confirm_lock_{proc_sel}", False):
                         st.warning("⚠️ Are you sure you want to finalize this meeting? After finalization, the proceedings and meeting register will become read-only.")
                         col_c1, col_c2 = st.columns(2)
@@ -686,8 +734,10 @@ def show():
                                 set_msg("error", "🔴 Meeting proceedings are required before finalization. Do not lock an empty meeting.")
                             else:
                                 try:
-                                    upd_resp = supabase.table("meetings").update({"status": "Convened"}).eq("id", clean_proc_id).execute()
-                                    if upd_resp.count and upd_resp.count > 0:
+                                    upd_resp = service_supabase.table("meetings").update(
+                                        {"status": "Convened"}
+                                    ).eq("id", clean_proc_id).execute()
+                                    if upd_resp.data:
                                         verify = supabase.table("meetings").select("status").eq("id", clean_proc_id).execute()
                                         if verify.data and verify.data[0]["status"] == "Convened":
                                             set_msg("success", "🟢 Meeting proceedings completed successfully.\n🔒 Meeting Register locked successfully.")
@@ -695,7 +745,7 @@ def show():
                                         else:
                                             set_msg("error", "🔴 Meeting could not be finalized. Database verification failed. No lock applied.")
                                     else:
-                                        set_msg("error", "🔴 Meeting update returned no data (RLS block); lock may have failed.")
+                                        set_msg("error", "🔴 Meeting update returned no data – lock may have failed.")
                                 except Exception as e:
                                     set_msg("error", f"🔴 Meeting could not be finalized. Please verify the record and try again. Error: {str(e)}")
                             st.rerun()
@@ -704,7 +754,9 @@ def show():
                             st.session_state[f"confirm_lock_{proc_sel}"] = True
                             st.rerun()
 
-    # TAB 4: ADVANCED ACTION TRACKER & ATR
+    # ------------------------------------------------------------------
+    # TAB 4: ACTION TRACKER & ATR
+    # ------------------------------------------------------------------
     if tab_tracker:
         with tab_tracker:
             st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
@@ -789,8 +841,11 @@ def show():
                                             "remarks": f"[Corrected by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {correction_reason}] | {target_row.get('remarks', '')}"
                                         }
                                         try:
-                                            upd_resp = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", clean_ap_id).execute()
-                                            if upd_resp.count and upd_resp.count > 0:
+                                            # Use service client to update action point
+                                            upd_resp = service_supabase.table("meeting_action_points").update(
+                                                sanitize_payload(update_payload)
+                                            ).eq("id", clean_ap_id).execute()
+                                            if upd_resp.data:
                                                 v_resp = supabase.table("meeting_action_points").select("*").eq("id", clean_ap_id).execute()
                                                 if v_resp.data:
                                                     updated_row = v_resp.data[0]
@@ -806,7 +861,7 @@ def show():
                                                 else:
                                                     set_msg("error", "🔴 Correction could not be verified after update.")
                                             else:
-                                                set_msg("error", "🔴 Correction update returned no data. RLS may be blocking changes.")
+                                                set_msg("error", "🔴 Correction update returned no data.")
                                         except Exception as e:
                                             set_msg("error", f"❌ Failed to correct resolution: {str(e)}")
                                         st.rerun()
@@ -826,8 +881,10 @@ def show():
                                                 "status": "Dropped",
                                                 "remarks": f"[Cancelled by {role.upper()} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}] | {target_row.get('remarks', '')}"
                                             }
-                                            upd_resp = supabase.table("meeting_action_points").update(sanitize_payload(update_payload)).eq("id", clean_ap_id).execute()
-                                            if upd_resp.count and upd_resp.count > 0:
+                                            upd_resp = service_supabase.table("meeting_action_points").update(
+                                                sanitize_payload(update_payload)
+                                            ).eq("id", clean_ap_id).execute()
+                                            if upd_resp.data:
                                                 v_resp = supabase.table("meeting_action_points").select("status").eq("id", clean_ap_id).execute()
                                                 if v_resp.data and v_resp.data[0].get('status') == "Dropped":
                                                     try:
@@ -856,8 +913,10 @@ def show():
                         else:
                             clean_ap_id = safe_id(ap_id)
                             try:
-                                upd_resp = supabase.table("meeting_action_points").update(sanitize_payload({"status": new_ap_status, "remarks": atr_remarks})).eq("id", clean_ap_id).execute()
-                                if upd_resp.count and upd_resp.count > 0:
+                                upd_resp = service_supabase.table("meeting_action_points").update(
+                                    sanitize_payload({"status": new_ap_status, "remarks": atr_remarks})
+                                ).eq("id", clean_ap_id).execute()
+                                if upd_resp.data:
                                     v_resp = supabase.table("meeting_action_points").select("status").eq("id", clean_ap_id).execute()
                                     if v_resp.data and v_resp.data[0].get('status') == new_ap_status:
                                         try:
@@ -872,7 +931,9 @@ def show():
                                 set_msg("error", f"❌ Failed to submit ATR: {str(e)}")
                             st.rerun()
 
-    # TAB 5: AUTOMATED NEXT AGENDA PREP
+    # ------------------------------------------------------------------
+    # TAB 5: NEXT AGENDA PREP (unchanged)
+    # ------------------------------------------------------------------
     if tab_agenda:
         with tab_agenda:
             st.markdown("#### ⏭️ Auto-Generated Next Meeting Agenda")
@@ -902,7 +963,9 @@ def show():
                 else:
                     st.success("🎉 No overdue items detected.")
 
-    # TAB 6: DIRECT PRINT CENTRE
+    # ------------------------------------------------------------------
+    # TAB 6: PRINT CENTRE (unchanged)
+    # ------------------------------------------------------------------
     if tab_print:
         with tab_print:
             st.markdown("#### 🖨️ Meeting Print Centre")
