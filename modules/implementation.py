@@ -33,10 +33,7 @@ def show():
     role = user['role']
     supabase = get_supabase()
     
-    st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Execution & Governance / Progress Monitoring</div>", unsafe_allow_html=True)
-    st.markdown("<h2 style='margin-bottom: 0px; color: #0F4C81;'>🚀 Implementation & Target Monitoring</h2>", unsafe_allow_html=True)
-    st.caption("Plan annual targets, execute physical progress, and resolve statutory meeting commitments.")
-    st.markdown("---")
+    # ---------- REMOVED HEADER: breadcrumb, title, subtitle, and separator ----------
 
     departments, wings, districts, blocks, activities, act_dept_mapping = fetch_master_data()
     
