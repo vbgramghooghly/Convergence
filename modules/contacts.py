@@ -3,10 +3,51 @@ import io
 import json
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from auth.auth import get_current_user, require_role
 from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
+# ---------- PRINT PREVIEW FUNCTION (UPGRADED) ----------
+def render_print_preview(html_content):
+    wrapped_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Print Document</title>
+        <style>
+            @media print {{
+                .no-print {{ display: none !important; }}
+                body {{ padding: 0 !important; margin: 0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+                .page-break {{ page-break-after: always; }}
+            }}
+            body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 11px; color: #000; line-height: 1.5; }}
+            .print-toolbar {{ background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6; text-align: center; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }}
+            .print-btn {{ padding: 10px 24px; font-size: 16px; font-weight: bold; background-color: #0F4C81; color: white; border: none; border-radius: 6px; cursor: pointer; transition: background 0.3s; }}
+            .print-btn:hover {{ background-color: #0b3960; }}
+            .header {{ text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; page-break-inside: auto; }}
+            tr {{ page-break-inside: avoid; page-break-after: auto; }}
+            th, td {{ border: 1px solid #000; padding: 6px; text-align: left; font-size: 10px; }}
+            th {{ background-color: #f2f2f2; font-weight: bold; }}
+            h3, h4 {{ margin-bottom: 5px; }}
+        </style>
+    </head>
+    <body>
+        <div class="no-print print-toolbar">
+            <h4 style="margin-top: 0; color: #333; font-family: Arial, sans-serif;">🖨️ Print Preview – Official Contact Directory</h4>
+            <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+        </div>
+        <div id="print-content">
+            {html_content}
+        </div>
+    </body>
+    </html>
+    """
+    components.html(wrapped_html, height=800, scrolling=True)
+
+# ---------- MAIN show() ----------
 def show():
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
@@ -16,10 +57,8 @@ def show():
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Administration / Officials Directory</div>", unsafe_allow_html=True)
-    st.markdown(f"<h2 style='margin-bottom: 0px; color: {primary_color};'>📇 Official Contact Directory</h2>", unsafe_allow_html=True)
-    st.caption("Manage departmental officers, statutory committee members, and nodal points.")
-    st.markdown("---")
+    # ---------- HEADER LINES REMOVED ----------
+    # (Previously: breadcrumb, title, subtitle, and separator)
 
     designations = supabase.table("designations").select("id, designation_name").eq("active", True).execute().data or []
     districts = supabase.table("districts").select("id, district_name").execute().data or []
@@ -105,7 +144,10 @@ def show():
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-            col_dl, col_pr, _ = st.columns([1.5, 1.8, 6.7])
+            # --- EXPORT & PRINT BUTTONS ---
+            col_dl, col_pr, col_print_preview = st.columns([1.5, 1.8, 1.8])
+            
+            # Excel download
             buffer = io.BytesIO()
             try:
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -114,9 +156,21 @@ def show():
             except Exception:
                 col_dl.download_button("📥 Download CSV", data=filtered_df.to_csv(index=False).encode("utf-8"), file_name="official_contact_directory.csv", mime="text/csv", use_container_width=True)
 
+            # Printable HTML download (legacy)
             html_table = filtered_df.to_html(index=False)
             printable_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Official Contact Directory</title><style>body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 11px; color: #333; }} h2 {{ text-align: center; color: {primary_color}; border-bottom: 2px solid {primary_color}; padding-bottom: 10px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ border: 1px solid #dddddd; padding: 6px; text-align: left; }} th {{ background-color: #f2f2f2; color: #000; }} @page {{ size: A4 landscape; margin: 15mm; }} @media print {{ .no-print {{ display: none; }} body {{ padding: 0; }} }}</style></head><body onload="window.print()"><div class="no-print" style="text-align: center; margin-bottom: 20px; background-color: #f8f9fa; padding: 15px; border-radius: 8px;"><button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: {primary_color}; color: white; border: none; border-radius: 4px;">🖨️ Print or Save as PDF</button></div><h2>Official Contact Directory & Statutory Roles</h2>{html_table}</body></html>"""
-            col_pr.download_button("🖨️ Printable Version", data=printable_html, file_name="Contact_Directory_Print.html", mime="text/html", use_container_width=True)
+            col_pr.download_button("🖨️ Printable HTML", data=printable_html, file_name="Contact_Directory_Print.html", mime="text/html", use_container_width=True)
+
+            # NEW: Direct Print Preview (upgraded)
+            if col_print_preview.button("🖨️ Print Table", use_container_width=True):
+                html_preview = f"""
+                <div style="text-align:center; margin-bottom:20px;">
+                    <h2 style="color:{primary_color};">Official Contact Directory & Statutory Roles</h2>
+                </div>
+                {filtered_df.to_html(index=False)}
+                """
+                render_print_preview(html_preview)
+
         else:
             st.info("No contact records found for your jurisdiction.")
 
