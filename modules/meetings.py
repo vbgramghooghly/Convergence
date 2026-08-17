@@ -622,15 +622,14 @@ def show():
                                 set_msg("error", "🔴 Resolution directive and Discussion Point are mandatory.")
                             else:
                                 res_payload = {
-                                    "meeting_id": clean_proc_id,
-                                    "department_id": safe_id(selected_opt['dept_id']),
-                                    "wing_id": safe_id(selected_opt['wing_id']),
-                                    "action_point": f"[{res_scheme}] {res_resolution.strip()}",
-                                    "deadline": str(res_deadline),
-                                    "status": res_status,
-                                    "priority": res_priority,
-                                    "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}",
-                                    "created_by": safe_id(user["id"])
+                                        "meeting_id": clean_proc_id,
+                                        "department_id": safe_id(selected_opt['dept_id']),
+                                        "wing_id": safe_id(selected_opt['wing_id']),
+                                        "action_point": f"[{res_scheme}] {res_resolution.strip()}",
+                                        "deadline": str(res_deadline),
+                                         "status": res_status,
+                                         "priority": res_priority,
+                                       "remarks": f"Issue: {res_issue} | Expected: {res_outcome} | ATR Req: {atr_req}"
                                 }
                                 if pd.notna(proc_mtg.get("district_id")):
                                     res_payload["district_id"] = safe_id(proc_mtg["district_id"])
