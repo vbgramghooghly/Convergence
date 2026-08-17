@@ -15,7 +15,8 @@ def fetch_master_data():
     blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
     activities = supabase.table("activities").select("*").eq("active", True).execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
-    return departments, wings, districts, blocks, activities, act_dept_mapping
+    fys = supabase.table("financial_years").select("*").eq("active", True).execute().data or []  # <--- NEW: Fetched FY
+    return departments, wings, districts, blocks, activities, act_dept_mapping, fys
 
 def safe_parse_date(date_val):
     if pd.isna(date_val) or not date_val:
@@ -33,12 +34,18 @@ def show():
     role = user['role']
     supabase = get_supabase()
     
-    departments, wings, districts, blocks, activities, act_dept_mapping = fetch_master_data()
+    departments, wings, districts, blocks, activities, act_dept_mapping, fys = fetch_master_data()
     
     dept_map = {d['id']: d['department_name'] for d in departments}
     wing_map = {w['id']: w for w in wings}
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
+    
+    # <--- NEW: Extract FY names for dynamic selections
+    fy_names = [f["year_name"] for f in fys]
+    if not fy_names:
+        st.error("⚠️ No active Financial Years found in the database. Please contact your administrator.")
+        st.stop()
 
     tab1, tab2, tab3 = st.tabs(["🎯 Department Targets (Planning)", "🏗️ Implementation Progress (Execution)", "🤝 Meeting Commitments (Sync)"])
 
@@ -72,6 +79,9 @@ def show():
             else:
                 with st.container(border=True):
                     active_dept_id, active_wing_id, dist_id = None, None, None
+
+                    # <--- NEW: Added Financial Year Dropdown for Target
+                    sel_fy_target = st.selectbox("Financial Year*", fy_names)
 
                     if role == 'department':
                         active_dept_id = user.get('department_id')
@@ -127,7 +137,7 @@ def show():
                     # Pre-fill if editing an existing record (we try to fetch it)
                     existing_record = None
                     if active_dept_id and dist_id and activity and activity != "No activities available":
-                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity)
+                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", sel_fy_target).eq("activity", activity) # <--- MODIFIED: Dynamic Year check
                         if active_wing_id:
                             q_check = q_check.eq("wing_id", active_wing_id)
                         else:
@@ -136,7 +146,7 @@ def show():
                         if existing_records:
                             existing_record = existing_records[0]
 
-                    # --- FIXED: Safely unpack existing_record to prevent AttributeError on None ---
+                    # FIXED: Safely unpack existing_record to prevent AttributeError on None
                     if existing_record:
                         default_convergence = existing_record.get("department_scheme_convergence", False)
                         default_scheme_name = existing_record.get("department_scheme_name", "")
@@ -201,7 +211,7 @@ def show():
                                 "department_id": active_dept_id,
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
-                                "financial_year": "2026-27",
+                                "financial_year": sel_fy_target,  # <--- MODIFIED: Dynamic Year saving
                                 "project_head": project_head.strip(),
                                 "activity": activity,
                                 "asset_count": asset_count,
@@ -218,7 +228,7 @@ def show():
                                 "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
                             }
                             try:
-                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity)
+                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", sel_fy_target).eq("activity", activity) # <--- MODIFIED: Dynamic Year query
                                 if active_wing_id: q_existing = q_existing.eq("wing_id", active_wing_id)
                                 else: q_existing = q_existing.is_("wing_id", "null")
                                 
