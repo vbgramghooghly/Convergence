@@ -156,10 +156,16 @@ def show():
                             key="scheme_name_target"
                         )
 
+                    # Safely handle annual plan status
+                    status_options = ["Yes", "No", "Not Confirmed"]
+                    if default_annual_plan_status not in status_options:
+                        default_annual_plan_status = "Not Confirmed"
+                    default_index = status_options.index(default_annual_plan_status)
+
                     annual_plan_status = st.selectbox(
                         "Included in Department's Own Annual Plan?",
-                        options=["Yes", "No", "Not Confirmed"],
-                        index=["Yes", "No", "Not Confirmed"].index(default_annual_plan_status),
+                        options=status_options,
+                        index=default_index,
                         key="annual_plan_status_target"
                     )
 
@@ -270,10 +276,6 @@ def show():
                 st.download_button("📥 Export Target Plan to Excel", data=buffer.getvalue(), file_name="department_targets.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
-
-    # TAB 2 and TAB 3 remain unchanged – they are the same as in the original.
-    # (We keep them exactly as they were to avoid any unwanted changes.)
-    # For completeness, they are included below but you can reuse your existing code.
 
     # ================= TAB 2 =================
     with tab2:
