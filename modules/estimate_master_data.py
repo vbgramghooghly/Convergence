@@ -70,9 +70,9 @@ def show():
     require_role('superadmin')
     inject_tab_css()
     
-    st.markdown("<h1 style='color: #1F77B4;'>📐 Estimate Builder Master Data</h1>", unsafe_allow_html=True)
-    st.caption("Manage Specifications, Consumption Matrix, and LMR Rates exclusively for Estimate Building.")
-    st.markdown("---")
+    # ==========================================================
+    # REMOVED: The h1 Header and caption sections completely
+    # ==========================================================
 
     supabase = get_supabase()
     master = fetch_estimate_master()
@@ -340,16 +340,33 @@ def show():
                                 st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
 
+        # =================================================================
+        # REWRITTEN: Step 1 / Step 2 Bulk LMR workflow
+        # =================================================================
         if st.session_state.get('show_bulk_lmr'):
             with st.expander("📤 Bulk Upload LMR (Pivot format)", expanded=True):
-                st.caption("Format: `lmr_code`, `description`, `unit`, `dist_1_rate` ... `dist_23_rate`")
+                # --- Step 1: Download Template ---
+                st.markdown("### Step 1: Download Template")
+                st.caption("Format: `lmr_code`, `description`, `unit`, `dist_1_rate` ... `dist_23_rate`. Leave rate blank if not applicable.")
+                
                 template_cols = ['lmr_code', 'description', 'unit'] + [f'dist_{i}_rate' for i in range(1, 24)]
                 template_df = pd.DataFrame(columns=template_cols)
                 buf = io.StringIO()
                 template_df.to_csv(buf, index=False)
-                st.download_button("📥 Download Template CSV", data=buf.getvalue(), file_name="lmr_pivot.csv", mime="text/csv")
+                st.download_button(
+                    "📥 Download Template CSV",
+                    data=buf.getvalue(),
+                    file_name="lmr_pivot_template.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+                st.markdown("---")
+
+                # --- Step 2: Upload & Process ---
+                st.markdown("### Step 2: Upload Filled Template")
+                uploaded = st.file_uploader("Upload the filled template", type=["csv", "xlsx", "xls"], key="bulk_lmr")
                 
-                uploaded = st.file_uploader("Upload Filled Template", type=["csv", "xlsx", "xls"], key="bulk_lmr")
                 if uploaded:
                     try:
                         df_up = pd.read_csv(uploaded) if uploaded.name.endswith('.csv') else pd.read_excel(uploaded)
