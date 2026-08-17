@@ -112,12 +112,19 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-# REMOVED "🏠 Portal Home" from the core pages
-core_pages = ["👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
+core_pages = ["🏠 Portal Home", "👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
 if role == "block":
     core_pages.remove("📈 Reports")
 
-admin_pages = ["📊 Global Analytics", "⚙️ Master Data", "👥 User Management", "🛡️ Audit Logs", "🎨 UI / System Settings"]
+# UPDATED: Added the new Estimate Master Data option
+admin_pages = [
+    "📊 Global Analytics", 
+    "⚙️ Master Data", 
+    "📐 Estimate Master Data", 
+    "👥 User Management", 
+    "🛡️ Audit Logs", 
+    "🎨 UI / System Settings"
+]
 allowed_admin = admin_pages if role == "superadmin" else []
 
 # Set default landing page
@@ -198,8 +205,19 @@ def render_top_navigation():
 
 render_top_navigation()
 
+# ---------- LANDING PAGE STATS ----------
+def render_landing_page():
+    try:
+        from modules.analytics import show as show_portal_analytics
+        show_portal_analytics()
+    except Exception:
+        st.error("Failed to load Portal Analytics. Please run the SQL fixes provided.")
+
 # ---------- IMPORT MODULES & ROUTING (DEFERRED TO AVOID CACHE POISON) ----------
 try:
+    # UPDATED: Added the new import
+    from modules.estimate_master_data import show as show_estimate_master_data
+    
     if st.session_state.current_page == "📐 Estimate Builder":
         from modules.estimate_builder import show as show_estimate_builder
         show_estimate_builder()
@@ -224,6 +242,9 @@ try:
     elif st.session_state.current_page == "⚙️ Master Data":
         from modules.master_data import show as show_masterdata
         show_masterdata()
+    # UPDATED: Added the routing for the new option
+    elif st.session_state.current_page == "📐 Estimate Master Data":
+        show_estimate_master_data()
     elif st.session_state.current_page == "👥 User Management":
         from modules.users import show as show_users
         show_users()
