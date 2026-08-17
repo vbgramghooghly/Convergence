@@ -1,12 +1,34 @@
-from datetime import date, datetime
-import base64
-import json
-import io
-from utils.db import get_supabase
 import streamlit as st
+from utils.db import get_supabase
 
+# ---------- CAPTCHA ----------
+def get_captcha():
+    """Return a (question, answer) tuple. Stored in session to avoid regeneration on reruns."""
+    if "captcha" not in st.session_state:
+        import random
+        a = random.randint(1, 10)
+        b = random.randint(1, 10)
+        op = random.choice(['+', '-', '*'])
+        if op == '+':
+            answer = a + b
+            question = f"{a} + {b}"
+        elif op == '-':
+            a, b = max(a, b), min(a, b)
+            answer = a - b
+            question = f"{a} - {b}"
+        else:
+            answer = a * b
+            question = f"{a} × {b}"
+        st.session_state.captcha = {"question": question, "answer": answer}
+    return st.session_state.captcha["question"], st.session_state.captcha["answer"]
+
+def clear_captcha():
+    if "captcha" in st.session_state:
+        del st.session_state.captcha
+
+# ---------- AUTHENTICATION (original, plus CAPTCHA) ----------
 def check_password():
-    """Returns True if the user is authenticated, otherwise renders a login page."""
+    """Returns True if the user is authenticated, otherwise renders a login page with CAPTCHA."""
     
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -59,11 +81,32 @@ def check_password():
             
             username = st.text_input("Username / Email")
             password = st.text_input("Password", type="password")
+
+            # ---------- CAPTCHA ----------
+            question, correct_answer = get_captcha()
+            captcha_input = st.text_input(f"Security Check: What is {question}?", placeholder="Your answer")
             
             st.markdown("<br>", unsafe_allow_html=True)
             submit_btn = st.form_submit_button("Sign In to Portal", type="primary", use_container_width=True)
 
             if submit_btn:
+                # Validate CAPTCHA
+                try:
+                    user_answer = int(captcha_input.strip())
+                except ValueError:
+                    st.error("⚠️ Please enter a numeric answer for the security check.")
+                    return False
+
+                if user_answer != correct_answer:
+                    st.error("❌ Incorrect security answer. Please try again.")
+                    clear_captcha()  # generate new challenge
+                    st.rerun()
+                    return False
+
+                # CAPTCHA passed – clear it
+                clear_captcha()
+
+                # Validate credentials (original logic)
                 if not username or not password:
                     st.error("⚠️ Credentials required.")
                 else:
