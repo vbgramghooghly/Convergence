@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import pandas as pd
 from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
@@ -97,7 +98,7 @@ st.markdown(f"""
             background-color: #F1F5F9 !important;
         }}
 
-        /* 3. APP LAUNCHER CARDS */
+        /* 3. APP LAUNCHER BUTTON STYLES */
         .app-card {{
             background-color: #FFFFFF; 
             padding: 20px; 
@@ -105,7 +106,6 @@ st.markdown(f"""
             box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
             border: 1px solid #E2E8F0;
             text-align: center;
-            cursor: pointer;
             transition: transform 0.2s, box-shadow 0.2s;
             margin-bottom: 12px;
         }}
@@ -136,7 +136,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-# UPDATED: The first page is now the "Portal Home" landing page
 core_pages = ["🏠 Portal Home", "📐 Estimate Builder", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "👥 Officials", "📈 Reports"]
 if role == "block":
     core_pages.remove("📈 Reports")
@@ -223,7 +222,6 @@ def fetch_landing_stats(role, user):
             stats['converged_fund'] = 0
 
     except Exception as e:
-        # If the DB permission or connection fails, don't crash the landing page, just show 0s
         stats = {'total_works': 0, 'total_targets': 0, 'total_users': 0, 'total_blocks': 0, 'total_depts': 0, 'status_counts': {}, 'converged_fund': 0}
     
     return stats
@@ -235,7 +233,7 @@ def render_landing_page():
     st.markdown(f"### 👋 Welcome back, {user.get('full_name', 'User')}")
     
     if role in ['superadmin', 'district', 'block']:
-        st.markdown("#### 📊 Governance & Execution Performance Overview")
+        # REMOVED: st.markdown("#### 📊 Governance & Execution Performance Overview")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🏢 Active Blocks", stats['total_blocks'])
         col2.metric("🏛️ Departments Enrolled", stats['total_depts'])
@@ -247,7 +245,6 @@ def render_landing_page():
         with c_status:
             st.caption("**Work Status Distribution**")
             if stats['status_counts']:
-                # Convert to a simple DataFrame for charting
                 df_status = pd.DataFrame(list(stats['status_counts'].items()), columns=['Status', 'Count'])
                 st.bar_chart(df_status.set_index('Status'))
             else:
@@ -260,48 +257,49 @@ def render_landing_page():
         col2.metric("🛠️ My Registered Works", stats['total_works'])
         col3.metric("💰 Dept. Converged Fund", f"₹{stats['converged_fund']:.2f} L")
 
-    # ========== APP LAUNCHER ==========
+    # ========== APP LAUNCHER (CRITICAL FIX: Hardcoded Buttons) ==========
     st.markdown("---")
     st.markdown("### 🚀 Launch an Application")
     st.caption("Select a module below to start working.")
 
-    # Create 3 rows of columns for cards
-    apps = [
-        ("📐", "Estimate Builder", "Create and calculate estimates", "📐 Estimate Builder"),
-        ("📋", "Work Entry", "Register individual activities", "📋 Work Entry"),
-        ("🚀", "Progress", "Update implementation status", "🚀 Progress"),
-        ("🤝", "Meetings", "Manage meeting commitments", "🤝 Meetings"),
-        ("👥", "Officials", "View department officials", "👥 Officials"),
-        ("📈", "Reports", "Generate statutory reports", "📈 Reports"),
-    ]
-    
-    # Remove Reports if role is block (as per earlier logic)
-    if role == "block":
-        apps = [a for a in apps if a[3] != "📈 Reports"]
+    # Row 1
+    r1_col1, r1_col2, r1_col3 = st.columns(3)
+    with r1_col1:
+        if st.button("📐 **Estimate Builder**\n\nCreate and calculate estimates", use_container_width=True):
+            st.session_state.current_page = "📐 Estimate Builder"
+            st.rerun()
+    with r1_col2:
+        if st.button("📋 **Work Entry**\n\nRegister individual activities", use_container_width=True):
+            st.session_state.current_page = "📋 Work Entry"
+            st.rerun()
+    with r1_col3:
+        if st.button("🚀 **Progress**\n\nUpdate implementation status", use_container_width=True):
+            st.session_state.current_page = "🚀 Progress"
+            st.rerun()
 
-    for i in range(0, len(apps), 3):
-        row_cols = st.columns(3)
-        group = apps[i:i+3]
-        for j, card in enumerate(group):
-            icon, title, desc, page_name = card
-            with row_cols[j]:
-                # We use HTML wrapped inside st.markdown to mimic a clickable tile,
-                # then a button below it for actual functionality.
-                st.markdown(f"""
-                <div class="app-card" onclick="document.getElementById('nav_{page_name}').click()">
-                    <div style="font-size: 2.5rem;">{icon}</div>
-                    <div class="app-card-title">{title}</div>
-                    <div class="app-card-desc">{desc}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                # Hidden button that handles the actual navigation click
-                if st.button(f"Launch {title}", key=f"btn_{page_name}", use_container_width=True):
-                    st.session_state.current_page = page_name
-                    st.rerun()
+    # Row 2
+    r2_col1, r2_col2, r2_col3 = st.columns(3)
+    with r2_col1:
+        if st.button("🤝 **Meetings**\n\nManage meeting commitments", use_container_width=True):
+            st.session_state.current_page = "🤝 Meetings"
+            st.rerun()
+    with r2_col2:
+        if st.button("👥 **Officials**\n\nView department officials", use_container_width=True):
+            st.session_state.current_page = "👥 Officials"
+            st.rerun()
+
+    # Conditionally hide Reports for Block users
+    if role != "block":
+        with r2_col3:
+            if st.button("📈 **Reports**\n\nGenerate statutory reports", use_container_width=True):
+                st.session_state.current_page = "📈 Reports"
+                st.rerun()
+    else:
+        with r2_col3:
+            st.empty() # Keeps the layout balanced
 
 # ---------- MAIN NAVIGATION LOGIC ----------
 def render_top_navigation():
-    # No Admin buttons on the main landing page layout, keep it clean
     if allowed_admin:
         cols = st.columns([2.2, 7, 1.2, 1.2], vertical_alignment="center")
     else:
@@ -322,7 +320,6 @@ def render_top_navigation():
             for i, page in enumerate(core_pages):
                 with nav_cols[i]:
                     is_active = st.session_state.current_page == page
-                    # Using standard button callback here resolves the no-op error
                     if st.button(page, type="primary" if is_active else "secondary", use_container_width=True):
                         st.session_state.current_page = page
                         st.rerun()
