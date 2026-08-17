@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
 import uuid
-import base64
 import streamlit.components.v1 as components
 from utils.db import get_supabase
-from auth.auth import logout_user
+from auth.auth import logout
 
 # --- Security ---
 if not st.session_state.get('authenticated', False) and not st.session_state.get('is_guest', False):
@@ -25,8 +24,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Full VBGRAMG Scheme List (same as AI Drawings) ---
-VB_GRAM_G_SCHEMES = [
+# --- Fallback Scheme List (In case DB fetch fails or is empty) ---
+VB_GRAM_G_SCHEMES_FALLBACK = [
     "Construction of Boulder Check Dam for Individual",
     "Construction of Boulder Check Dam for Community",
     "Repair & Maintenance of Boulder Check Dam for Community",
@@ -90,18 +89,16 @@ SKILLED_SEMI_CODES = ['0116', '0160', '0161']
 if 'work_name' not in st.session_state:
     st.session_state['work_name'] = ""
 if 'work_type' not in st.session_state:
-    st.session_state['work_type'] = VB_GRAM_G_SCHEMES[0]
+    st.session_state['work_type'] = VB_GRAM_G_SCHEMES_FALLBACK[0] if VB_GRAM_G_SCHEMES_FALLBACK else ""
 if 'estimate_data' not in st.session_state:
     st.session_state['estimate_data'] = []
 if 'show_dpr' not in st.session_state:
-    st.session_state['show_dpr'] = False  # DPR preview toggle
+    st.session_state['show_dpr'] = False
 
 # --- Sidebar ---
 with st.sidebar:
-    # REMOVED: "Back to Dashboard" button because it is now an integrated tab
     st.header("⚙️ Global Settings")
     
-    # RETRIEVE LOCKED DISTRICT FROM SESSION STATE
     user_district = st.session_state.get('district_id', 1)
     active_district_name = DISTRICT_NAMES.get(user_district, f"District {user_district}")
     st.markdown(f"**📍 Active District (LMR)**")
@@ -118,7 +115,7 @@ with st.sidebar:
 # --- Data Loader with Infinite Pagination ---
 @st.cache_data(ttl=3600)
 def load_master_data(district_id):
-    supabase = get_supabase() # FIX: Use get_supabase() instead of core.db
+    supabase = get_supabase()
     try:
         def fetch_all(table, cols="*", filter_col=None, filter_val=None):
             data = []
@@ -140,13 +137,18 @@ def load_master_data(district_id):
         specs_data = fetch_all("master_database", "spec_code, description, final_unit, base_qty")
         matrix_data = fetch_all("consumption_matrix", "spec_code, lmr_code, consumed_qty")
         lmr_data = fetch_all("district_lmr_data", "lmr_code, description, rate", "district_id", district_id)
+        
+        # --- NEW: Fetch Thematic Activities ---
+        activities_data = fetch_all("activities", "id, activity_name", "active", True)
+        activities = pd.DataFrame(activities_data)
 
-        return pd.DataFrame(specs_data), pd.DataFrame(matrix_data), pd.DataFrame(lmr_data)
+        return pd.DataFrame(specs_data), pd.DataFrame(matrix_data), pd.DataFrame(lmr_data), activities
     except Exception as e:
         st.error(f"Database Connection Failed: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_specs, df_matrix, df_lmr = load_master_data(user_district) # Passes locked district ID
+df_specs, df_matrix, df_lmr, df_activities = load_master_data(user_district)
+
 if not df_lmr.empty:
     df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
@@ -246,21 +248,15 @@ def calculate_item_cost(spec_code, final_qty, material_gsts_dict):
     return unskilled, skilled, pure_material_cost, total_gst, material_breakdown
 
 def calculate_totals(estimate_data):
-    """
-    Compute global totals from the estimate_data structure.
-    Returns a dict with keys: unskilled, skilled, material, gst, grand_total,
-    and also per‑item details for reporting.
-    """
     total_unskilled = 0.0
     total_skilled = 0.0
     total_material = 0.0
     total_gst = 0.0
-    item_details = []  # list of dicts with full breakdown
+    item_details = []
 
     for heading in estimate_data:
         for item in heading.get('items', []):
             if item['input_type'] == "Lump Sum (LS)":
-                # Lump sum item: amount is directly in ls_amount, no GST
                 ls_amt = item.get('ls_amount', 0.0)
                 total_material += ls_amt
                 item_details.append({
@@ -287,7 +283,6 @@ def calculate_totals(estimate_data):
                 total_skilled += skilled
                 total_material += mat
                 total_gst += gst
-                # store detail
                 try:
                     spec_desc = df_specs[df_specs['spec_code'] == spec]['description'].iloc[0]
                 except:
@@ -335,10 +330,22 @@ if view_mode == "Edit Workspace":
         st.markdown("""<div style='background-color:#f8f9fa; padding:15px; border-radius:5px; border:1px solid #e9ecef; margin-bottom: 20px;'>""", unsafe_allow_html=True)
         st.markdown("#### 📋 Project Details")
         st.session_state['work_name'] = st.text_input("Name of Work", value=st.session_state['work_name'], placeholder="Enter the official project title...")
+        
+        # --- NEW: Dynamic Work Type Dropdown ---
+        if not df_activities.empty:
+            activity_options = df_activities['activity_name'].tolist()
+        else:
+            activity_options = VB_GRAM_G_SCHEMES_FALLBACK  # Fallback
+        
+        current_selection = st.session_state['work_type']
+        default_index = 0
+        if current_selection in activity_options:
+            default_index = activity_options.index(current_selection)
+            
         st.session_state['work_type'] = st.selectbox(
             "VB-G RAM G Scheme (Work Type)",
-            options=VB_GRAM_G_SCHEMES,
-            index=VB_GRAM_G_SCHEMES.index(st.session_state['work_type']) if st.session_state['work_type'] in VB_GRAM_G_SCHEMES else 0
+            options=activity_options,
+            index=default_index
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -484,13 +491,11 @@ elif view_mode == "View Appendix-I Report":
 with st.sidebar:
     st.markdown("---")
 
-    # Compute totals from current estimate_data
     totals = calculate_totals(st.session_state['estimate_data'])
     total_a = totals['unskilled']
     total_b = totals['skilled'] + totals['material'] + totals['gst']
     grand_total = totals['grand_total']
 
-    # Person days
     unskilled_rate = df_lmr[df_lmr['lmr_code'] == '0115']['rate'].iloc[0] if not df_lmr.empty and '0115' in df_lmr['lmr_code'].values else 1
     person_days = (total_a / unskilled_rate) if unskilled_rate > 0 else 0
 
@@ -498,7 +503,6 @@ with st.sidebar:
     st.metric("Component B (Skilled + Material + GST)", f"₹ {total_b:,.2f}")
     st.success(f"### Grand Total: ₹ {grand_total:,.2f}")
 
-    # Print / DPR actions
     st.markdown("---")
     st.markdown("**📄 Document Actions**")
     if st.button("🖨️ Print Estimate (Appendix-I)", use_container_width=True):
@@ -507,7 +511,6 @@ with st.sidebar:
 
     if st.session_state.get('print_trigger', False):
         st.session_state['print_trigger'] = False
-        # Generate a printable HTML report
         html_report = f"""
         <html>
         <head><style>
@@ -567,17 +570,13 @@ with st.sidebar:
         <script>window.onload = function() {{ window.print(); }}</script>
         </body></html>
         """
-        # Display the HTML in an iframe and auto-print
         components.html(html_report, height=600, scrolling=True)
-        # Also display a button to reprint if needed
         if st.button("🔄 Re-print / Download PDF"):
             st.components.v1.html(html_report, height=600, scrolling=True)
 
-    # DPR Preview (optional)
     if st.session_state.get('show_dpr', False):
         st.markdown("---")
         st.markdown("**📊 DPR Summary**")
-        # Show detailed material breakdown per item
         for detail in totals['item_details']:
             if detail['materials']:
                 with st.expander(f"{detail['spec_code']} - {detail['description']}"):
@@ -623,4 +622,4 @@ with st.sidebar:
 
     if st.session_state.get('authenticated'):
         st.markdown("---")
-        st.button("🔒 Logout", on_click=logout_user, use_container_width=True)
+        st.button("🔒 Logout", on_click=logout, use_container_width=True)
