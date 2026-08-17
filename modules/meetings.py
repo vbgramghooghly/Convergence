@@ -8,7 +8,7 @@ from utils.db import get_supabase
 from utils.audit import log_action
 
 # ------------------------------------------------------------------
-# Helper functions (unchanged from original)
+# Helper functions (unchanged)
 # ------------------------------------------------------------------
 def safe_id(val):
     if pd.isna(val) or val is None or val == '':
@@ -83,15 +83,13 @@ def render_print_preview(html_content):
     components.html(wrapped_html, height=800, scrolling=True)
 
 # ------------------------------------------------------------------
-# Main show() – all business logic preserved, only write operations
-# are now verified with `resp.data` instead of `resp.count`, and
-# the regular Supabase client is used for all operations.
+# Main show()
 # ------------------------------------------------------------------
 def show():
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
     role = user["role"]
-    supabase = get_supabase()                # regular client – all operations use this
+    supabase = get_supabase()
     today = pd.to_datetime(date.today())
     active_fy = st.session_state.get("selected_fy", "2026-27")
 
@@ -118,11 +116,8 @@ def show():
             st.session_state.mtg_msg = None
             st.session_state.mtg_msg_type = None
 
-    # Header
-    st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Statutory Governance / Convergence Meetings</div>", unsafe_allow_html=True)
-    st.markdown("<h2 style='margin-bottom: 0px; color: #0F4C81;'>🤝 Statutory Meeting Governance & Resolution Tracker</h2>", unsafe_allow_html=True)
-    st.caption(f"FY {active_fy} | Coordinate Committee Meetings, Record Proceedings, Synchronize ATRs, and Generate Agendas.")
-    st.markdown("---")
+    # ---------- HEADER LINES REMOVED ----------
+    # (Previously: breadcrumb, title, subtitle, and separator)
 
     # Master data fetches
     departments = supabase.table("departments").select("id, department_name").execute().data or []
@@ -219,7 +214,7 @@ def show():
             df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
     # --------------------------------------------------------------
-    # Generate meeting HTML for printing
+    # Generate meeting HTML for printing (unchanged)
     # --------------------------------------------------------------
     def generate_meeting_html(p_mtg, p_aps, doc_type):
         org_label = "District Administration" if p_mtg.get('meeting_type') == 'District' else "Block Development Office"
@@ -775,6 +770,54 @@ def show():
                     }
                 )
 
+                # ---------- NEW: Dedicated Delete Section for District/Block Users ----------
+                if role in ["district", "block"]:
+                    with st.expander("🗑️ Delete Extra/Mistaken Commitment", expanded=False):
+                        st.caption("Select a commitment that was added by mistake and remove it from active tracking. This action is audited.")
+                        # Prepare list of commitments (excluding already dropped)
+                        delete_options = filtered_df['id'].tolist()
+                        if delete_options:
+                            def format_delete_label(x):
+                                row = filtered_df[filtered_df['id'] == x].iloc[0]
+                                return f"{row['Resolution No.']} | {row['Department / Wing']} | {str(row['action_point'])[:60]}..."
+                            
+                            selected_delete_id = st.selectbox("Select Commitment to Delete", delete_options, format_func=format_delete_label, key="delete_select")
+                            delete_reason = st.text_input("Reason for Deletion (Audited)*", placeholder="e.g. Duplicate entry, Wrong department, Mistakenly added")
+                            
+                            if st.button("🗑️ Delete Commitment Permanently (Soft Delete)", type="primary"):
+                                if not delete_reason.strip():
+                                    st.error("⚠️ Please provide a reason for deletion.")
+                                else:
+                                    clean_del_id = safe_id(selected_delete_id)
+                                    try:
+                                        # Soft delete: set status to "Dropped" and add remarks
+                                        update_payload = {
+                                            "status": "Dropped",
+                                            "remarks": f"[Deleted by {role.upper()} user {user.get('full_name', user['id'])} on {datetime.now().strftime('%d-%m-%Y %H:%M')} - Reason: {delete_reason}]"
+                                        }
+                                        upd_resp = supabase.table("meeting_action_points").update(
+                                            sanitize_payload(update_payload)
+                                        ).eq("id", clean_del_id).execute()
+                                        if upd_resp.data:
+                                            # Verify
+                                            v_resp = supabase.table("meeting_action_points").select("status").eq("id", clean_del_id).execute()
+                                            if v_resp.data and v_resp.data[0].get('status') == "Dropped":
+                                                try:
+                                                    log_action(user.get('id'), f"DELETED meeting_action_points {clean_del_id} - Reason: {delete_reason}")
+                                                except:
+                                                    pass
+                                                set_msg("success", "✅ Commitment successfully removed from active tracking.")
+                                            else:
+                                                set_msg("error", "🔴 Deletion verification failed; status not updated.")
+                                        else:
+                                            set_msg("error", "🔴 Deletion update returned no data.")
+                                    except Exception as e:
+                                        set_msg("error", f"❌ Failed to delete commitment: {str(e)}")
+                                    st.rerun()
+                        else:
+                            st.info("No commitments available for deletion in the current filter.")
+
+                # ---------- Existing Authorized Correction & Cancellation Workspace ----------
                 if role in ["superadmin", "district", "block"]:
                     st.markdown("---")
                     st.markdown("##### ⚙️ Authorized Correction & Cancellation Workspace")
