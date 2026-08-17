@@ -6,6 +6,13 @@ from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
 
+CONVERGENCE_TYPES = [
+    "Technical Convergence (Zero Fund/NOC)",
+    "Financial (as PIA)",
+    "Financial (as Non-PIA)",
+]
+PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
+
 @st.cache_data(ttl=600)
 def fetch_master_data():
     supabase = get_supabase()
@@ -41,7 +48,6 @@ def show():
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
     
-    # Create ID map for FY
     fy_id_to_name = {f["id"]: f["year_name"].strip() for f in fys}
     if not fy_id_to_name:
         st.error("⚠️ No active Financial Years found in the database. Please contact your administrator.")
@@ -80,7 +86,6 @@ def show():
                 with st.container(border=True):
                     active_dept_id, active_wing_id, dist_id = None, None, None
                     
-                    # ----- FIX: ULTIMATE FY DROPDOWN (RETURNS ID DIRECTLY) -----
                     selected_fy_target_id = st.selectbox(
                         "Financial Year*",
                         options=list(fy_id_to_name.keys()),
@@ -136,6 +141,7 @@ def show():
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
 
                     st.markdown("##### Departmental Scheme / Fund Convergence")
+                    
                     existing_record = None
                     if active_dept_id and dist_id and activity and activity != "No activities available":
                         q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
@@ -143,7 +149,10 @@ def show():
                             q_check = q_check.eq("wing_id", active_wing_id)
                         else:
                             q_check = q_check.is_("wing_id", "null")
-                        existing_records = q_check.execute().data
+                        
+                        exec_result = q_check.execute()
+                        existing_records = exec_result.data if exec_result else []
+                        
                         if existing_records:
                             existing_record = existing_records[0]
 
@@ -201,11 +210,18 @@ def show():
                             st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
                         else:
                             target_record = {
-                                "department_id": active_dept_id, "wing_id": active_wing_id, "district_id": dist_id,
-                                "financial_year_id": selected_fy_target_id, # Save the ID, not the string
-                                "project_head": project_head.strip(), "activity": activity,
-                                "asset_count": asset_count, "annual_plan_scope": annual_plan_scope, "desired_target": desired_target,
-                                "department_fund": dept_fund, "vbgramg_fund": vbg_fund, "expected_persondays": expected_persondays,
+                                "department_id": active_dept_id,
+                                "wing_id": active_wing_id,
+                                "district_id": dist_id,
+                                "financial_year_id": selected_fy_target_id, # Uses the ID directly
+                                "project_head": project_head.strip(),
+                                "activity": activity,
+                                "asset_count": asset_count,
+                                "annual_plan_scope": annual_plan_scope,
+                                "desired_target": desired_target,
+                                "department_fund": dept_fund,
+                                "vbgramg_fund": vbg_fund,
+                                "expected_persondays": expected_persondays,
                                 "created_by": user['id'],
                                 "department_scheme_convergence": conv_choice == "Yes",
                                 "department_scheme_name": scheme_name.strip() if scheme_name else None,
@@ -216,7 +232,9 @@ def show():
                                 q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
                                 if active_wing_id: q_existing = q_existing.eq("wing_id", active_wing_id)
                                 else: q_existing = q_existing.is_("wing_id", "null")
+                                
                                 existing = q_existing.execute().data
+                                
                                 if existing:
                                     target_id = existing[0]['id']
                                     supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
@@ -267,8 +285,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 & 3 =================
-    # (Tabs 2 and 3 remain identical to the previous rewrite, unchanged)
+    # ================= TAB 2 =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
