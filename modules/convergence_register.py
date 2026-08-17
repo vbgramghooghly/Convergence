@@ -54,7 +54,7 @@ def fetch_master_lookups():
 
 def build_maps(data):
     return {
-        "fy_map": {f["id"]: f["year_name"].strip() for f in data["fys"]},
+        "fy_name_to_id": {f["year_name"].strip(): f["id"] for f in data["fys"]},
         "dist_map": {d["district_name"]: d["id"] for d in data["districts"]},
         "block_map": {b["block_name"]: b["id"] for b in data["blocks"]},
         "dept_map": {d["department_name"]: d["id"] for d in data["depts"]},
@@ -327,12 +327,12 @@ def show():
         with st.container(border=True):
             col1, col2 = st.columns(2)
             
-            # ----- FIX: ULTIMATE FY DROPDOWN (RETURNS ID DIRECTLY) -----
-            fy_id_to_name = {f["id"]: f["year_name"].strip() for f in master["fys"]}
+            # Clean ID Selection using pre-built map
+            fy_id_options = list(maps["fy_reverse"].keys())
             selected_fy_id = col1.selectbox(
                 "Financial Year*",
-                options=list(fy_id_to_name.keys()),
-                format_func=lambda x: fy_id_to_name[x]
+                options=fy_id_options,
+                format_func=lambda x: maps["fy_reverse"][x]
             )
 
             # Building Combined Department & Wings Dropdown
@@ -482,9 +482,8 @@ def show():
                     if inp_lat_long:
                         geo_string += f" | GPS: {inp_lat_long}"
 
-                    # ----- DATA INSERT USING VALIDATED ID -----
                     insert_data = {
-                        "financial_year_id": selected_fy_id, # This is now a guaranteed valid ID
+                        "financial_year_id": selected_fy_id,
                         "district_id": selected_dist_id,
                         "block_id": block_id,
                         "department_id": selected_dept_id,
@@ -520,7 +519,6 @@ def show():
                         st.error(f"Error saving record: {e}")
 
     with tab3:
-        # Bulk upload unchanged
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
@@ -559,7 +557,8 @@ def show():
                             act_str = str(row.get("Base Activity", "")).strip()
                             conv_str = str(row.get("Convergence Type", "")).strip()
 
-                            fy_id = maps["fy_map"].get(fy_str) if fy_str in maps["fy_map"] else None
+                            # FIX: Use the correct fy_name_to_id map for string to ID lookup
+                            fy_id = maps["fy_name_to_id"].get(fy_str)
                             dist_id = maps["dist_map"].get(dist_str)
                             block_id = maps["block_map"].get(block_str)
                             dept_id = maps["dept_map"].get(dept_str)
