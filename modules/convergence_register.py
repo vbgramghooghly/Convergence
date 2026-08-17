@@ -232,6 +232,7 @@ def edit_delete_section(records, maps, supabase, user):
             new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
 
             # --- NEW: Departmental Scheme / Fund Convergence section in edit form ---
+            st.markdown("---")
             defaults = {
                 "convergence": rec.get("department_scheme_convergence", False),
                 "scheme_name": rec.get("department_scheme_name", "") or "",
@@ -272,7 +273,10 @@ def edit_delete_section(records, maps, supabase, user):
                     }
                     try:
                         supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                        log_action(user.get("id"), f"UPDATE convergence_register {selected_edit_id}")
+                        try:
+                            log_action(user.get("id"), f"UPDATE convergence_register {selected_edit_id}")
+                        except Exception:
+                            pass  # Silently ignore audit errors
                         st.success("Activity updated successfully!")
                         st.rerun()
                     except Exception as e:
@@ -452,7 +456,10 @@ def show():
                     }
                     try:
                         res = supabase.table("convergence_register").insert(insert_data).execute()
-                        log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
+                        try:
+                            log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
+                        except Exception:
+                            pass  # Silently ignore audit errors
                         st.success("✅ Convergence activity successfully created and registered!")
                         st.rerun()
                     except Exception as e:
