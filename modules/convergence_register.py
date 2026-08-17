@@ -103,6 +103,17 @@ def display_register(df, maps):
     for col in ["convergence_type", "mis_code", "origin_source"]:
         if col not in df_display.columns:
             df_display[col] = "Not Specified" if col == "convergence_type" else ""
+    
+    # Add new columns if they exist
+    if "department_scheme_convergence" in df_display.columns:
+        df_display["Own Scheme Convergence"] = df_display["department_scheme_convergence"].map({True: "Yes", False: "No"})
+    if "department_scheme_name" in df_display.columns:
+        df_display["Scheme / Fund Name"] = df_display["department_scheme_name"]
+    if "department_annual_plan_status" in df_display.columns:
+        df_display["Own Annual Plan Status"] = df_display["department_annual_plan_status"]
+    if "department_scheme_remarks" in df_display.columns:
+        df_display["Remarks"] = df_display["department_scheme_remarks"]
+
     df_display.rename(
         columns={
             "activity_description": "Work Name",
@@ -118,6 +129,10 @@ def display_register(df, maps):
         "FY", "District", "Block", "Department", "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
+    # Append new columns if present
+    extra_cols = [c for c in ["Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
+    display_cols.extend(extra_cols)
+
     st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
 
     buffer = io.BytesIO()
@@ -129,6 +144,43 @@ def display_register(df, maps):
         file_name="convergence_register.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+def render_scheme_convergence_section(defaults):
+    """
+    Renders the Departmental Scheme / Fund Convergence section.
+    Returns a dict with the entered values.
+    """
+    st.markdown("##### Departmental Scheme / Fund Convergence")
+    conv_choice = st.radio(
+        "Convergence with Own Departmental Scheme / Fund?",
+        options=["No", "Yes"],
+        index=0 if not defaults.get("convergence") else 1,
+        key="conv_choice_reg"
+    )
+    scheme_name = ""
+    if conv_choice == "Yes":
+        scheme_name = st.text_input(
+            "Name of Departmental Scheme / Fund *",
+            value=defaults.get("scheme_name", ""),
+            key="scheme_name_reg"
+        )
+    annual_plan_status = st.selectbox(
+        "Included in Department's Own Annual Plan?",
+        options=["Yes", "No", "Not Confirmed"],
+        index=["Yes", "No", "Not Confirmed"].index(defaults.get("annual_plan_status", "Not Confirmed")),
+        key="annual_plan_status_reg"
+    )
+    scheme_remarks = st.text_area(
+        "Departmental Scheme / Annual Plan Remarks (Optional)",
+        value=defaults.get("scheme_remarks", ""),
+        key="scheme_remarks_reg"
+    )
+    return {
+        "convergence": conv_choice == "Yes",
+        "scheme_name": scheme_name.strip() if scheme_name else None,
+        "annual_plan_status": annual_plan_status,
+        "scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
+    }
 
 def edit_delete_section(records, maps, supabase, user):
     if user["role"] not in ["superadmin", "district"] or not records:
@@ -179,10 +231,22 @@ def edit_delete_section(records, maps, supabase, user):
             new_v_fund = col_t2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get("vbgramg_fund", 0.0)))
             new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
 
+            # --- NEW: Departmental Scheme / Fund Convergence section in edit form ---
+            defaults = {
+                "convergence": rec.get("department_scheme_convergence", False),
+                "scheme_name": rec.get("department_scheme_name", "") or "",
+                "annual_plan_status": rec.get("department_annual_plan_status", "Not Confirmed"),
+                "scheme_remarks": rec.get("department_scheme_remarks", "") or "",
+            }
+            scheme_data = render_scheme_convergence_section(defaults)
+
             if st.form_submit_button("Commit Changes", type="primary"):
                 if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
                     new_d_fund = new_v_fund = 0.0
-                if not new_work_name.strip():
+                # Validation for new fields
+                if scheme_data["convergence"] and not scheme_data["scheme_name"]:
+                    st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
+                elif not new_work_name.strip():
                     st.error("⚠️ Work Name cannot be empty.")
                 elif new_conv_type != "Technical Convergence (Zero Fund/NOC)" and new_d_fund == 0.0 and new_v_fund == 0.0:
                     st.error("⚠️ Financial Convergence requires a Fund amount > 0.")
@@ -201,6 +265,10 @@ def edit_delete_section(records, maps, supabase, user):
                         "expected_persondays": new_pd,
                         "department_fund": new_d_fund,
                         "vbgramg_fund": new_v_fund,
+                        "department_scheme_convergence": scheme_data["convergence"],
+                        "department_scheme_name": scheme_data["scheme_name"],
+                        "department_annual_plan_status": scheme_data["annual_plan_status"],
+                        "department_scheme_remarks": scheme_data["scheme_remarks"],
                     }
                     try:
                         supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
@@ -320,6 +388,11 @@ def show():
                 dept_fund = col_f3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
                 vbg_fund = col_f4.number_input("VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1)
 
+            # --- NEW: Departmental Scheme / Fund Convergence section (creation) ---
+            st.markdown("---")
+            scheme_defaults = {"convergence": False, "scheme_name": "", "annual_plan_status": "Not Confirmed", "scheme_remarks": ""}
+            scheme_data = render_scheme_convergence_section(scheme_defaults)
+
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Commit Activity Registration", type="primary", use_container_width=True):
                 errors = []
@@ -339,6 +412,9 @@ def show():
                     errors.append("Financial Convergence requires a Fund allocation.")
                 if persondays <= 0:
                     errors.append("Expected Persondays must be greater than zero.")
+                # New validation
+                if scheme_data["convergence"] and not scheme_data["scheme_name"]:
+                    errors.append("Scheme / Fund name is mandatory when Convergence = Yes.")
 
                 if errors:
                     for err in errors:
@@ -369,6 +445,10 @@ def show():
                         "department_fund": dept_fund,
                         "vbgramg_fund": vbg_fund,
                         "current_status": "Planned",
+                        "department_scheme_convergence": scheme_data["convergence"],
+                        "department_scheme_name": scheme_data["scheme_name"],
+                        "department_annual_plan_status": scheme_data["annual_plan_status"],
+                        "department_scheme_remarks": scheme_data["scheme_remarks"],
                     }
                     try:
                         res = supabase.table("convergence_register").insert(insert_data).execute()
@@ -379,6 +459,8 @@ def show():
                         st.error(f"Error saving record: {e}")
 
     with tab3:
+        # Bulk upload remains unchanged; new columns are not included in the template to avoid breaking existing CSV imports.
+        # If you wish to add them, extend the template and validation accordingly.
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
@@ -492,6 +574,11 @@ def show():
                                 "department_fund": d_fund,
                                 "vbgramg_fund": m_fund,
                                 "current_status": "Planned",
+                                # New fields left NULL for bulk upload (optional)
+                                "department_scheme_convergence": False,
+                                "department_scheme_name": None,
+                                "department_annual_plan_status": "Not Confirmed",
+                                "department_scheme_remarks": None,
                             }
                             supabase.table("convergence_register").insert(insert_data).execute()
                             success_count += 1
