@@ -60,18 +60,6 @@ def show():
     role = user["role"]
     supabase = get_supabase()
 
-    # ----- CLEAN, COMPACT HEADER -----
-    st.markdown("""
-        <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 0.25rem;">
-            <h2 style="margin: 0; color: #0F4C81;">📋 Convergence Register</h2>
-            <span style="font-size: 0.85rem; color: #64748B;">System‑of‑Record</span>
-        </div>
-        <p style="margin-top: 0; color: #475569; font-size: 0.95rem;">
-            Plan, validate, record, and bulk‑upload individual convergence works across jurisdictions.
-        </p>
-    """, unsafe_allow_html=True)
-    st.markdown("---")
-
     # ---------- FETCH MASTER DATA ----------
     fys, districts, blocks, depts, themes, activities, act_dept_mapping = fetch_master_lookups()
 
