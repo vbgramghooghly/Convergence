@@ -191,25 +191,26 @@ def render_top_navigation():
         </div>
         """, unsafe_allow_html=True)
 
-    if st.session_state.current_page != "🏠 Portal Home":
-        with cols[1]:
-            nav_cols = st.columns(len(core_pages))
-            for i, page in enumerate(core_pages):
-                with nav_cols[i]:
-                    is_active = st.session_state.current_page == page
-                    if st.button(page, type="primary" if is_active else "secondary", use_container_width=True):
+    # ------------------ FIX: REMOVED CONDITIONAL CHECK ------------------
+    # The navbar now ALWAYS renders, regardless of the current page.
+    with cols[1]:
+        nav_cols = st.columns(len(core_pages))
+        for i, page in enumerate(core_pages):
+            with nav_cols[i]:
+                is_active = st.session_state.current_page == page
+                if st.button(page, type="primary" if is_active else "secondary", use_container_width=True):
+                    st.session_state.current_page = page
+                    st.rerun()
+
+    if allowed_admin:
+        with cols[2]:
+            is_admin_active = st.session_state.current_page in allowed_admin
+            with st.popover("⚙️ Admin ▾", use_container_width=True):
+                for page in allowed_admin:
+                    btn_type = "primary" if st.session_state.current_page == page else "secondary"
+                    if st.button(page, type=btn_type, use_container_width=True):
                         st.session_state.current_page = page
                         st.rerun()
-
-        if allowed_admin:
-            with cols[2]:
-                is_admin_active = st.session_state.current_page in allowed_admin
-                with st.popover("⚙️ Admin ▾", use_container_width=True):
-                    for page in allowed_admin:
-                        btn_type = "primary" if st.session_state.current_page == page else "secondary"
-                        if st.button(page, type=btn_type, use_container_width=True):
-                            st.session_state.current_page = page
-                            st.rerun()
 
     with cols[-1]:
         render_profile_menu()
