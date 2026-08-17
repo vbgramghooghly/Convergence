@@ -1,4 +1,3 @@
-# implementation.py
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
@@ -34,8 +33,6 @@ def show():
     role = user['role']
     supabase = get_supabase()
     
-    # ---------- REMOVED HEADER: breadcrumb, title, subtitle, and separator ----------
-
     departments, wings, districts, blocks, activities, act_dept_mapping = fetch_master_data()
     
     dept_map = {d['id']: d['department_name'] for d in departments}
@@ -123,7 +120,56 @@ def show():
                     asset_count = col_tf2.number_input("Number of assets/works", min_value=0, value=0)
                     
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
-                    
+
+                    # ========== NEW: Departmental Scheme / Fund Convergence ==========
+                    st.markdown("##### Departmental Scheme / Fund Convergence")
+
+                    # Pre-fill if editing an existing record (we try to fetch it)
+                    existing_record = None
+                    if active_dept_id and dist_id and activity and activity != "No activities available":
+                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity)
+                        if active_wing_id:
+                            q_check = q_check.eq("wing_id", active_wing_id)
+                        else:
+                            q_check = q_check.is_("wing_id", "null")
+                        existing_records = q_check.execute().data
+                        if existing_records:
+                            existing_record = existing_records[0]
+
+                    default_convergence = existing_record.get("department_scheme_convergence") if existing_record else False
+                    default_scheme_name = existing_record.get("department_scheme_name") or ""
+                    default_annual_plan_status = existing_record.get("department_annual_plan_status") or "Not Confirmed"
+                    default_scheme_remarks = existing_record.get("department_scheme_remarks") or ""
+
+                    conv_choice = st.radio(
+                        "Convergence with Own Departmental Scheme / Fund?",
+                        options=["No", "Yes"],
+                        index=0 if not default_convergence else 1,
+                        key="conv_choice_target"
+                    )
+
+                    scheme_name = ""
+                    if conv_choice == "Yes":
+                        scheme_name = st.text_input(
+                            "Name of Departmental Scheme / Fund *",
+                            value=default_scheme_name,
+                            key="scheme_name_target"
+                        )
+
+                    annual_plan_status = st.selectbox(
+                        "Included in Department's Own Annual Plan?",
+                        options=["Yes", "No", "Not Confirmed"],
+                        index=["Yes", "No", "Not Confirmed"].index(default_annual_plan_status),
+                        key="annual_plan_status_target"
+                    )
+
+                    scheme_remarks = st.text_area(
+                        "Departmental Scheme / Annual Plan Remarks (Optional)",
+                        value=default_scheme_remarks,
+                        key="scheme_remarks_target"
+                    )
+                    # ========== END NEW SECTION ==========
+
                     col_tf3, col_tf4 = st.columns(2)
                     dept_fund = col_tf3.number_input("Dept Fund (₹ Lakhs)", min_value=0.0, format="%.2f")
                     vbg_fund = col_tf4.number_input("VB-G Fund (₹ Lakhs)", min_value=0.0, format="%.2f")
@@ -135,12 +181,28 @@ def show():
                         elif not project_head or not project_head.strip(): st.error("Project Head name cannot be empty.")
                         elif activity == "No activities available": st.error("Cannot save target without a valid approved activity.")
                         elif expected_persondays <= 0: st.error("Expected Persondays is a mandatory field.")
+                        elif conv_choice == "Yes" and not scheme_name.strip():
+                            st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
                         else:
                             target_record = {
-                                "department_id": active_dept_id, "wing_id": active_wing_id, "district_id": dist_id,
-                                "financial_year": "2026-27", "project_head": project_head.strip(), "activity": activity,
-                                "asset_count": asset_count, "annual_plan_scope": annual_plan_scope, "desired_target": desired_target,
-                                "department_fund": dept_fund, "vbgramg_fund": vbg_fund, "expected_persondays": expected_persondays, "created_by": user['id']
+                                "department_id": active_dept_id,
+                                "wing_id": active_wing_id,
+                                "district_id": dist_id,
+                                "financial_year": "2026-27",
+                                "project_head": project_head.strip(),
+                                "activity": activity,
+                                "asset_count": asset_count,
+                                "annual_plan_scope": annual_plan_scope,
+                                "desired_target": desired_target,
+                                "department_fund": dept_fund,
+                                "vbgramg_fund": vbg_fund,
+                                "expected_persondays": expected_persondays,
+                                "created_by": user['id'],
+                                # New fields
+                                "department_scheme_convergence": conv_choice == "Yes",
+                                "department_scheme_name": scheme_name.strip() if scheme_name else None,
+                                "department_annual_plan_status": annual_plan_status,
+                                "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
                             }
                             try:
                                 q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", "2026-27").eq("activity", activity)
@@ -186,7 +248,20 @@ def show():
                     'department_fund': 'Dept. Fund', 'vbgramg_fund': 'VB-G Fund', 'expected_persondays': 'Persondays'
                 }, inplace=True)
 
+                # Append new columns if they exist
+                if 'department_scheme_convergence' in df_t.columns:
+                    df_t['Own Scheme Conv.'] = df_t['department_scheme_convergence'].map({True: 'Yes', False: 'No'})
+                if 'department_scheme_name' in df_t.columns:
+                    df_t['Scheme / Fund Name'] = df_t['department_scheme_name']
+                if 'department_annual_plan_status' in df_t.columns:
+                    df_t['Own Annual Plan Status'] = df_t['department_annual_plan_status']
+                if 'department_scheme_remarks' in df_t.columns:
+                    df_t['Remarks'] = df_t['department_scheme_remarks']
+
                 disp_cols = ['Department / Wing', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
+                extra_cols = [c for c in ['Own Scheme Conv.', 'Scheme / Fund Name', 'Own Annual Plan Status', 'Remarks'] if c in df_t.columns]
+                disp_cols.extend(extra_cols)
+
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
                 
                 buffer = io.BytesIO()
@@ -196,33 +271,31 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # TAB 2: IMPLEMENTATION PROGRESS
+    # TAB 2 and TAB 3 remain unchanged – they are the same as in the original.
+    # (We keep them exactly as they were to avoid any unwanted changes.)
+    # For completeness, they are included below but you can reuse your existing code.
+
+    # ================= TAB 2 =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
-        
         query_reg = supabase.table("convergence_register").select("*")
         if role == 'district': query_reg = query_reg.eq("district_id", user['district_id'])
         elif role == 'block': query_reg = query_reg.eq("block_id", user['block_id'])
         elif role == 'department': query_reg = query_reg.eq("department_id", user['department_id']).eq("district_id", user['district_id'])
-
         activities_reg = query_reg.execute().data
-
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
             missing_mis = [a for a in activities_reg if a.get('current_status') in ["Under Implementation", "Completed"] and not a.get('mis_code')]
             delayed = [a for a in activities_reg if a.get('current_status') == "Delayed"]
-            
             if missing_mis or delayed:
                 st.markdown("<div style='background-color:#FFF4E5; padding:12px; border-left:4px solid #ED6C02; border-radius:4px; margin-bottom:15px;'><b>⚠️ Management Exceptions Detected:</b></div>", unsafe_allow_html=True)
                 e1, e2 = st.columns(2)
                 if missing_mis: e1.error(f"🚨 {len(missing_mis)} activities are under implementation/completed but **Missing MIS Codes**.")
                 if delayed: e2.warning(f"⏳ {len(delayed)} activities are officially flagged as **Delayed**.")
-
             activity_map = {a['id']: f"[{a.get('current_status', 'Planned').upper()}] {a.get('activity_description', 'Unnamed Activity')}" for a in activities_reg}
             selected_act_id = st.selectbox("🔍 Search & Select Specific Work to Update", options=list(activity_map.keys()), format_func=lambda x: activity_map[x])
             selected_act = next((a for a in activities_reg if a['id'] == selected_act_id), None)
-
             if selected_act:
                 st.markdown(f"""
                 <div style="background:#F8FAFC; padding:16px; border-radius:8px; border:1px solid #E2E8F0; margin-bottom: 20px;">
@@ -234,9 +307,7 @@ def show():
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 col_p_left, col_p_right = st.columns([1.5, 1], gap="large")
-                
                 with col_p_left:
                     st.markdown("##### 📝 Update Progress Status")
                     with st.form("update_progress_form"):
@@ -244,24 +315,18 @@ def show():
                         status_options = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed", "Dropped"]
                         current_status = selected_act.get('current_status', 'Planned')
                         new_status = col_p1.selectbox("New Status*", status_options, index=status_options.index(current_status) if current_status in status_options else 0)
-                        
                         phys_ach = col_p2.slider("Physical Achievement (%)*", min_value=0, max_value=100, value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0)))
-                        
                         st.markdown("##### 💰 Financials & MIS Registration")
                         col_p3, col_p4 = st.columns(2)
                         mis_code_val = col_p3.text_input("MIS Code (Mandatory if Active/Done)", value=selected_act.get('mis_code', '') or '')
                         fin_ach = col_p4.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_act.get('financial_achievement', 0.0) or 0.0))
-                        
                         persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_act.get('persondays_generated', 0) or 0))
-
                         st.markdown("##### 📅 Schedule & Blockages")
                         col_p5, col_p6, col_p7 = st.columns(3)
                         start_date = col_p5.date_input("Actual Start", value=safe_parse_date(selected_act.get('actual_start_date')))
                         exp_date = col_p6.date_input("Expected End", value=safe_parse_date(selected_act.get('expected_completion_date')))
                         act_date = col_p7.date_input("Actual End", value=safe_parse_date(selected_act.get('actual_completion_date')))
-
                         remarks = st.text_area("Remarks / Blockage Details", value=selected_act.get('remarks', '') or '')
-
                         if st.form_submit_button("Commit Progress Update", type="primary", use_container_width=True):
                             if new_status in ["Under Implementation", "Completed"] and not mis_code_val.strip():
                                 st.error("⚠️ **Validation Error:** MIS Code is strictly mandatory when moving a scheme to 'Under Implementation' or 'Completed'.")
@@ -273,12 +338,11 @@ def show():
                                     "actual_completion_date": str(act_date) if act_date else None, "remarks": remarks
                                 }
                                 try:
-                                    # Fix: Use `.count` to check RLS permissions
                                     resp = supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
                                     if resp.count and resp.count > 0:
                                         history_payload = {
-                                            "convergence_id": selected_act_id, "status": new_status, 
-                                            "physical_achievement": phys_ach, "financial_achievement": fin_ach, 
+                                            "convergence_id": selected_act_id, "status": new_status,
+                                            "physical_achievement": phys_ach, "financial_achievement": fin_ach,
                                             "persondays_generated": persondays_gen, "remarks": f"MIS Code: {mis_code_val} | {remarks}"
                                         }
                                         supabase.table("progress_updates").insert(history_payload).execute()
@@ -290,7 +354,6 @@ def show():
                                         st.error("🔴 Update failed. Database security (RLS) prevented the update.")
                                 except Exception as e:
                                     st.error(f"Error saving progress: {e}")
-
                 with col_p_right:
                     st.markdown("#### ⏳ Activity Audit Timeline")
                     try:
@@ -310,71 +373,55 @@ def show():
                     except Exception:
                         st.warning("Could not load history timeline.")
 
-    # TAB 3: MEETING COMMITMENTS
+    # ================= TAB 3 =================
     with tab3:
         st.markdown("#### 🤝 Synchronized Departmental Meeting Commitments")
         st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
-
         ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, wing_id, priority, linkage_type, action_point, target, deadline, status, remarks").execute().data
-        
         if ap_query:
             df_ap = pd.DataFrame(ap_query)
-            if role == 'department': 
+            if role == 'department':
                 if user.get('wing_id'):
                     df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
                 else:
                     df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
-
             if not df_ap.empty:
                 def format_dept_display(row):
                     d_name = dept_map.get(row.get("department_id"), "Unknown")
                     w_id = row.get("wing_id")
                     if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
                     return f"{d_name} (Main)"
-                    
                 df_ap['Department / Wing'] = df_ap.apply(format_dept_display, axis=1)
-                
                 meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type").execute().data or []
                 m_map = {m['id']: m for m in meetings_data}
-                
                 df_ap['Meeting Context'] = df_ap['meeting_id'].map(lambda x: f"{m_map.get(x, {}).get('meeting_type', 'Unknown')} ({m_map.get(x, {}).get('meeting_date', 'Unknown')})")
-                
                 pending_ap = df_ap[~df_ap['status'].isin(['Completed', 'Dropped', 'completed', 'dropped'])].copy()
-                
                 if not pending_ap.empty:
                     pending_ap['deadline'] = pd.to_datetime(pending_ap['deadline'], errors='coerce')
                     today_dt = pd.to_datetime(date.today())
                     pending_ap['Days Left'] = (pending_ap['deadline'] - today_dt).dt.days
-                    
                     def get_sla_badge(days):
                         if pd.isna(days): return "⚪ Unscheduled"
                         if days < 0: return "🔴 Overdue"
                         if days == 0: return "🟡 Due Today"
                         if days <= 3: return "🟠 Due Soon"
                         return "🔵 On Track"
-                        
                     pending_ap['SLA Status'] = pending_ap['Days Left'].apply(get_sla_badge)
-
                     sk1, sk2, sk3, sk4 = st.columns(4)
                     sk1.metric("Open Assigned", len(pending_ap))
                     sk2.metric("Overdue / Breach", len(pending_ap[pending_ap['Days Left'] < 0]))
                     sk3.metric("Due Today", len(pending_ap[pending_ap['Days Left'] == 0]))
                     sk4.metric("Requires Review", len(pending_ap[pending_ap['status'].str.contains('Feasible|Review', case=False, na=False)]))
-                    
                     st.markdown("<br>##### 📑 Live Action Registry", unsafe_allow_html=True)
                     disp_cols = ['SLA Status', 'Meeting Context', 'Department / Wing', 'action_point', 'Days Left', 'status']
                     st.dataframe(pending_ap[disp_cols].sort_values('Days Left'), use_container_width=True, hide_index=True)
-                    
                     st.markdown("##### ✏️ Update ATR Status & Progress")
                     with st.form("sync_atr_form"):
                         col_s1, col_s2 = st.columns(2)
-                        
                         sync_id = col_s1.selectbox("Select Resolution", pending_ap['id'].tolist(), format_func=lambda x: f"[{pending_ap[pending_ap['id']==x]['Meeting Context'].values[0]}] {pending_ap[pending_ap['id']==x]['action_point'].values[0][:50]}...")
                         sync_status = col_s2.selectbox("New Status*", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'])
                         sync_remarks = st.text_area("Implementation Outcome / Remarks (Mandatory if 'Not Feasible')")
-                        
                         submitted_sync = st.form_submit_button("Sync Progress to Master Record", type="primary")
-                        
                         if submitted_sync:
                             if sync_status == 'Not Feasible (Requires Review)' and not sync_remarks.strip():
                                 st.error("⚠️ **Validation Error:** You must provide a clear reason in 'Remarks' when flagging an activity as Not Feasible so the Chairperson can review it.")
