@@ -13,9 +13,9 @@ CONVERGENCE_TYPES = [
 ]
 ORIGIN_SOURCES = ["District Plan", "Block Plan", "District Meeting", "Block Meeting"]
 STATUS_OPTIONS = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed", "Dropped"]
-PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]  # NEW: PIA Options
+PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
 
-# ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING (PRESERVED) ----------
+# ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING ----------
 HOOGHLY_GPS = {
     "CHINSURAH MOGRA": ["BANDEL", "CHANDRAHATI-I", "CHANDRAHATI-II", "DEBANANDAPUR", "DIGSUIHOYERA", "KODALIA-I", "KODALIA-II", "MOGRA-I", "MOGRA-II", "SAPTAGRAM"],
     "POLBA DADPUR": ["AKHNA", "AMNAN", "BABNAN", "DADPUR", "GOSWAMIMALIPARA", "HARIT", "MAHANAD", "MAKALPUR", "POLBA", "RAJHAT", "SATITHAN", "SUGANDHA"],
@@ -52,11 +52,9 @@ def fetch_master_lookups():
         "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
     }
 
-# ---------- HELPERS ----------
 def build_maps(data):
     return {
-        # FIX: Added .strip() to prevent whitespace mismatch leading to None ID
-        "fy_map": {f["year_name"].strip(): f["id"] for f in data["fys"]},
+        "fy_map": {f["id"]: f["year_name"].strip() for f in data["fys"]},
         "dist_map": {d["district_name"]: d["id"] for d in data["districts"]},
         "block_map": {b["block_name"]: b["id"] for b in data["blocks"]},
         "dept_map": {d["department_name"]: d["id"] for d in data["depts"]},
@@ -305,7 +303,7 @@ def show():
     master = fetch_master_lookups()
     maps = build_maps(master)
 
-    if not maps["fy_map"]:
+    if not master["fys"]:
         st.error("⚠️ No active Financial Years found in the database. Please contact your administrator to add a Financial Year.")
         st.stop()
 
@@ -328,7 +326,14 @@ def show():
         st.markdown("#### ➕ Register Individual Convergence Activity")
         with st.container(border=True):
             col1, col2 = st.columns(2)
-            sel_fy = col1.selectbox("Financial Year*", list(maps["fy_map"].keys()))
+            
+            # ----- FIX: ULTIMATE FY DROPDOWN (RETURNS ID DIRECTLY) -----
+            fy_id_to_name = {f["id"]: f["year_name"].strip() for f in master["fys"]}
+            selected_fy_id = col1.selectbox(
+                "Financial Year*",
+                options=list(fy_id_to_name.keys()),
+                format_func=lambda x: fy_id_to_name[x]
+            )
 
             # Building Combined Department & Wings Dropdown
             dept_options = [
@@ -477,14 +482,9 @@ def show():
                     if inp_lat_long:
                         geo_string += f" | GPS: {inp_lat_long}"
 
-                    # CRITICAL FIX: Validate the FY ID map before inserting.
-                    selected_fy_id = maps["fy_map"].get(sel_fy.strip())
-                    if not selected_fy_id:
-                        st.error(f"🚨 Critical Error: Financial Year '{sel_fy}' not found in database mapping. Contact Admin to check for whitespace issues.")
-                        st.stop()
-
+                    # ----- DATA INSERT USING VALIDATED ID -----
                     insert_data = {
-                        "financial_year_id": selected_fy_id, # Uses the validated ID
+                        "financial_year_id": selected_fy_id, # This is now a guaranteed valid ID
                         "district_id": selected_dist_id,
                         "block_id": block_id,
                         "department_id": selected_dept_id,
@@ -559,7 +559,7 @@ def show():
                             act_str = str(row.get("Base Activity", "")).strip()
                             conv_str = str(row.get("Convergence Type", "")).strip()
 
-                            fy_id = maps["fy_map"].get(fy_str)
+                            fy_id = maps["fy_map"].get(fy_str) if fy_str in maps["fy_map"] else None
                             dist_id = maps["dist_map"].get(dist_str)
                             block_id = maps["block_map"].get(block_str)
                             dept_id = maps["dept_map"].get(dept_str)
