@@ -164,12 +164,21 @@ def render_scheme_convergence_section(defaults):
             value=defaults.get("scheme_name", ""),
             key="scheme_name_reg"
         )
+    
+    # Safely handle annual plan status
+    status_options = ["Yes", "No", "Not Confirmed"]
+    default_status = defaults.get("annual_plan_status", "Not Confirmed")
+    if default_status not in status_options:
+        default_status = "Not Confirmed"
+    default_index = status_options.index(default_status)
+    
     annual_plan_status = st.selectbox(
         "Included in Department's Own Annual Plan?",
-        options=["Yes", "No", "Not Confirmed"],
-        index=["Yes", "No", "Not Confirmed"].index(defaults.get("annual_plan_status", "Not Confirmed")),
+        options=status_options,
+        index=default_index,
         key="annual_plan_status_reg"
     )
+    
     scheme_remarks = st.text_area(
         "Departmental Scheme / Annual Plan Remarks (Optional)",
         value=defaults.get("scheme_remarks", ""),
