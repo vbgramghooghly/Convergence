@@ -44,7 +44,6 @@ primary_color = theme.get("primary_color", "#0F4C81")
 # ---------- GLOBAL CSS (ENTERPRISE NAVBAR & LANDING PAGE STYLES) ----------
 st.markdown(f"""
     <style>
-        /* 1. STRICTLY KILL SIDEBAR AND HEADER TOOLS */
         [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
             display: none !important; visibility: hidden !important; width: 0px !important;
         }}
@@ -136,7 +135,6 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-# UPDATED SEQUENCE: Portal Home -> Officials -> Progress -> Meetings -> Work Entry -> Reports -> Estimate Builder
 core_pages = ["🏠 Portal Home", "👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
 if role == "block":
     core_pages.remove("📈 Reports")
@@ -175,124 +173,10 @@ def render_profile_menu():
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🚪 Logout", use_container_width=True, type="primary"): logout()
 
-# ---------- STATS FETCHER ----------
-@st.cache_data(ttl=60)
-def fetch_landing_stats(role, user):
-    supabase = get_supabase()
-    stats = {}
-    try:
-        # Base Query
-        q_reg = supabase.table("convergence_register").select("*", count="exact")
-        q_targets = supabase.table("department_targets").select("*", count="exact")
-        q_users = supabase.table("users").select("*", count="exact")
-        q_blocks = supabase.table("blocks").select("*", count="exact")
-        q_depts = supabase.table("departments").select("*", count="exact")
+def handle_nav(page_name):
+    st.session_state.current_page = page_name
+    st.rerun()
 
-        # Apply Role Filters
-        if role == 'district' and user.get('district_id'):
-            q_reg = q_reg.eq("district_id", user['district_id'])
-            q_targets = q_targets.eq("district_id", user['district_id'])
-        elif role == 'block':
-            if user.get('district_id'): q_reg = q_reg.eq("district_id", user['district_id'])
-            if user.get('block_id'): q_reg = q_reg.eq("block_id", user['block_id'])
-        elif role == 'department':
-            if user.get('department_id'):
-                q_reg = q_reg.eq("department_id", user['department_id'])
-                q_targets = q_targets.eq("department_id", user['department_id'])
-
-        # Execute Counts
-        reg_res = q_reg.execute()
-        targets_res = q_targets.execute()
-        users_res = q_users.execute()
-        blocks_res = q_blocks.execute()
-        depts_res = q_depts.execute()
-
-        stats['total_works'] = reg_res.count if reg_res.count else 0
-        stats['total_targets'] = targets_res.count if targets_res.count else 0
-        stats['total_users'] = users_res.count if users_res.count else 0
-        stats['total_blocks'] = blocks_res.count if blocks_res.count else 0
-        stats['total_depts'] = depts_res.count if depts_res.count else 0
-
-        # Fetch Dataframes for detailed status
-        if reg_res.data:
-            df_reg = pd.DataFrame(reg_res.data)
-            stats['status_counts'] = df_reg['current_status'].value_counts().to_dict() if 'current_status' in df_reg.columns else {}
-            stats['converged_fund'] = df_reg['total_converged_fund'].sum() if 'total_converged_fund' in df_reg.columns else 0
-        else:
-            stats['status_counts'] = {}
-            stats['converged_fund'] = 0
-
-    except Exception as e:
-        stats = {'total_works': 0, 'total_targets': 0, 'total_users': 0, 'total_blocks': 0, 'total_depts': 0, 'status_counts': {}, 'converged_fund': 0}
-    
-    return stats
-
-# ---------- LANDING PAGE RENDERER ----------
-def render_landing_page():
-    stats = fetch_landing_stats(role, user)
-
-    st.markdown(f"### 👋 Welcome back, {user.get('full_name', 'User')}")
-    
-    if role in ['superadmin', 'district', 'block']:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🏢 Active Blocks", stats['total_blocks'])
-        col2.metric("🏛️ Departments Enrolled", stats['total_depts'])
-        col3.metric("✅ Registered Works", stats['total_works'])
-        col4.metric("💰 Converged Fund (₹ Lakhs)", f"{stats['converged_fund']:.2f}")
-
-        st.markdown("---")
-        c_status, c_fin = st.columns([2, 1])
-        with c_status:
-            st.caption("**Work Status Distribution**")
-            if stats['status_counts']:
-                df_status = pd.DataFrame(list(stats['status_counts'].items()), columns=['Status', 'Count'])
-                st.bar_chart(df_status.set_index('Status'))
-            else:
-                st.info("No registered works found yet.")
-
-    elif role == 'department':
-        st.markdown("#### 🏛️ My Department Performance")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("📋 My Active Targets", stats['total_targets'])
-        col2.metric("🛠️ My Registered Works", stats['total_works'])
-        col3.metric("💰 Dept. Converged Fund", f"₹{stats['converged_fund']:.2f} L")
-
-    # ========== APP LAUNCHER (Hardcoded Buttons) ==========
-    st.markdown("---")
-    st.markdown("### 🚀 Launch an Application")
-    st.caption("Select a module below to start working.")
-
-    # Row 1
-    r1_col1, r1_col2, r1_col3 = st.columns(3)
-    with r1_col1:
-        if st.button("👥 **Officials**\n\nView department officials", use_container_width=True):
-            st.session_state.current_page = "👥 Officials"
-            st.rerun()
-    with r1_col2:
-        if st.button("🚀 **Progress**\n\nUpdate implementation status", use_container_width=True):
-            st.session_state.current_page = "🚀 Progress"
-            st.rerun()
-    with r1_col3:
-        if st.button("🤝 **Meetings**\n\nManage meeting commitments", use_container_width=True):
-            st.session_state.current_page = "🤝 Meetings"
-            st.rerun()
-
-    # Row 2
-    r2_col1, r2_col2, r2_col3 = st.columns(3)
-    with r2_col1:
-        if st.button("📋 **Work Entry**\n\nRegister individual activities", use_container_width=True):
-            st.session_state.current_page = "📋 Work Entry"
-            st.rerun()
-    with r2_col2:
-        if st.button("📈 **Reports**\n\nGenerate statutory reports", use_container_width=True):
-            st.session_state.current_page = "📈 Reports"
-            st.rerun()
-    with r2_col3:
-        if st.button("📐 **Estimate Builder**\n\nCreate and calculate estimates", use_container_width=True):
-            st.session_state.current_page = "📐 Estimate Builder"
-            st.rerun()
-
-# ---------- MAIN NAVIGATION LOGIC ----------
 def render_top_navigation():
     if allowed_admin:
         cols = st.columns([2.2, 7, 1.2, 1.2], vertical_alignment="center")
@@ -307,7 +191,6 @@ def render_top_navigation():
         </div>
         """, unsafe_allow_html=True)
 
-    # Only show Nav Bar if not on the landing page
     if st.session_state.current_page != "🏠 Portal Home":
         with cols[1]:
             nav_cols = st.columns(len(core_pages))
@@ -331,43 +214,54 @@ def render_top_navigation():
     with cols[-1]:
         render_profile_menu()
 
-# Render the Top Header always
 render_top_navigation()
 
-# ---------- IMPORT MODULES & ROUTING ----------
-if st.session_state.current_page != "🏠 Portal Home":
+# ---------- LANDING PAGE STATS ----------
+def render_landing_page():
     try:
         from modules.analytics import show as show_portal_analytics
-        from modules.estimate_builder import show as show_estimate_builder
-        from modules.convergence_register import show as show_convergence
-        from modules.implementation import show as show_implementation
-        from modules.meetings import show as show_meetings
-        from modules.reports import show as show_reports
-        from modules.master_data import show as show_masterdata
-        from modules.users import show as show_users
-        from modules.audit import show as show_audit
-        from modules.contacts import show as show_contacts
-        from modules.ui_ux_controller import show as show_ui_ux
+        show_portal_analytics()
+    except Exception:
+        st.error("Failed to load Portal Analytics. Please run the SQL fixes provided.")
+
+# ---------- IMPORT MODULES & ROUTING (DEFERRED TO AVOID CACHE POISON) ----------
+if st.session_state.current_page != "🏠 Portal Home":
+    try:
+        if st.session_state.current_page == "📐 Estimate Builder":
+            from modules.estimate_builder import show as show_estimate_builder
+            show_estimate_builder()
+        elif st.session_state.current_page == "📋 Work Entry":
+            from modules.convergence_register import show as show_convergence
+            show_convergence()
+        elif st.session_state.current_page == "🚀 Progress":
+            from modules.implementation import show as show_implementation
+            show_implementation()
+        elif st.session_state.current_page == "🤝 Meetings":
+            from modules.meetings import show as show_meetings
+            show_meetings()
+        elif st.session_state.current_page == "👥 Officials":
+            from modules.contacts import show as show_contacts
+            show_contacts()
+        elif st.session_state.current_page == "📈 Reports":
+            from modules.reports import show as show_reports
+            show_reports()
+        elif st.session_state.current_page == "📊 Global Analytics":
+            from modules.analytics import show as show_portal_analytics
+            show_portal_analytics()
+        elif st.session_state.current_page == "⚙️ Master Data":
+            from modules.master_data import show as show_masterdata
+            show_masterdata()
+        elif st.session_state.current_page == "👥 User Management":
+            from modules.users import show as show_users
+            show_users()
+        elif st.session_state.current_page == "🛡️ Audit Logs":
+            from modules.audit import show as show_audit
+            show_audit()
+        elif st.session_state.current_page == "🎨 UI / System Settings":
+            from modules.ui_ux_controller import show as show_ui_ux
+            show_ui_ux()
     except Exception as e:
-        st.error(f"Error importing modules: {e}")
-        st.stop()
-
-    menu = {
-        "👥 Officials": show_contacts,
-        "🚀 Progress": show_implementation,
-        "🤝 Meetings": show_meetings,
-        "📋 Work Entry": show_convergence,
-        "📈 Reports": show_reports,
-        "📐 Estimate Builder": show_estimate_builder,
-        "📊 Global Analytics": show_portal_analytics,
-        "⚙️ Master Data": show_masterdata,
-        "👥 User Management": show_users,
-        "🛡️ Audit Logs": show_audit,
-        "🎨 UI / System Settings": show_ui_ux,
-    }
-
-    if st.session_state.current_page in menu:
-        menu[st.session_state.current_page]()
+        st.error(f"Error loading module: {e}")
+        st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
 else:
-    # Render the Landing Page Stats and Launchpad
     render_landing_page()
