@@ -13,6 +13,7 @@ CONVERGENCE_TYPES = [
 ]
 ORIGIN_SOURCES = ["District Plan", "Block Plan", "District Meeting", "Block Meeting"]
 STATUS_OPTIONS = ["Planned", "Approved", "Under Implementation", "Completed", "Delayed", "Dropped"]
+PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]  # NEW: PIA Options
 
 # ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING (PRESERVED) ----------
 HOOGHLY_GPS = {
@@ -114,6 +115,8 @@ def display_register(df, maps):
         df_display["Own Annual Plan Status"] = df_display["department_annual_plan_status"]
     if "department_scheme_remarks" in df_display.columns:
         df_display["Remarks"] = df_display["department_scheme_remarks"]
+    if "pia_type" in df_display.columns:
+        df_display["PIA (Implementing Agency)"] = df_display["pia_type"] # NEW: Display PIA
 
     df_display.rename(
         columns={
@@ -130,7 +133,8 @@ def display_register(df, maps):
         "FY", "District", "Block", "Department", "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
-    extra_cols = [c for c in ["Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
+    # Append new columns if present
+    extra_cols = [c for c in ["PIA (Implementing Agency)", "Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
     display_cols.extend(extra_cols)
 
     st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
@@ -146,10 +150,6 @@ def display_register(df, maps):
     )
 
 def render_scheme_convergence_section(defaults, key_prefix=""):
-    """
-    Renders the Departmental Scheme / Fund Convergence section.
-    Returns a dict with the entered values.
-    """
     st.markdown("##### Departmental Scheme / Fund Convergence")
     conv_choice = st.radio(
         "Convergence with Own Departmental Scheme / Fund?",
@@ -164,20 +164,17 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
             value=defaults.get("scheme_name", ""),
             key=f"{key_prefix}_scheme_name"
         )
-    
     status_options = ["Yes", "No", "Not Confirmed"]
     default_status = defaults.get("annual_plan_status", "Not Confirmed")
     if default_status not in status_options:
         default_status = "Not Confirmed"
     default_index = status_options.index(default_status)
-    
     annual_plan_status = st.selectbox(
         "Included in Department's Own Annual Plan?",
         options=status_options,
         index=default_index,
         key=f"{key_prefix}_annual_status"
     )
-    
     scheme_remarks = st.text_area(
         "Departmental Scheme / Annual Plan Remarks (Optional)",
         value=defaults.get("scheme_remarks", ""),
@@ -226,6 +223,13 @@ def edit_delete_section(records, maps, supabase, user):
             current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
             new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
 
+            # NEW: PIA selectbox for Edit form
+            curr_pia = rec.get("pia_type", "Select PIA")
+            pia_index = 0
+            if curr_pia in PIA_OPTIONS:
+                pia_index = PIA_OPTIONS.index(curr_pia)
+            new_pia = st.selectbox("Project Implementing Agency (PIA)*", PIA_OPTIONS, index=pia_index)
+
             new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
             new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
             new_outcome = st.text_area("Possible Outcome / Work Dimensions", value=rec.get("work_dimensions", "") or "")
@@ -252,7 +256,9 @@ def edit_delete_section(records, maps, supabase, user):
             if st.form_submit_button("Commit Changes", type="primary"):
                 if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
                     new_d_fund = new_v_fund = 0.0
-                if scheme_data["convergence"] and not scheme_data["scheme_name"]:
+                if new_pia == "Select PIA":
+                    st.error("⚠️ Please select a valid Project Implementing Agency (PIA).")
+                elif scheme_data["convergence"] and not scheme_data["scheme_name"]:
                     st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
                 elif not new_work_name.strip():
                     st.error("⚠️ Work Name cannot be empty.")
@@ -273,6 +279,7 @@ def edit_delete_section(records, maps, supabase, user):
                         "expected_persondays": new_pd,
                         "department_fund": new_d_fund,
                         "vbgramg_fund": new_v_fund,
+                        "pia_type": new_pia,  # NEW: Update PIA
                         "department_scheme_convergence": scheme_data["convergence"],
                         "department_scheme_name": scheme_data["scheme_name"],
                         "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -330,7 +337,6 @@ def show():
                 for d in master["depts"]
             ]
             for w in master["wings"]:
-                # FIXED: Correctly map department_id back to department_name using dept_reverse
                 p_name = maps["dept_reverse"].get(w["department_id"], "Unknown")
                 dept_options.append({
                     "label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]",
@@ -389,6 +395,10 @@ def show():
                 additional_gp = col_gp2.selectbox("Additional GP Name", gp_options)
                 add_gp_portion = col_gp3.text_input("Portion in Addl. GP", placeholder="e.g. 2 km or 40%")
 
+            # PIA Selector
+            st.markdown("##### 🏛️ Project Implementing Agency (PIA)")
+            selected_pia = st.selectbox("Implementing Agency (PIA)*", PIA_OPTIONS)
+
             # Thematic Category & Linkage
             st.markdown("##### 🏗️ Thematic Work Category & Linkage")
             mapped_act_ids = [m["activity_id"] for m in master["act_dept_mapping"] if m["department_id"] == selected_dept_id]
@@ -436,6 +446,8 @@ def show():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Commit Activity Registration", type="primary", use_container_width=True):
                 errors = []
+                if selected_pia == "Select PIA": 
+                    errors.append("Please select a valid Project Implementing Agency (PIA).")
                 if not valid_act_names:
                     errors.append("Approved activity required.")
                 if sel_block == "Select Block":
@@ -472,6 +484,7 @@ def show():
                         "block_id": block_id,
                         "department_id": selected_dept_id,
                         "wing_id": selected_wing_id,
+                        "pia_type": selected_pia,  # NEW: Save PIA
                         "activity_description": final_work_name,
                         "thematic_category_id": theme_id,
                         "convergence_type": sel_conv_type,
@@ -502,7 +515,7 @@ def show():
                         st.error(f"Error saving record: {e}")
 
     with tab3:
-        # Bulk upload remains unchanged
+        # Bulk upload remains unchanged, will skip PIA for now to avoid breaking CSVs
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
@@ -604,6 +617,7 @@ def show():
                                 "block_id": block_id,
                                 "department_id": dept_id,
                                 "wing_id": None,
+                                "pia_type": "Department",  # Default to Department for bulk uploads
                                 "activity_description": work_name_val,
                                 "thematic_category_id": target_act["theme_id"],
                                 "convergence_type": conv_str,
