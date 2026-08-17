@@ -136,7 +136,8 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["🏠 Portal Home", "📐 Estimate Builder", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "👥 Officials", "📈 Reports"]
+# UPDATED SEQUENCE: Portal Home -> Officials -> Progress -> Meetings -> Work Entry -> Reports -> Estimate Builder
+core_pages = ["🏠 Portal Home", "👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
 if role == "block":
     core_pages.remove("📈 Reports")
 
@@ -233,7 +234,6 @@ def render_landing_page():
     st.markdown(f"### 👋 Welcome back, {user.get('full_name', 'User')}")
     
     if role in ['superadmin', 'district', 'block']:
-        # REMOVED: st.markdown("#### 📊 Governance & Execution Performance Overview")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🏢 Active Blocks", stats['total_blocks'])
         col2.metric("🏛️ Departments Enrolled", stats['total_depts'])
@@ -257,7 +257,7 @@ def render_landing_page():
         col2.metric("🛠️ My Registered Works", stats['total_works'])
         col3.metric("💰 Dept. Converged Fund", f"₹{stats['converged_fund']:.2f} L")
 
-    # ========== APP LAUNCHER (CRITICAL FIX: Hardcoded Buttons) ==========
+    # ========== APP LAUNCHER (Hardcoded Buttons) ==========
     st.markdown("---")
     st.markdown("### 🚀 Launch an Application")
     st.caption("Select a module below to start working.")
@@ -265,38 +265,32 @@ def render_landing_page():
     # Row 1
     r1_col1, r1_col2, r1_col3 = st.columns(3)
     with r1_col1:
-        if st.button("📐 **Estimate Builder**\n\nCreate and calculate estimates", use_container_width=True):
-            st.session_state.current_page = "📐 Estimate Builder"
+        if st.button("👥 **Officials**\n\nView department officials", use_container_width=True):
+            st.session_state.current_page = "👥 Officials"
             st.rerun()
     with r1_col2:
-        if st.button("📋 **Work Entry**\n\nRegister individual activities", use_container_width=True):
-            st.session_state.current_page = "📋 Work Entry"
-            st.rerun()
-    with r1_col3:
         if st.button("🚀 **Progress**\n\nUpdate implementation status", use_container_width=True):
             st.session_state.current_page = "🚀 Progress"
+            st.rerun()
+    with r1_col3:
+        if st.button("🤝 **Meetings**\n\nManage meeting commitments", use_container_width=True):
+            st.session_state.current_page = "🤝 Meetings"
             st.rerun()
 
     # Row 2
     r2_col1, r2_col2, r2_col3 = st.columns(3)
     with r2_col1:
-        if st.button("🤝 **Meetings**\n\nManage meeting commitments", use_container_width=True):
-            st.session_state.current_page = "🤝 Meetings"
+        if st.button("📋 **Work Entry**\n\nRegister individual activities", use_container_width=True):
+            st.session_state.current_page = "📋 Work Entry"
             st.rerun()
     with r2_col2:
-        if st.button("👥 **Officials**\n\nView department officials", use_container_width=True):
-            st.session_state.current_page = "👥 Officials"
+        if st.button("📈 **Reports**\n\nGenerate statutory reports", use_container_width=True):
+            st.session_state.current_page = "📈 Reports"
             st.rerun()
-
-    # Conditionally hide Reports for Block users
-    if role != "block":
-        with r2_col3:
-            if st.button("📈 **Reports**\n\nGenerate statutory reports", use_container_width=True):
-                st.session_state.current_page = "📈 Reports"
-                st.rerun()
-    else:
-        with r2_col3:
-            st.empty() # Keeps the layout balanced
+    with r2_col3:
+        if st.button("📐 **Estimate Builder**\n\nCreate and calculate estimates", use_container_width=True):
+            st.session_state.current_page = "📐 Estimate Builder"
+            st.rerun()
 
 # ---------- MAIN NAVIGATION LOGIC ----------
 def render_top_navigation():
@@ -359,12 +353,12 @@ if st.session_state.current_page != "🏠 Portal Home":
         st.stop()
 
     menu = {
-        "📐 Estimate Builder": show_estimate_builder,
-        "📋 Work Entry": show_convergence,
+        "👥 Officials": show_contacts,
         "🚀 Progress": show_implementation,
         "🤝 Meetings": show_meetings,
-        "👥 Officials": show_contacts,
+        "📋 Work Entry": show_convergence,
         "📈 Reports": show_reports,
+        "📐 Estimate Builder": show_estimate_builder,
         "📊 Global Analytics": show_portal_analytics,
         "⚙️ Master Data": show_masterdata,
         "👥 User Management": show_users,
