@@ -45,6 +45,7 @@ def fetch_master_lookups():
         "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
         "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
         "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
+        "wings": supabase.table("department_wings").select("*").execute().data or [],  # <--- NEW: Fetch Wings
         "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
         "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
         "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
@@ -57,6 +58,7 @@ def build_maps(data):
         "dist_map": {d["district_name"]: d["id"] for d in data["districts"]},
         "block_map": {b["block_name"]: b["id"] for b in data["blocks"]},
         "dept_map": {d["department_name"]: d["id"] for d in data["depts"]},
+        "wing_map": {w["id"]: w for w in data["wings"]},  # <--- NEW: Create Wing Map
         "fy_reverse": {f["id"]: f["year_name"] for f in data["fys"]},
         "dist_reverse": {d["id"]: d["district_name"] for d in data["districts"]},
         "block_reverse": {b["id"]: b["block_name"] for b in data["blocks"]},
@@ -155,14 +157,14 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
         "Convergence with Own Departmental Scheme / Fund?",
         options=["No", "Yes"],
         index=0 if not defaults.get("convergence") else 1,
-        key=f"{key_prefix}_conv_choice"  # Dynamic Unique Key
+        key=f"{key_prefix}_conv_choice"
     )
     scheme_name = ""
     if conv_choice == "Yes":
         scheme_name = st.text_input(
             "Name of Departmental Scheme / Fund *",
             value=defaults.get("scheme_name", ""),
-            key=f"{key_prefix}_scheme_name"  # Dynamic Unique Key
+            key=f"{key_prefix}_scheme_name"
         )
     
     # Safely handle annual plan status
@@ -176,13 +178,13 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
         "Included in Department's Own Annual Plan?",
         options=status_options,
         index=default_index,
-        key=f"{key_prefix}_annual_status"  # Dynamic Unique Key
+        key=f"{key_prefix}_annual_status"
     )
     
     scheme_remarks = st.text_area(
         "Departmental Scheme / Annual Plan Remarks (Optional)",
         value=defaults.get("scheme_remarks", ""),
-        key=f"{key_prefix}_scheme_remarks"  # Dynamic Unique Key
+        key=f"{key_prefix}_scheme_remarks"
     )
     return {
         "convergence": conv_choice == "Yes",
@@ -249,7 +251,6 @@ def edit_delete_section(records, maps, supabase, user):
                 "annual_plan_status": rec.get("department_annual_plan_status", "Not Confirmed"),
                 "scheme_remarks": rec.get("department_scheme_remarks", "") or "",
             }
-            # FIXED: Add key_prefix="edit" to ensure unique keys for the edit form
             scheme_data = render_scheme_convergence_section(defaults, key_prefix="edit")
 
             if st.form_submit_button("Commit Changes", type="primary"):
@@ -287,7 +288,7 @@ def edit_delete_section(records, maps, supabase, user):
                         try:
                             log_action(user.get("id"), f"UPDATE convergence_register {selected_edit_id}")
                         except Exception:
-                            pass  # Silently ignore audit errors
+                            pass
                         st.success("Activity updated successfully!")
                         st.rerun()
                     except Exception as e:
@@ -302,6 +303,12 @@ def show():
 
     master = fetch_master_lookups()
     maps = build_maps(master)
+
+    # <--- NEW: Crash guard if no FY is found in the DB
+    if not maps["fy_map"]:
+        st.error("⚠️ No active Financial Years found in the database. Please contact your administrator to add a Financial Year.")
+        st.stop()
+
     records = get_filtered_records(supabase, role, user)
     df_records = pd.DataFrame(records) if records else pd.DataFrame()
 
@@ -323,16 +330,42 @@ def show():
             col1, col2 = st.columns(2)
             sel_fy = col1.selectbox("Financial Year*", list(maps["fy_map"].keys()))
 
-            if role == "department":
-                dept_default = next((d["department_name"] for d in master["depts"] if d["id"] == user.get("department_id")), None)
-                if not dept_default:
-                    st.error("🚨 Account not mapped to a department. Contact Superadmin.")
-                    st.stop()
-                sel_dept = col2.selectbox("Department*", [dept_default], disabled=True)
-            else:
-                sel_dept = col2.selectbox("Department*", list(maps["dept_map"].keys()))
+            # <--- NEW: Building Combined Department & Wings Dropdown
+            dept_options = [
+                {"label": f"{d['department_name']} (Main Dept)", "dept_id": d['id'], "wing_id": None}
+                for d in master["depts"]
+            ]
+            for w in master["wings"]:
+                p_name = maps["dept_map"].get(w["department_id"], "Unknown")
+                dept_options.append({
+                    "label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]",
+                    "dept_id": w['department_id'],
+                    "wing_id": w['id']
+                })
+            dept_options = sorted(dept_options, key=lambda x: x['label'])
+            dept_labels = [opt['label'] for opt in dept_options]
 
-            selected_dept_id = maps["dept_map"].get(sel_dept)
+            if role == "department":
+                # Auto-select if the user is a department head
+                user_dept_id = user.get("department_id")
+                user_wing_id = user.get("wing_id")
+                preselected_dept = next(
+                    (opt for opt in dept_options if opt['dept_id'] == user_dept_id and opt['wing_id'] == user_wing_id),
+                    None
+                )
+                if preselected_dept:
+                    sel_dept_label = col2.selectbox("Department / Wing*", [preselected_dept["label"]], disabled=True)
+                    selected_opt = preselected_dept
+                else:
+                    # Fallback if account mapping is broken
+                    sel_dept_label = col2.selectbox("Department / Wing*", dept_labels)
+                    selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
+            else:
+                sel_dept_label = col2.selectbox("Department / Wing*", dept_labels)
+                selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
+
+            selected_dept_id = selected_opt['dept_id']
+            selected_wing_id = selected_opt['wing_id']
 
             if role in ["block", "district", "department"]:
                 dist_default = next(d["district_name"] for d in master["districts"] if d["id"] == user["district_id"])
@@ -371,7 +404,7 @@ def show():
 
             col_act1, col_loc1 = st.columns(2)
             if not valid_act_names:
-                st.warning(f"No approved activities found for {sel_dept}.")
+                st.warning(f"No approved activities found for {sel_dept_label}.")
                 sel_act_name = col_act1.selectbox("Base Activity*", ["No activities available"], disabled=True)
                 theme_id = None
             else:
@@ -406,7 +439,6 @@ def show():
             # --- Departmental Scheme / Fund Convergence section (creation) ---
             st.markdown("---")
             scheme_defaults = {"convergence": False, "scheme_name": "", "annual_plan_status": "Not Confirmed", "scheme_remarks": ""}
-            # FIXED: Add key_prefix="new" to ensure unique keys for the add form
             scheme_data = render_scheme_convergence_section(scheme_defaults, key_prefix="new")
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -448,6 +480,7 @@ def show():
                         "district_id": selected_dist_id,
                         "block_id": block_id,
                         "department_id": selected_dept_id,
+                        "wing_id": selected_wing_id,  # <--- NEW: Adding wing_id to payload
                         "activity_description": final_work_name,
                         "thematic_category_id": theme_id,
                         "convergence_type": sel_conv_type,
@@ -471,7 +504,7 @@ def show():
                         try:
                             log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
                         except Exception:
-                            pass  # Silently ignore audit errors
+                            pass
                         st.success("✅ Convergence activity successfully created and registered!")
                         st.rerun()
                     except Exception as e:
@@ -579,6 +612,7 @@ def show():
                                 "district_id": dist_id,
                                 "block_id": block_id,
                                 "department_id": dept_id,
+                                "wing_id": None, # Bulk upload doesn't support wings yet to keep it safe for CSV users
                                 "activity_description": work_name_val,
                                 "thematic_category_id": target_act["theme_id"],
                                 "convergence_type": conv_str,
@@ -592,7 +626,6 @@ def show():
                                 "department_fund": d_fund,
                                 "vbgramg_fund": m_fund,
                                 "current_status": "Planned",
-                                # New fields left NULL for bulk upload (optional)
                                 "department_scheme_convergence": False,
                                 "department_scheme_name": None,
                                 "department_annual_plan_status": "Not Confirmed",
