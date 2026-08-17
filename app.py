@@ -23,6 +23,15 @@ if not user or 'role' not in user:
     logout()
     st.stop()
 
+# =========================================================================
+# CRITICAL FIX: Synchronize the logged-in user's details to global session
+# =========================================================================
+if user:
+    st.session_state['full_name'] = user.get('full_name', 'User')
+    st.session_state['district_id'] = user.get('district_id')
+    st.session_state['role'] = user.get('role')
+# =========================================================================
+
 role = user['role']
 
 # ---------- APPLY CENTRAL UI/UX THEME ----------
@@ -32,7 +41,6 @@ primary_color = theme.get("primary_color", "#0F4C81")
 # ---------- GLOBAL CSS (ENTERPRISE NAVBAR & COMPACT SPACING) ----------
 st.markdown(f"""
     <style>
-        /* 1. STRICTLY KILL SIDEBAR AND HEADER TOOLS */
         [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
             display: none !important; visibility: hidden !important; width: 0px !important;
         }}
@@ -40,14 +48,12 @@ st.markdown(f"""
             display: none !important; visibility: hidden !important; height: 0px !important;
         }}
 
-        /* 2. REDUCE WASTED TOP SPACE */
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
             max-width: 98% !important;
         }}
 
-        /* 3. ENTERPRISE TOP NAVIGATION BAR */
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] {{
             background: #FFFFFF;
             border-bottom: 1px solid #E2E8F0;
@@ -92,7 +98,6 @@ st.markdown(f"""
             background-color: #F1F5F9 !important;
         }}
 
-        /* 4. CONTEXTUAL SECONDARY NAVIGATION */
         div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
             gap: 24px;
             border-bottom: 1px solid #E2E8F0;
@@ -116,12 +121,10 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-# UPDATED: Replaced Dashboard with Estimate Builder in Core Pages
 core_pages = ["📐 Estimate Builder", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "👥 Officials", "📈 Reports"]
 if role == "block":
     core_pages.remove("📈 Reports")
 
-# UPDATED: Moved Dashboard to Admin Pages as Portal Analytics
 admin_pages = ["📊 Portal Analytics", "⚙️ Master Data", "👥 User Management", "🛡️ Audit Logs", "🎨 UI / System Settings"]
 allowed_admin = admin_pages if role == "superadmin" else []
 
