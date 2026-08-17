@@ -6,14 +6,6 @@ from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
 
-# Constants moved here for immediate usage
-CONVERGENCE_TYPES = [
-    "Technical Convergence (Zero Fund/NOC)",
-    "Financial (as PIA)",
-    "Financial (as Non-PIA)",
-]
-PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
-
 @st.cache_data(ttl=600)
 def fetch_master_data():
     supabase = get_supabase()
@@ -49,9 +41,9 @@ def show():
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
     
-    # NEW: Extract FY names for dynamic selections
-    fy_names = [f["year_name"] for f in fys]
-    if not fy_names:
+    # Create ID map for FY
+    fy_id_to_name = {f["id"]: f["year_name"].strip() for f in fys}
+    if not fy_id_to_name:
         st.error("⚠️ No active Financial Years found in the database. Please contact your administrator.")
         st.stop()
 
@@ -87,7 +79,14 @@ def show():
             else:
                 with st.container(border=True):
                     active_dept_id, active_wing_id, dist_id = None, None, None
-                    sel_fy_target = st.selectbox("Financial Year*", fy_names)
+                    
+                    # ----- FIX: ULTIMATE FY DROPDOWN (RETURNS ID DIRECTLY) -----
+                    selected_fy_target_id = st.selectbox(
+                        "Financial Year*",
+                        options=list(fy_id_to_name.keys()),
+                        format_func=lambda x: fy_id_to_name[x]
+                    )
+
                     if role == 'department':
                         active_dept_id = user.get('department_id')
                         active_wing_id = user.get('wing_id')
@@ -136,11 +135,10 @@ def show():
                     
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
 
-                    # Departmental Scheme / Fund Convergence
                     st.markdown("##### Departmental Scheme / Fund Convergence")
                     existing_record = None
                     if active_dept_id and dist_id and activity and activity != "No activities available":
-                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", sel_fy_target).eq("activity", activity)
+                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
                         if active_wing_id:
                             q_check = q_check.eq("wing_id", active_wing_id)
                         else:
@@ -204,7 +202,8 @@ def show():
                         else:
                             target_record = {
                                 "department_id": active_dept_id, "wing_id": active_wing_id, "district_id": dist_id,
-                                "financial_year": sel_fy_target, "project_head": project_head.strip(), "activity": activity,
+                                "financial_year_id": selected_fy_target_id, # Save the ID, not the string
+                                "project_head": project_head.strip(), "activity": activity,
                                 "asset_count": asset_count, "annual_plan_scope": annual_plan_scope, "desired_target": desired_target,
                                 "department_fund": dept_fund, "vbgramg_fund": vbg_fund, "expected_persondays": expected_persondays,
                                 "created_by": user['id'],
@@ -214,7 +213,7 @@ def show():
                                 "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
                             }
                             try:
-                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year", sel_fy_target).eq("activity", activity)
+                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
                                 if active_wing_id: q_existing = q_existing.eq("wing_id", active_wing_id)
                                 else: q_existing = q_existing.is_("wing_id", "null")
                                 existing = q_existing.execute().data
@@ -232,10 +231,7 @@ def show():
                                     st.success("Target added successfully!")
                                 st.rerun()
                             except Exception as e:
-                                if "wing_id" in str(e):
-                                    st.error("🚨 Database Error: The `wing_id` column is missing from your `department_targets` table in Supabase.")
-                                else:
-                                    st.error(f"Error saving target: {e}")
+                                st.error(f"Error saving target: {e}")
 
         with col_t1:
             st.markdown("#### 📊 Target Analytics Dashboard")
@@ -271,7 +267,8 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 =================
+    # ================= TAB 2 & 3 =================
+    # (Tabs 2 and 3 remain identical to the previous rewrite, unchanged)
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -299,7 +296,7 @@ def show():
                     <div style="display:flex; gap:20px; font-size:13px; color:#475569;">
                         <div><b>Source:</b> {selected_act.get('origin_source', 'N/A')}</div>
                         <div><b>Type:</b> {selected_act.get('convergence_type', 'N/A')}</div>
-                        <div><b>PIA:</b> {selected_act.get('pia_type', 'Not Assigned')}</div>  <!-- NEW: Shows PIA -->
+                        <div><b>PIA:</b> {selected_act.get('pia_type', 'Not Assigned')}</div>
                         <div><b>Location:</b> {selected_act.get('geo_location', 'N/A')}</div>
                     </div>
                 </div>
@@ -313,7 +310,6 @@ def show():
                         current_status = selected_act.get('current_status', 'Planned')
                         new_status = col_p1.selectbox("New Status*", status_options, index=status_options.index(current_status) if current_status in status_options else 0)
 
-                        # NEW: PIA and Type of Convergence mandatory fields in Implementation Form
                         curr_pia = selected_act.get("pia_type", "Select PIA")
                         pia_index = 0
                         if curr_pia in PIA_OPTIONS:
@@ -339,7 +335,6 @@ def show():
                         act_date = col_p7.date_input("Actual End", value=safe_parse_date(selected_act.get('actual_completion_date')))
                         remarks = st.text_area("Remarks / Blockage Details", value=selected_act.get('remarks', '') or '')
                         if st.form_submit_button("Commit Progress Update", type="primary", use_container_width=True):
-                            # NEW: Validation for Implementation stage
                             if new_status in ["Under Implementation", "Completed"]:
                                 if pia_type_sel == "Select PIA":
                                     st.error("⚠️ **Validation Error:** PIA (Implementing Agency) is strictly mandatory for Implementation/Completed stages.")
@@ -350,16 +345,11 @@ def show():
                                 else:
                                     update_data = {
                                         "current_status": new_status, 
-                                        "convergence_type": new_conv_type, # Update Convergence Type
-                                        "pia_type": pia_type_sel, # Update PIA
+                                        "convergence_type": new_conv_type, "pia_type": pia_type_sel,
                                         "mis_code": mis_code_val.strip() if mis_code_val else None,
-                                        "physical_achievement": phys_ach, 
-                                        "financial_achievement": fin_ach, 
-                                        "persondays_generated": persondays_gen,
-                                        "actual_start_date": str(start_date) if start_date else None, 
-                                        "expected_completion_date": str(exp_date) if exp_date else None,
-                                        "actual_completion_date": str(act_date) if act_date else None, 
-                                        "remarks": remarks
+                                        "physical_achievement": phys_ach, "financial_achievement": fin_ach, "persondays_generated": persondays_gen,
+                                        "actual_start_date": str(start_date) if start_date else None, "expected_completion_date": str(exp_date) if exp_date else None,
+                                        "actual_completion_date": str(act_date) if act_date else None, "remarks": remarks
                                     }
                                     try:
                                         resp = supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
@@ -379,18 +369,13 @@ def show():
                                     except Exception as e:
                                         st.error(f"Error saving progress: {e}")
                             else:
-                                # Existing logic for other statuses (without PIA/MIS Code enforcement)
                                 update_data = {
                                     "current_status": new_status, 
-                                    "convergence_type": new_conv_type, 
-                                    "pia_type": pia_type_sel,
+                                    "convergence_type": new_conv_type, "pia_type": pia_type_sel,
                                     "mis_code": mis_code_val.strip() if mis_code_val else None,
-                                    "physical_achievement": phys_ach, "financial_achievement": fin_ach, 
-                                    "persondays_generated": persondays_gen,
-                                    "actual_start_date": str(start_date) if start_date else None, 
-                                    "expected_completion_date": str(exp_date) if exp_date else None,
-                                    "actual_completion_date": str(act_date) if act_date else None, 
-                                    "remarks": remarks
+                                    "physical_achievement": phys_ach, "financial_achievement": fin_ach, "persondays_generated": persondays_gen,
+                                    "actual_start_date": str(start_date) if start_date else None, "expected_completion_date": str(exp_date) if exp_date else None,
+                                    "actual_completion_date": str(act_date) if act_date else None, "remarks": remarks
                                 }
                                 try:
                                     resp = supabase.table("convergence_register").update(update_data).eq("id", selected_act_id).execute()
