@@ -6,6 +6,12 @@ from utils.validators import validate_import_dataframe
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
 
+def dataframe_to_excel(df, sheet_name="Sheet1"):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
+    
 def show():
     require_role('superadmin')
     st.title("📤 Import Convergence Data from Excel")
