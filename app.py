@@ -24,7 +24,7 @@ if not user or 'role' not in user:
     st.stop()
 
 # =========================================================================
-# CRITICAL FIX: Synchronize the logged-in user's details to global session
+# FIX: Synchronize the logged-in user's details to global session
 # =========================================================================
 if user:
     st.session_state['full_name'] = user.get('full_name', 'User')
@@ -161,6 +161,8 @@ def render_profile_menu():
 
 def handle_nav(page_name):
     st.session_state.current_page = page_name
+    # CRITICAL FIX: Force a full re-run to update the page immediately
+    st.rerun()
 
 def render_top_navigation():
     if allowed_admin:
