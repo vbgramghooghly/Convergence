@@ -195,7 +195,7 @@ render_top_navigation()
 
 # ---------- IMPORT MODULES & ROUTING ----------
 try:
-    # UPDATED: Import Estimate Builder and Analytics
+    # UPDATED: Import Estimate Builder and renamed Analytics
     from modules.analytics import show as show_portal_analytics
     from modules.estimate_builder import show as show_estimate_builder
     from modules.convergence_register import show as show_convergence
