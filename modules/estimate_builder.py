@@ -3,7 +3,7 @@ import pandas as pd
 import uuid
 import streamlit.components.v1 as components
 from utils.db import get_supabase
-from auth.auth import logout
+from auth.auth import logout, get_current_user
 
 # --- Security ---
 if not st.session_state.get('authenticated', False) and not st.session_state.get('is_guest', False):
@@ -24,54 +24,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Fallback Scheme List (In case DB fetch fails or is empty) ---
-VB_GRAM_G_SCHEMES_FALLBACK = [
-    "Construction of Boulder Check Dam for Individual",
-    "Construction of Boulder Check Dam for Community",
-    "Repair & Maintenance of Boulder Check Dam for Community",
-    "Construction of Earthen Check Dam for Individual",
-    "Construction of Earthen Check Dam for Community",
-    "Repair & Maintenance of Earthen Check Dam for Community",
-    "Construction of Gabion Check Dam for Individual",
-    "Construction of Gabion Check Dam for Community",
-    "Repair & Maintenance of Gabion Check Dam for Community",
-    "Construction of Masonry Check Dam for Individual",
-    "Construction of Masonry Check Dam for Community",
-    "Repair & Maintenance of Masonry Check Dam for Community",
-    "Construction of Brushwood Gully Plug for Community",
-    "Construction of Earthen Gully Plug for Individual",
-    "Construction of Stone Boulder Gully Plug for Community",
-    "Construction of Main Canal for Community",
-    "Lining of Canal for Community",
-    "Construction of Flood or Diversion Channel for Community",
-    "Construction of Storm Water Drain for Community",
-    "Construction of Farm Pond for Individual",
-    "Construction of Recharge Pit for Community",
-    "Rejuvenation of Pond for Community",
-    "Construction of Water Harvesting Pond for Community",
-    "Construction of Irrigation Well for Community",
-    "Construction of Cross Drainage Structure for Community",
-    "Construction of Culvert for Community",
-    "Construction of Bitumen Road for Community",
-    "Construction of Cement Concrete Road for Community",
-    "Construction of Interlocking Paver Block Road for Community",
-    "Construction of WBM Road for Community",
-    "Construction of Anganwadi Centre Building for Community",
-    "Construction of Gram Panchayat Building for Community",
-    "Construction of Marriage/Community Hall for Community",
-    "Construction of Rural Health Centre for Community",
-    "Construction of Additional Classroom for Government School for Community",
-    "Construction of Toilet for Government School for Community",
-    "Construction of Crematorium for Community",
-    "Construction of Graveyard for Community",
-    "Construction of Community Sanitary Complex for Community",
-    "Construction of IHHL for Individual",
-    "Construction of PMAY-G House for Individual",
-    "Construction of Workshed for SHG for Community",
-    "Construction of Rural Haat Building for Community",
-    "Construction of Fishery Pond for Community"
-]
-
 # --- Constants ---
 DISTRICT_NAMES = {
     1: "Alipurduar", 2: "Bankura", 3: "Birbhum", 4: "Cooch Behar",
@@ -89,7 +41,7 @@ SKILLED_SEMI_CODES = ['0116', '0160', '0161']
 if 'work_name' not in st.session_state:
     st.session_state['work_name'] = ""
 if 'work_type' not in st.session_state:
-    st.session_state['work_type'] = VB_GRAM_G_SCHEMES_FALLBACK[0] if VB_GRAM_G_SCHEMES_FALLBACK else ""
+    st.session_state['work_type'] = ""
 if 'estimate_data' not in st.session_state:
     st.session_state['estimate_data'] = []
 if 'show_dpr' not in st.session_state:
@@ -114,7 +66,7 @@ with st.sidebar:
 
 # --- Data Loader with Infinite Pagination ---
 @st.cache_data(ttl=3600)
-def load_master_data(district_id):
+def load_master_data(district_id, role, department_id):
     supabase = get_supabase()
     try:
         def fetch_all(table, cols="*", filter_col=None, filter_val=None):
@@ -138,16 +90,22 @@ def load_master_data(district_id):
         matrix_data = fetch_all("consumption_matrix", "spec_code, lmr_code, consumed_qty")
         lmr_data = fetch_all("district_lmr_data", "lmr_code, description, rate", "district_id", district_id)
         
-        # --- NEW: Fetch Thematic Activities ---
-        activities_data = fetch_all("activities", "id, activity_name", "active", True)
-        activities = pd.DataFrame(activities_data)
+        # --- Fetch Thematic, Activities, and Department Mappings ---
+        themes_data = fetch_all("themes", "id, theme_name", "active", True)
+        activities_data = fetch_all("activities", "id, theme_id, activity_name", "active", True)
+        act_dept_mapping = fetch_all("activity_departments")
 
-        return pd.DataFrame(specs_data), pd.DataFrame(matrix_data), pd.DataFrame(lmr_data), activities
+        return (pd.DataFrame(specs_data), pd.DataFrame(matrix_data), pd.DataFrame(lmr_data),
+                pd.DataFrame(themes_data), pd.DataFrame(activities_data), pd.DataFrame(act_dept_mapping))
     except Exception as e:
         st.error(f"Database Connection Failed: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_specs, df_matrix, df_lmr, df_activities = load_master_data(user_district)
+# Load data using the locked district ID, role, and department_id
+user_role = st.session_state.get('role')
+user_dept_id = st.session_state.get('department_id')
+
+df_specs, df_matrix, df_lmr, df_themes, df_activities, df_act_dept = load_master_data(user_district, user_role, user_dept_id)
 
 if not df_lmr.empty:
     df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
@@ -331,22 +289,59 @@ if view_mode == "Edit Workspace":
         st.markdown("#### 📋 Project Details")
         st.session_state['work_name'] = st.text_input("Name of Work", value=st.session_state['work_name'], placeholder="Enter the official project title...")
         
-        # --- NEW: Dynamic Work Type Dropdown ---
-        if not df_activities.empty:
-            activity_options = df_activities['activity_name'].tolist()
+        # --- Filter Logic for Theme & Activity based on Department (NO FALLBACK) ---
+        if df_activities.empty:
+            st.error("❌ No active activities found in the database. Please contact Superadmin to set up the Master Activities.")
+            st.session_state['work_type'] = ""
         else:
-            activity_options = VB_GRAM_G_SCHEMES_FALLBACK  # Fallback
-        
-        current_selection = st.session_state['work_type']
-        default_index = 0
-        if current_selection in activity_options:
-            default_index = activity_options.index(current_selection)
+            # Filter activities based on Role
+            df_activities_filtered = df_activities.copy()
             
-        st.session_state['work_type'] = st.selectbox(
-            "VB-G RAM G Scheme (Work Type)",
-            options=activity_options,
-            index=default_index
-        )
+            if user_role == 'department' and user_dept_id:
+                # Ensure data types are consistent for comparison
+                df_act_dept['activity_id'] = df_act_dept['activity_id'].astype(str)
+                df_activities_filtered['id'] = df_activities_filtered['id'].astype(str)
+                mapped_ids = df_act_dept[df_act_dept['department_id'] == user_dept_id]['activity_id'].tolist()
+                df_activities_filtered = df_activities_filtered[df_activities_filtered['id'].isin(mapped_ids)]
+
+            if df_activities_filtered.empty:
+                if user_role == 'department':
+                    st.warning("⚠️ No approved activities mapped to your department. Please contact SuperAdmin.")
+                else:
+                    st.warning("⚠️ No active activities found for your jurisdiction.")
+                st.session_state['work_type'] = ""
+            else:
+                # Create Theme selection based on filtered activities
+                valid_theme_ids = df_activities_filtered['theme_id'].unique()
+                df_themes_filtered = df_themes[df_themes['id'].isin(valid_theme_ids)]
+                theme_names = ["Select Theme"] + df_themes_filtered['theme_name'].tolist()
+                
+                col_theme, col_act = st.columns(2)
+                with col_theme:
+                    sel_theme = st.selectbox("Thematic Work Category", options=theme_names)
+                
+                with col_act:
+                    if sel_theme != "Select Theme":
+                        selected_theme_id = df_themes_filtered[df_themes_filtered['theme_name'] == sel_theme]['id'].iloc[0]
+                        final_activities = df_activities_filtered[df_activities_filtered['theme_id'] == selected_theme_id]
+                        final_act_names = final_activities['activity_name'].tolist()
+                    else:
+                        final_act_names = df_activities_filtered['activity_name'].tolist()
+
+                    if not final_act_names:
+                        st.warning("No activities available for the selected theme.")
+                        st.session_state['work_type'] = ""
+                    else:
+                        current_selection = st.session_state.get('work_type')
+                        default_index = 0
+                        if current_selection in final_act_names:
+                            default_index = final_act_names.index(current_selection)
+                        
+                        st.session_state['work_type'] = st.selectbox(
+                            "Base Activity*",
+                            options=final_act_names,
+                            index=default_index
+                        )
         st.markdown("</div>", unsafe_allow_html=True)
 
     # DPR toggle
@@ -491,11 +486,13 @@ elif view_mode == "View Appendix-I Report":
 with st.sidebar:
     st.markdown("---")
 
+    # Compute totals from current estimate_data
     totals = calculate_totals(st.session_state['estimate_data'])
     total_a = totals['unskilled']
     total_b = totals['skilled'] + totals['material'] + totals['gst']
     grand_total = totals['grand_total']
 
+    # Person days
     unskilled_rate = df_lmr[df_lmr['lmr_code'] == '0115']['rate'].iloc[0] if not df_lmr.empty and '0115' in df_lmr['lmr_code'].values else 1
     person_days = (total_a / unskilled_rate) if unskilled_rate > 0 else 0
 
@@ -503,6 +500,7 @@ with st.sidebar:
     st.metric("Component B (Skilled + Material + GST)", f"₹ {total_b:,.2f}")
     st.success(f"### Grand Total: ₹ {grand_total:,.2f}")
 
+    # Print / DPR actions
     st.markdown("---")
     st.markdown("**📄 Document Actions**")
     if st.button("🖨️ Print Estimate (Appendix-I)", use_container_width=True):
@@ -511,6 +509,7 @@ with st.sidebar:
 
     if st.session_state.get('print_trigger', False):
         st.session_state['print_trigger'] = False
+        # Generate a printable HTML report
         html_report = f"""
         <html>
         <head><style>
@@ -570,13 +569,17 @@ with st.sidebar:
         <script>window.onload = function() {{ window.print(); }}</script>
         </body></html>
         """
+        # Display the HTML in an iframe and auto-print
         components.html(html_report, height=600, scrolling=True)
+        # Also display a button to reprint if needed
         if st.button("🔄 Re-print / Download PDF"):
             st.components.v1.html(html_report, height=600, scrolling=True)
 
+    # DPR Preview (optional)
     if st.session_state.get('show_dpr', False):
         st.markdown("---")
         st.markdown("**📊 DPR Summary**")
+        # Show detailed material breakdown per item
         for detail in totals['item_details']:
             if detail['materials']:
                 with st.expander(f"{detail['spec_code']} - {detail['description']}"):
