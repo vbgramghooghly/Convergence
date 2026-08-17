@@ -145,7 +145,7 @@ def display_register(df, maps):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-def render_scheme_convergence_section(defaults):
+def render_scheme_convergence_section(defaults, key_prefix=""):
     """
     Renders the Departmental Scheme / Fund Convergence section.
     Returns a dict with the entered values.
@@ -155,14 +155,14 @@ def render_scheme_convergence_section(defaults):
         "Convergence with Own Departmental Scheme / Fund?",
         options=["No", "Yes"],
         index=0 if not defaults.get("convergence") else 1,
-        key="conv_choice_reg_form"  # <--- FIXED: Renamed to guarantee uniqueness
+        key=f"{key_prefix}_conv_choice"  # Dynamic Unique Key
     )
     scheme_name = ""
     if conv_choice == "Yes":
         scheme_name = st.text_input(
             "Name of Departmental Scheme / Fund *",
             value=defaults.get("scheme_name", ""),
-            key="scheme_name_reg"
+            key=f"{key_prefix}_scheme_name"  # Dynamic Unique Key
         )
     
     # Safely handle annual plan status
@@ -176,13 +176,13 @@ def render_scheme_convergence_section(defaults):
         "Included in Department's Own Annual Plan?",
         options=status_options,
         index=default_index,
-        key="annual_plan_status_reg"
+        key=f"{key_prefix}_annual_status"  # Dynamic Unique Key
     )
     
     scheme_remarks = st.text_area(
         "Departmental Scheme / Annual Plan Remarks (Optional)",
         value=defaults.get("scheme_remarks", ""),
-        key="scheme_remarks_reg"
+        key=f"{key_prefix}_scheme_remarks"  # Dynamic Unique Key
     )
     return {
         "convergence": conv_choice == "Yes",
@@ -241,7 +241,7 @@ def edit_delete_section(records, maps, supabase, user):
             new_v_fund = col_t2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get("vbgramg_fund", 0.0)))
             new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
 
-            # --- NEW: Departmental Scheme / Fund Convergence section in edit form ---
+            # --- Departmental Scheme / Fund Convergence section in edit form ---
             st.markdown("---")
             defaults = {
                 "convergence": rec.get("department_scheme_convergence", False),
@@ -249,7 +249,8 @@ def edit_delete_section(records, maps, supabase, user):
                 "annual_plan_status": rec.get("department_annual_plan_status", "Not Confirmed"),
                 "scheme_remarks": rec.get("department_scheme_remarks", "") or "",
             }
-            scheme_data = render_scheme_convergence_section(defaults)
+            # FIXED: Add key_prefix="edit" to ensure unique keys for the edit form
+            scheme_data = render_scheme_convergence_section(defaults, key_prefix="edit")
 
             if st.form_submit_button("Commit Changes", type="primary"):
                 if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
@@ -402,10 +403,11 @@ def show():
                 dept_fund = col_f3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
                 vbg_fund = col_f4.number_input("VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1)
 
-            # --- NEW: Departmental Scheme / Fund Convergence section (creation) ---
+            # --- Departmental Scheme / Fund Convergence section (creation) ---
             st.markdown("---")
             scheme_defaults = {"convergence": False, "scheme_name": "", "annual_plan_status": "Not Confirmed", "scheme_remarks": ""}
-            scheme_data = render_scheme_convergence_section(scheme_defaults)
+            # FIXED: Add key_prefix="new" to ensure unique keys for the add form
+            scheme_data = render_scheme_convergence_section(scheme_defaults, key_prefix="new")
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Commit Activity Registration", type="primary", use_container_width=True):
