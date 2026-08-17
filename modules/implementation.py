@@ -136,10 +136,17 @@ def show():
                         if existing_records:
                             existing_record = existing_records[0]
 
-                    default_convergence = existing_record.get("department_scheme_convergence") if existing_record else False
-                    default_scheme_name = existing_record.get("department_scheme_name") or ""
-                    default_annual_plan_status = existing_record.get("department_annual_plan_status") or "Not Confirmed"
-                    default_scheme_remarks = existing_record.get("department_scheme_remarks") or ""
+                    # --- FIXED: Safely unpack existing_record to prevent AttributeError on None ---
+                    if existing_record:
+                        default_convergence = existing_record.get("department_scheme_convergence", False)
+                        default_scheme_name = existing_record.get("department_scheme_name", "")
+                        default_annual_plan_status = existing_record.get("department_annual_plan_status", "Not Confirmed")
+                        default_scheme_remarks = existing_record.get("department_scheme_remarks", "")
+                    else:
+                        default_convergence = False
+                        default_scheme_name = ""
+                        default_annual_plan_status = "Not Confirmed"
+                        default_scheme_remarks = ""
 
                     conv_choice = st.radio(
                         "Convergence with Own Departmental Scheme / Fund?",
