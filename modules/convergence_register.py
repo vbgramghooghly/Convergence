@@ -1,4 +1,3 @@
-# convergence_register.py
 import io
 import pandas as pd
 import streamlit as st
@@ -205,7 +204,8 @@ def edit_delete_section(records, maps, supabase, user):
         if st.button("🗑️ Permanently Delete Activity", type="primary"):
             try:
                 supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
-                log_action(user.get("id"), f"DELETE convergence_register {selected_edit_id}")
+                try: log_action(user.get("id"), f"DELETE convergence_register {selected_edit_id}")
+                except: pass
                 st.success("Activity deleted successfully!")
                 st.rerun()
             except Exception as e:
@@ -468,7 +468,6 @@ def show():
 
     with tab3:
         # Bulk upload remains unchanged; new columns are not included in the template to avoid breaking existing CSV imports.
-        # If you wish to add them, extend the template and validation accordingly.
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
