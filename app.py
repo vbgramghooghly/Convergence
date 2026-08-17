@@ -97,29 +97,6 @@ st.markdown(f"""
             background-color: #F1F5F9 !important;
         }}
 
-        /* 3. APP LAUNCHER BUTTON STYLES */
-        .app-card {{
-            background-color: #FFFFFF; 
-            padding: 20px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-            border: 1px solid #E2E8F0;
-            text-align: center;
-            transition: transform 0.2s, box-shadow 0.2s;
-            margin-bottom: 12px;
-        }}
-        .app-card:hover {{
-            transform: translateY(-5px);
-            box-shadow: 0 10px 15px rgba(0,0,0,0.1);
-            border-color: {primary_color};
-        }}
-        .app-card-title {{
-            font-weight: 700; font-size: 1.1rem; color: #1E293B; margin-top: 10px;
-        }}
-        .app-card-desc {{
-            font-size: 0.85rem; color: #64748B; margin-top: 5px;
-        }}
-
         div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
             gap: 24px; border-bottom: 1px solid #E2E8F0; padding-bottom: 0px;
         }}
@@ -135,15 +112,20 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["🏠 Portal Home", "👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
+# REMOVED "🏠 Portal Home" from the core pages
+core_pages = ["👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
 if role == "block":
     core_pages.remove("📈 Reports")
 
 admin_pages = ["📊 Global Analytics", "⚙️ Master Data", "👥 User Management", "🛡️ Audit Logs", "🎨 UI / System Settings"]
 allowed_admin = admin_pages if role == "superadmin" else []
 
+# Set default landing page
 if 'current_page' not in st.session_state:
-    st.session_state.current_page = core_pages[0]
+    if role == "superadmin":
+        st.session_state.current_page = "📊 Global Analytics"
+    else:
+        st.session_state.current_page = core_pages[0]
 
 # ---------- REUSABLE UI COMPONENTS ----------
 def render_profile_menu():
@@ -191,8 +173,7 @@ def render_top_navigation():
         </div>
         """, unsafe_allow_html=True)
 
-    # ------------------ FIX: REMOVED CONDITIONAL CHECK ------------------
-    # The navbar now ALWAYS renders, regardless of the current page.
+    # Navigation Bar (always visible)
     with cols[1]:
         nav_cols = st.columns(len(core_pages))
         for i, page in enumerate(core_pages):
@@ -217,52 +198,45 @@ def render_top_navigation():
 
 render_top_navigation()
 
-# ---------- LANDING PAGE STATS ----------
-def render_landing_page():
-    try:
+# ---------- IMPORT MODULES & ROUTING (DEFERRED TO AVOID CACHE POISON) ----------
+try:
+    if st.session_state.current_page == "📐 Estimate Builder":
+        from modules.estimate_builder import show as show_estimate_builder
+        show_estimate_builder()
+    elif st.session_state.current_page == "📋 Work Entry":
+        from modules.convergence_register import show as show_convergence
+        show_convergence()
+    elif st.session_state.current_page == "🚀 Progress":
+        from modules.implementation import show as show_implementation
+        show_implementation()
+    elif st.session_state.current_page == "🤝 Meetings":
+        from modules.meetings import show as show_meetings
+        show_meetings()
+    elif st.session_state.current_page == "👥 Officials":
+        from modules.contacts import show as show_contacts
+        show_contacts()
+    elif st.session_state.current_page == "📈 Reports":
+        from modules.reports import show as show_reports
+        show_reports()
+    elif st.session_state.current_page == "📊 Global Analytics":
         from modules.analytics import show as show_portal_analytics
         show_portal_analytics()
-    except Exception:
-        st.error("Failed to load Portal Analytics. Please run the SQL fixes provided.")
-
-# ---------- IMPORT MODULES & ROUTING (DEFERRED TO AVOID CACHE POISON) ----------
-if st.session_state.current_page != "🏠 Portal Home":
-    try:
-        if st.session_state.current_page == "📐 Estimate Builder":
-            from modules.estimate_builder import show as show_estimate_builder
-            show_estimate_builder()
-        elif st.session_state.current_page == "📋 Work Entry":
-            from modules.convergence_register import show as show_convergence
-            show_convergence()
-        elif st.session_state.current_page == "🚀 Progress":
-            from modules.implementation import show as show_implementation
-            show_implementation()
-        elif st.session_state.current_page == "🤝 Meetings":
-            from modules.meetings import show as show_meetings
-            show_meetings()
-        elif st.session_state.current_page == "👥 Officials":
-            from modules.contacts import show as show_contacts
-            show_contacts()
-        elif st.session_state.current_page == "📈 Reports":
-            from modules.reports import show as show_reports
-            show_reports()
-        elif st.session_state.current_page == "📊 Global Analytics":
-            from modules.analytics import show as show_portal_analytics
-            show_portal_analytics()
-        elif st.session_state.current_page == "⚙️ Master Data":
-            from modules.master_data import show as show_masterdata
-            show_masterdata()
-        elif st.session_state.current_page == "👥 User Management":
-            from modules.users import show as show_users
-            show_users()
-        elif st.session_state.current_page == "🛡️ Audit Logs":
-            from modules.audit import show as show_audit
-            show_audit()
-        elif st.session_state.current_page == "🎨 UI / System Settings":
-            from modules.ui_ux_controller import show as show_ui_ux
-            show_ui_ux()
-    except Exception as e:
-        st.error(f"Error loading module: {e}")
-        st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
-else:
-    render_landing_page()
+    elif st.session_state.current_page == "⚙️ Master Data":
+        from modules.master_data import show as show_masterdata
+        show_masterdata()
+    elif st.session_state.current_page == "👥 User Management":
+        from modules.users import show as show_users
+        show_users()
+    elif st.session_state.current_page == "🛡️ Audit Logs":
+        from modules.audit import show as show_audit
+        show_audit()
+    elif st.session_state.current_page == "🎨 UI / System Settings":
+        from modules.ui_ux_controller import show as show_ui_ux
+        show_ui_ux()
+    else:
+        # Fallback to the analytics dashboard if no active module matches
+        from modules.analytics import show as show_portal_analytics
+        show_portal_analytics()
+except Exception as e:
+    st.error(f"Error loading module: {e}")
+    st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
