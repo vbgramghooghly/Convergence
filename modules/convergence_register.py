@@ -155,7 +155,7 @@ def render_scheme_convergence_section(defaults):
         "Convergence with Own Departmental Scheme / Fund?",
         options=["No", "Yes"],
         index=0 if not defaults.get("convergence") else 1,
-        key="conv_choice_reg"
+        key="conv_choice_reg_form"  # <--- FIXED: Renamed to guarantee uniqueness
     )
     scheme_name = ""
     if conv_choice == "Yes":
