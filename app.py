@@ -116,11 +116,13 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["📊 Dashboard", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "👥 Officials", "📈 Reports"]
+# UPDATED: Replaced Dashboard with Estimate Builder in Core Pages
+core_pages = ["📐 Estimate Builder", "📋 Work Entry", "🚀 Progress", "🤝 Meetings", "👥 Officials", "📈 Reports"]
 if role == "block":
     core_pages.remove("📈 Reports")
 
-admin_pages = ["⚙️ Master Data", "👥 User Management", "🛡️ Audit Logs", "🎨 UI / System Settings"]
+# UPDATED: Moved Dashboard to Admin Pages as Portal Analytics
+admin_pages = ["📊 Portal Analytics", "⚙️ Master Data", "👥 User Management", "🛡️ Audit Logs", "🎨 UI / System Settings"]
 allowed_admin = admin_pages if role == "superadmin" else []
 
 if 'current_page' not in st.session_state:
@@ -193,7 +195,9 @@ render_top_navigation()
 
 # ---------- IMPORT MODULES & ROUTING ----------
 try:
-    from modules.dashboard import show as show_dashboard
+    # UPDATED: Import Estimate Builder and Analytics
+    from modules.analytics import show as show_portal_analytics
+    from modules.estimate_builder import show as show_estimate_builder
     from modules.convergence_register import show as show_convergence
     from modules.implementation import show as show_implementation
     from modules.meetings import show as show_meetings
@@ -208,9 +212,17 @@ except Exception as e:
     st.stop()
 
 menu = {
-    "📊 Dashboard": show_dashboard, "📋 Work Entry": show_convergence, "🚀 Progress": show_implementation,
-    "🤝 Meetings": show_meetings, "👥 Officials": show_contacts, "📈 Reports": show_reports,
-    "⚙️ Master Data": show_masterdata, "👥 User Management": show_users, "🛡️ Audit Logs": show_audit, "🎨 UI / System Settings": show_ui_ux,
+    "📐 Estimate Builder": show_estimate_builder,
+    "📋 Work Entry": show_convergence,
+    "🚀 Progress": show_implementation,
+    "🤝 Meetings": show_meetings,
+    "👥 Officials": show_contacts,
+    "📈 Reports": show_reports,
+    "📊 Portal Analytics": show_portal_analytics,
+    "⚙️ Master Data": show_masterdata,
+    "👥 User Management": show_users,
+    "🛡️ Audit Logs": show_audit,
+    "🎨 UI / System Settings": show_ui_ux,
 }
 
 if st.session_state.current_page in menu:
