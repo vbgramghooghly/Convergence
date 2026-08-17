@@ -55,7 +55,8 @@ def fetch_master_lookups():
 # ---------- HELPERS ----------
 def build_maps(data):
     return {
-        "fy_map": {f["year_name"]: f["id"] for f in data["fys"]},
+        # FIX: Added .strip() to prevent whitespace mismatch leading to None ID
+        "fy_map": {f["year_name"].strip(): f["id"] for f in data["fys"]},
         "dist_map": {d["district_name"]: d["id"] for d in data["districts"]},
         "block_map": {b["block_name"]: b["id"] for b in data["blocks"]},
         "dept_map": {d["department_name"]: d["id"] for d in data["depts"]},
@@ -116,7 +117,7 @@ def display_register(df, maps):
     if "department_scheme_remarks" in df_display.columns:
         df_display["Remarks"] = df_display["department_scheme_remarks"]
     if "pia_type" in df_display.columns:
-        df_display["PIA (Implementing Agency)"] = df_display["pia_type"] # NEW: Display PIA
+        df_display["PIA (Implementing Agency)"] = df_display["pia_type"]
 
     df_display.rename(
         columns={
@@ -133,7 +134,6 @@ def display_register(df, maps):
         "FY", "District", "Block", "Department", "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
-    # Append new columns if present
     extra_cols = [c for c in ["PIA (Implementing Agency)", "Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
     display_cols.extend(extra_cols)
 
@@ -223,7 +223,6 @@ def edit_delete_section(records, maps, supabase, user):
             current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
             new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
 
-            # NEW: PIA selectbox for Edit form
             curr_pia = rec.get("pia_type", "Select PIA")
             pia_index = 0
             if curr_pia in PIA_OPTIONS:
@@ -279,7 +278,7 @@ def edit_delete_section(records, maps, supabase, user):
                         "expected_persondays": new_pd,
                         "department_fund": new_d_fund,
                         "vbgramg_fund": new_v_fund,
-                        "pia_type": new_pia,  # NEW: Update PIA
+                        "pia_type": new_pia,
                         "department_scheme_convergence": scheme_data["convergence"],
                         "department_scheme_name": scheme_data["scheme_name"],
                         "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -478,13 +477,19 @@ def show():
                     if inp_lat_long:
                         geo_string += f" | GPS: {inp_lat_long}"
 
+                    # CRITICAL FIX: Validate the FY ID map before inserting.
+                    selected_fy_id = maps["fy_map"].get(sel_fy.strip())
+                    if not selected_fy_id:
+                        st.error(f"🚨 Critical Error: Financial Year '{sel_fy}' not found in database mapping. Contact Admin to check for whitespace issues.")
+                        st.stop()
+
                     insert_data = {
-                        "financial_year_id": maps["fy_map"][sel_fy],
+                        "financial_year_id": selected_fy_id, # Uses the validated ID
                         "district_id": selected_dist_id,
                         "block_id": block_id,
                         "department_id": selected_dept_id,
                         "wing_id": selected_wing_id,
-                        "pia_type": selected_pia,  # NEW: Save PIA
+                        "pia_type": selected_pia,
                         "activity_description": final_work_name,
                         "thematic_category_id": theme_id,
                         "convergence_type": sel_conv_type,
@@ -515,7 +520,7 @@ def show():
                         st.error(f"Error saving record: {e}")
 
     with tab3:
-        # Bulk upload remains unchanged, will skip PIA for now to avoid breaking CSVs
+        # Bulk upload unchanged
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
@@ -617,7 +622,7 @@ def show():
                                 "block_id": block_id,
                                 "department_id": dept_id,
                                 "wing_id": None,
-                                "pia_type": "Department",  # Default to Department for bulk uploads
+                                "pia_type": "Department",
                                 "activity_description": work_name_val,
                                 "thematic_category_id": target_act["theme_id"],
                                 "convergence_type": conv_str,
