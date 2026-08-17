@@ -65,7 +65,7 @@ with st.sidebar:
         st.rerun()
 
 # --- Data Loader with Infinite Pagination ---
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=600)
 def load_master_data(district_id, role, department_id):
     supabase = get_supabase()
     try:
@@ -98,7 +98,6 @@ def load_master_data(district_id, role, department_id):
         return (pd.DataFrame(specs_data), pd.DataFrame(matrix_data), pd.DataFrame(lmr_data),
                 pd.DataFrame(themes_data), pd.DataFrame(activities_data), pd.DataFrame(act_dept_mapping))
     except Exception as e:
-        st.error(f"Database Connection Failed: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 # Load data using the locked district ID, role, and department_id
@@ -283,22 +282,20 @@ if view_mode == "Edit Workspace":
     st.title("🛠️ Estimate Builder")
     st.markdown(f"**Engineer:** {user_name} | **Pricing Engine Locked To:** {active_district_name}")
 
-    # Project details
     with st.container():
         st.markdown("""<div style='background-color:#f8f9fa; padding:15px; border-radius:5px; border:1px solid #e9ecef; margin-bottom: 20px;'>""", unsafe_allow_html=True)
         st.markdown("#### 📋 Project Details")
         st.session_state['work_name'] = st.text_input("Name of Work", value=st.session_state['work_name'], placeholder="Enter the official project title...")
         
-        # --- Filter Logic for Theme & Activity based on Department (NO FALLBACK) ---
+        # --- Filter Logic for Theme & Activity based on Department ---
         if df_activities.empty:
-            st.error("❌ No active activities found in the database. Please contact Superadmin to set up the Master Activities.")
+            st.warning("No active activities found in the database. Please contact Superadmin to set up Master Activities.")
             st.session_state['work_type'] = ""
         else:
             # Filter activities based on Role
             df_activities_filtered = df_activities.copy()
             
             if user_role == 'department' and user_dept_id:
-                # Ensure data types are consistent for comparison
                 df_act_dept['activity_id'] = df_act_dept['activity_id'].astype(str)
                 df_activities_filtered['id'] = df_activities_filtered['id'].astype(str)
                 mapped_ids = df_act_dept[df_act_dept['department_id'] == user_dept_id]['activity_id'].tolist()
@@ -311,7 +308,6 @@ if view_mode == "Edit Workspace":
                     st.warning("⚠️ No active activities found for your jurisdiction.")
                 st.session_state['work_type'] = ""
             else:
-                # Create Theme selection based on filtered activities
                 valid_theme_ids = df_activities_filtered['theme_id'].unique()
                 df_themes_filtered = df_themes[df_themes['id'].isin(valid_theme_ids)]
                 theme_names = ["Select Theme"] + df_themes_filtered['theme_name'].tolist()
@@ -344,7 +340,6 @@ if view_mode == "Edit Workspace":
                         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # DPR toggle
     dpr_toggle = st.checkbox("📄 Show DPR Preview (Optional)", value=st.session_state.get('show_dpr', False))
     if dpr_toggle != st.session_state.get('show_dpr', False):
         st.session_state['show_dpr'] = dpr_toggle
@@ -356,126 +351,126 @@ if view_mode == "Edit Workspace":
 
     if df_specs.empty:
         st.warning("Master Data is missing. Please check Supabase setup.")
-        st.stop()
-    spec_options = [""] + df_specs['spec_code'].tolist()
+    else:
+        spec_options = [""] + df_specs['spec_code'].tolist()
 
-    # Iterate headings
-    for h_idx, heading in enumerate(st.session_state['estimate_data']):
-        with st.expander(f"📁 {heading['title']}", expanded=True):
-            col_t, col_del = st.columns([10, 1])
-            heading['title'] = col_t.text_input("Heading Title", value=heading['title'], key=f"title_{heading['id']}", label_visibility="collapsed")
-            if col_del.button("🗑️", key=f"del_h_{heading['id']}"):
-                remove_element(st.session_state['estimate_data'], heading['id'])
-                st.rerun()
-
-            for i_idx, item in enumerate(heading['items']):
-                st.markdown(f"**Item {i_idx + 1}**")
-                if 'material_gsts' not in item:
-                    item['material_gsts'] = {}
-                if 'last_spec' not in item:
-                    item['last_spec'] = None
-
-                c1, c2, c3, c4, c5 = st.columns([3, 2, 3, 2, 1])
-                item['input_type'] = c2.radio(
-                    "Input Type",
-                    ["Direct Quantity", "L × B × D", "Lump Sum (LS)"],
-                    key=f"type_{item['id']}",
-                    horizontal=True,
-                    label_visibility="collapsed"
-                )
-
-                if item['input_type'] != "Lump Sum (LS)":
-                    item['spec_code'] = c1.selectbox(
-                        "Specification",
-                        spec_options,
-                        index=spec_options.index(item['spec_code']) if item['spec_code'] in spec_options else 0,
-                        key=f"spec_{item['id']}",
-                        format_func=format_spec_dropdown
-                    )
-                    active_unit = get_spec_unit(item['spec_code'])
-                    unit_label = f" ({active_unit})" if active_unit else ""
-
-                    spec_norm = item['spec_code'].strip().upper() if isinstance(item['spec_code'], str) else ""
-                    if 'spec_norm' not in df_matrix.columns:
-                        df_matrix['spec_norm'] = df_matrix['spec_code'].str.strip().str.upper()
-                    recipe = df_matrix[df_matrix['spec_norm'] == spec_norm].copy()
-
-                    if recipe.empty:
-                        c4.markdown(f"""<div style='font-size:12px; padding:5px; background-color:#fff3cd; border-radius:5px; border:1px solid #ffeeba;'>
-                            <b style='color:#856404;'>⚠️ No consumption data for this spec</b><br>
-                            Please add entries in the <i>Consumption Matrix</i> (Super Admin).
-                        </div>""", unsafe_allow_html=True)
-                        unskilled_amt = skilled_amt = mat_amt = item_gst = 0.0
-                        item['qty'] = 1.0
-                        if item['input_type'] == "L × B × D":
-                            l_col, b_col, d_col = c3.columns(3)
-                            item['L'] = l_col.number_input("L", value=item['L'], key=f"l_{item['id']}")
-                            item['B'] = b_col.number_input("B", value=item['B'], key=f"b_{item['id']}")
-                            item['D'] = d_col.number_input("D", value=item['D'], key=f"d_{item['id']}")
-                            item['qty'] = item['L'] * item['B'] * item['D']
-                        else:
-                            item['qty'] = c3.number_input(f"Total Qty{unit_label}", value=item['qty'], key=f"q_{item['id']}")
-                    else:
-                        if item['input_type'] == "L × B × D":
-                            l_col, b_col, d_col = c3.columns(3)
-                            item['L'] = l_col.number_input("L", value=item['L'], key=f"l_{item['id']}")
-                            item['B'] = b_col.number_input("B", value=item['B'], key=f"b_{item['id']}")
-                            item['D'] = d_col.number_input("D", value=item['D'], key=f"d_{item['id']}")
-                            item['qty'] = item['L'] * item['B'] * item['D']
-                        else:
-                            item['qty'] = c3.number_input(f"Total Qty{unit_label}", value=item['qty'], key=f"q_{item['id']}")
-
-                        pure_mats = recipe[~recipe['lmr_code'].isin(UNSKILLED_CODES + SKILLED_SEMI_CODES)]['lmr_code'].tolist()
-                        if item['last_spec'] != item['spec_code']:
-                            item['material_gsts'] = {m: 18 for m in pure_mats}
-                            item['last_spec'] = item['spec_code']
-
-                        unskilled_amt, skilled_amt, mat_amt, item_gst, mat_breakdown = calculate_item_cost(
-                            item['spec_code'], item['qty'], item['material_gsts']
-                        )
-
-                        c4.markdown(f"""<div style='font-size:12px; line-height:1.2; padding:5px; background-color:#f0f2f6; border-radius:5px;'>
-                            <b style='color:#0056b3;'>Qty: {item['qty']:.2f} {active_unit}</b><br><br>
-                            <b>Unskilled (0115):</b> ₹{unskilled_amt:,.2f}<br>
-                            <b>Skilled/Semi:</b> ₹{skilled_amt:,.2f}<br>
-                            <b>Pure Material:</b> ₹{mat_amt:,.2f}<br>
-                            <b style='color:#d32f2f;'>GST (Aggregated):</b> ₹{item_gst:,.2f}</div>""", unsafe_allow_html=True)
-
-                        if pure_mats:
-                            with st.expander("⚙️ Configure Material GST Slabs", expanded=False):
-                                cols = st.columns(min(len(pure_mats), 3))
-                                for idx, m_code in enumerate(pure_mats):
-                                    col_idx = idx % 3
-                                    m_desc = df_lmr[df_lmr['lmr_code'] == m_code]['description'].iloc[0] if not df_lmr[df_lmr['lmr_code'] == m_code].empty else "Unknown"
-                                    item['material_gsts'][m_code] = cols[col_idx].selectbox(
-                                        f"{m_code} - {m_desc[:15]}...",
-                                        [0, 5, 12, 18, 28],
-                                        index=[0, 5, 12, 18, 28].index(item['material_gsts'].get(m_code, 18)),
-                                        key=f"gst_{item['id']}_{m_code}",
-                                        format_func=lambda x: f"{x}%"
-                                    )
-                else:
-                    item['ls_desc'] = c1.text_input("Lump Sum Type", value=item.get('ls_desc', ''), key=f"ls_d_{item['id']}")
-                    item['ls_amount'] = c3.number_input("Direct Amount (₹)", value=item.get('ls_amount', 0.0), key=f"ls_m_{item['id']}")
-                    c4.markdown(f"""<div style='font-size:12px; padding:5px; background-color:#e8f4f8; border-radius:5px;'>
-                        <b style='color:#0056b3;'>Qty: 1 (LS)</b><br><br>
-                        <b>Lump Sum Amount:</b> ₹{item['ls_amount']:,.2f}<br>
-                        <b style='color:#d32f2f;'>GST Exempt (0%)</b></div>""", unsafe_allow_html=True)
-                    unskilled_amt = 0.0
-                    skilled_amt = 0.0
-                    mat_amt = item['ls_amount']
-                    item_gst = 0.0
-                    item['spec_code'] = 'LS'
-                    item['qty'] = 1
-
-                if c5.button("❌", key=f"del_i_{item['id']}"):
-                    remove_element(heading['items'], item['id'])
+        # Iterate headings
+        for h_idx, heading in enumerate(st.session_state['estimate_data']):
+            with st.expander(f"📁 {heading['title']}", expanded=True):
+                col_t, col_del = st.columns([10, 1])
+                heading['title'] = col_t.text_input("Heading Title", value=heading['title'], key=f"title_{heading['id']}", label_visibility="collapsed")
+                if col_del.button("🗑️", key=f"del_h_{heading['id']}"):
+                    remove_element(st.session_state['estimate_data'], heading['id'])
                     st.rerun()
-                st.markdown("<hr style='margin: 0px; padding: 0px; border-top: 1px dashed #ddd;'>", unsafe_allow_html=True)
 
-            item_add_col1, item_add_col2 = st.columns([3, 7])
-            item_add_col1.button("↳ Add Standard Item", key=f"add_i_{heading['id']}", on_click=add_item, args=(heading['id'], False))
-            item_add_col2.button("↳ Add Lump Sum Item", key=f"add_ls_{heading['id']}", on_click=add_item, args=(heading['id'], True))
+                for i_idx, item in enumerate(heading['items']):
+                    st.markdown(f"**Item {i_idx + 1}**")
+                    if 'material_gsts' not in item:
+                        item['material_gsts'] = {}
+                    if 'last_spec' not in item:
+                        item['last_spec'] = None
+
+                    c1, c2, c3, c4, c5 = st.columns([3, 2, 3, 2, 1])
+                    item['input_type'] = c2.radio(
+                        "Input Type",
+                        ["Direct Quantity", "L × B × D", "Lump Sum (LS)"],
+                        key=f"type_{item['id']}",
+                        horizontal=True,
+                        label_visibility="collapsed"
+                    )
+
+                    if item['input_type'] != "Lump Sum (LS)":
+                        item['spec_code'] = c1.selectbox(
+                            "Specification",
+                            spec_options,
+                            index=spec_options.index(item['spec_code']) if item['spec_code'] in spec_options else 0,
+                            key=f"spec_{item['id']}",
+                            format_func=format_spec_dropdown
+                        )
+                        active_unit = get_spec_unit(item['spec_code'])
+                        unit_label = f" ({active_unit})" if active_unit else ""
+
+                        spec_norm = item['spec_code'].strip().upper() if isinstance(item['spec_code'], str) else ""
+                        if 'spec_norm' not in df_matrix.columns:
+                            df_matrix['spec_norm'] = df_matrix['spec_code'].str.strip().str.upper()
+                        recipe = df_matrix[df_matrix['spec_norm'] == spec_norm].copy()
+
+                        if recipe.empty:
+                            c4.markdown(f"""<div style='font-size:12px; padding:5px; background-color:#fff3cd; border-radius:5px; border:1px solid #ffeeba;'>
+                                <b style='color:#856404;'>⚠️ No consumption data for this spec</b><br>
+                                Please add entries in the <i>Consumption Matrix</i> (Super Admin).
+                            </div>""", unsafe_allow_html=True)
+                            unskilled_amt = skilled_amt = mat_amt = item_gst = 0.0
+                            item['qty'] = 1.0
+                            if item['input_type'] == "L × B × D":
+                                l_col, b_col, d_col = c3.columns(3)
+                                item['L'] = l_col.number_input("L", value=item['L'], key=f"l_{item['id']}")
+                                item['B'] = b_col.number_input("B", value=item['B'], key=f"b_{item['id']}")
+                                item['D'] = d_col.number_input("D", value=item['D'], key=f"d_{item['id']}")
+                                item['qty'] = item['L'] * item['B'] * item['D']
+                            else:
+                                item['qty'] = c3.number_input(f"Total Qty{unit_label}", value=item['qty'], key=f"q_{item['id']}")
+                        else:
+                            if item['input_type'] == "L × B × D":
+                                l_col, b_col, d_col = c3.columns(3)
+                                item['L'] = l_col.number_input("L", value=item['L'], key=f"l_{item['id']}")
+                                item['B'] = b_col.number_input("B", value=item['B'], key=f"b_{item['id']}")
+                                item['D'] = d_col.number_input("D", value=item['D'], key=f"d_{item['id']}")
+                                item['qty'] = item['L'] * item['B'] * item['D']
+                            else:
+                                item['qty'] = c3.number_input(f"Total Qty{unit_label}", value=item['qty'], key=f"q_{item['id']}")
+
+                            pure_mats = recipe[~recipe['lmr_code'].isin(UNSKILLED_CODES + SKILLED_SEMI_CODES)]['lmr_code'].tolist()
+                            if item['last_spec'] != item['spec_code']:
+                                item['material_gsts'] = {m: 18 for m in pure_mats}
+                                item['last_spec'] = item['spec_code']
+
+                            unskilled_amt, skilled_amt, mat_amt, item_gst, mat_breakdown = calculate_item_cost(
+                                item['spec_code'], item['qty'], item['material_gsts']
+                            )
+
+                            c4.markdown(f"""<div style='font-size:12px; line-height:1.2; padding:5px; background-color:#f0f2f6; border-radius:5px;'>
+                                <b style='color:#0056b3;'>Qty: {item['qty']:.2f} {active_unit}</b><br><br>
+                                <b>Unskilled (0115):</b> ₹{unskilled_amt:,.2f}<br>
+                                <b>Skilled/Semi:</b> ₹{skilled_amt:,.2f}<br>
+                                <b>Pure Material:</b> ₹{mat_amt:,.2f}<br>
+                                <b style='color:#d32f2f;'>GST (Aggregated):</b> ₹{item_gst:,.2f}</div>""", unsafe_allow_html=True)
+
+                            if pure_mats:
+                                with st.expander("⚙️ Configure Material GST Slabs", expanded=False):
+                                    cols = st.columns(min(len(pure_mats), 3))
+                                    for idx, m_code in enumerate(pure_mats):
+                                        col_idx = idx % 3
+                                        m_desc = df_lmr[df_lmr['lmr_code'] == m_code]['description'].iloc[0] if not df_lmr[df_lmr['lmr_code'] == m_code].empty else "Unknown"
+                                        item['material_gsts'][m_code] = cols[col_idx].selectbox(
+                                            f"{m_code} - {m_desc[:15]}...",
+                                            [0, 5, 12, 18, 28],
+                                            index=[0, 5, 12, 18, 28].index(item['material_gsts'].get(m_code, 18)),
+                                            key=f"gst_{item['id']}_{m_code}",
+                                            format_func=lambda x: f"{x}%"
+                                        )
+                    else:
+                        item['ls_desc'] = c1.text_input("Lump Sum Type", value=item.get('ls_desc', ''), key=f"ls_d_{item['id']}")
+                        item['ls_amount'] = c3.number_input("Direct Amount (₹)", value=item.get('ls_amount', 0.0), key=f"ls_m_{item['id']}")
+                        c4.markdown(f"""<div style='font-size:12px; padding:5px; background-color:#e8f4f8; border-radius:5px;'>
+                            <b style='color:#0056b3;'>Qty: 1 (LS)</b><br><br>
+                            <b>Lump Sum Amount:</b> ₹{item['ls_amount']:,.2f}<br>
+                            <b style='color:#d32f2f;'>GST Exempt (0%)</b></div>""", unsafe_allow_html=True)
+                        unskilled_amt = 0.0
+                        skilled_amt = 0.0
+                        mat_amt = item['ls_amount']
+                        item_gst = 0.0
+                        item['spec_code'] = 'LS'
+                        item['qty'] = 1
+
+                    if c5.button("❌", key=f"del_i_{item['id']}"):
+                        remove_element(heading['items'], item['id'])
+                        st.rerun()
+                    st.markdown("<hr style='margin: 0px; padding: 0px; border-top: 1px dashed #ddd;'>", unsafe_allow_html=True)
+
+                item_add_col1, item_add_col2 = st.columns([3, 7])
+                item_add_col1.button("↳ Add Standard Item", key=f"add_i_{heading['id']}", on_click=add_item, args=(heading['id'], False))
+                item_add_col2.button("↳ Add Lump Sum Item", key=f"add_ls_{heading['id']}", on_click=add_item, args=(heading['id'], True))
 
 elif view_mode == "View Appendix-I Report":
     st.info("Report preview uses the identical calculation engine. Make sure to refine values in 'Edit Workspace' mode.")
@@ -509,7 +504,6 @@ with st.sidebar:
 
     if st.session_state.get('print_trigger', False):
         st.session_state['print_trigger'] = False
-        # Generate a printable HTML report
         html_report = f"""
         <html>
         <head><style>
@@ -569,17 +563,13 @@ with st.sidebar:
         <script>window.onload = function() {{ window.print(); }}</script>
         </body></html>
         """
-        # Display the HTML in an iframe and auto-print
         components.html(html_report, height=600, scrolling=True)
-        # Also display a button to reprint if needed
         if st.button("🔄 Re-print / Download PDF"):
             st.components.v1.html(html_report, height=600, scrolling=True)
 
-    # DPR Preview (optional)
     if st.session_state.get('show_dpr', False):
         st.markdown("---")
         st.markdown("**📊 DPR Summary**")
-        # Show detailed material breakdown per item
         for detail in totals['item_details']:
             if detail['materials']:
                 with st.expander(f"{detail['spec_code']} - {detail['description']}"):
