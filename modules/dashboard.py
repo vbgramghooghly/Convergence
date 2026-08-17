@@ -100,8 +100,9 @@ def show():
     activity_dept_counts = {}
     for m in act_dept_mapping: activity_dept_counts[m['activity_id']] = activity_dept_counts.get(m['activity_id'], 0) + 1
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard", "🚨 Target Compliance", "🏢 Department Onboarding", "🏘️ Block Coverage", "🔗 Activity Convergence"
+    # REMOVED: tab2 (Target Compliance) is now moved to Progress Page.
+    tab1, tab3, tab4, tab5 = st.tabs([
+        "📊 Dashboard", "🏢 Department Onboarding", "🏘️ Block Coverage", "🔗 Activity Convergence"
     ])
 
     with tab1:
@@ -137,35 +138,6 @@ def show():
                 df_phys['Department'] = df_phys['department_id'].map(dept_map)
                 st.bar_chart(df_phys.set_index('Department')['physical_achievement'])
             else: st.info("No achievement data available.")
-
-    with tab2:
-        compliance_data = []
-        if not df_targets.empty:
-            for idx, row in df_targets.iterrows():
-                d_id = row['department_id']
-                w_id = row.get('wing_id')
-                target_val = safe_int(row.get('desired_target', 0))
-                target_w_id_safe = None if pd.isna(w_id) else w_id
-                dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_map[target_w_id_safe].get('wing_name', 'Unknown')}" if target_w_id_safe and target_w_id_safe in wing_map else f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
-                contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
-                entered_count = 0
-                if not df_reg.empty:
-                    dept_reg = df_reg[df_reg['department_id'] == d_id]
-                    if 'activity_description' in dept_reg.columns:
-                        entered_count = safe_int(dept_reg['activity_description'].apply(lambda x: str(row['activity']).lower() in str(x).lower()).sum())
-                gap = entered_count - target_val
-                status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
-                compliance_data.append({
-                    "Department / Wing": dept_display, "Nodal Person": " | ".join(contacts) if contacts else "⚠️ No Login",
-                    "Target Activity": row['activity'], "Target Set": target_val, "Entries Captured": entered_count, "Gap": gap, "Status": status
-                })
-
-        def style_compliance(row):
-            if row['Status'] != "Target Matched": return ['background-color: #ffebee; color: #b71c1c; font-weight: bold;'] * len(row)
-            return ['background-color: #e8f5e9; color: #1b5e20; font-weight: bold;'] * len(row)
-
-        if compliance_data: st.dataframe(pd.DataFrame(compliance_data).style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
-        else: st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
 
     with tab3:
         matrix_rows = []
