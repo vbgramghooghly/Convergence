@@ -45,7 +45,7 @@ def fetch_master_lookups():
         "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
         "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
         "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
-        "wings": supabase.table("department_wings").select("*").execute().data or [],  # <--- NEW: Fetch Wings
+        "wings": supabase.table("department_wings").select("*").execute().data or [],
         "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
         "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
         "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
@@ -58,7 +58,7 @@ def build_maps(data):
         "dist_map": {d["district_name"]: d["id"] for d in data["districts"]},
         "block_map": {b["block_name"]: b["id"] for b in data["blocks"]},
         "dept_map": {d["department_name"]: d["id"] for d in data["depts"]},
-        "wing_map": {w["id"]: w for w in data["wings"]},  # <--- NEW: Create Wing Map
+        "wing_map": {w["id"]: w for w in data["wings"]},
         "fy_reverse": {f["id"]: f["year_name"] for f in data["fys"]},
         "dist_reverse": {d["id"]: d["district_name"] for d in data["districts"]},
         "block_reverse": {b["id"]: b["block_name"] for b in data["blocks"]},
@@ -106,7 +106,6 @@ def display_register(df, maps):
         if col not in df_display.columns:
             df_display[col] = "Not Specified" if col == "convergence_type" else ""
     
-    # Add new columns if they exist
     if "department_scheme_convergence" in df_display.columns:
         df_display["Own Scheme Convergence"] = df_display["department_scheme_convergence"].map({True: "Yes", False: "No"})
     if "department_scheme_name" in df_display.columns:
@@ -131,7 +130,6 @@ def display_register(df, maps):
         "FY", "District", "Block", "Department", "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
-    # Append new columns if present
     extra_cols = [c for c in ["Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
     display_cols.extend(extra_cols)
 
@@ -167,7 +165,6 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
             key=f"{key_prefix}_scheme_name"
         )
     
-    # Safely handle annual plan status
     status_options = ["Yes", "No", "Not Confirmed"]
     default_status = defaults.get("annual_plan_status", "Not Confirmed")
     if default_status not in status_options:
@@ -243,7 +240,6 @@ def edit_delete_section(records, maps, supabase, user):
             new_v_fund = col_t2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get("vbgramg_fund", 0.0)))
             new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
 
-            # --- Departmental Scheme / Fund Convergence section in edit form ---
             st.markdown("---")
             defaults = {
                 "convergence": rec.get("department_scheme_convergence", False),
@@ -256,7 +252,6 @@ def edit_delete_section(records, maps, supabase, user):
             if st.form_submit_button("Commit Changes", type="primary"):
                 if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
                     new_d_fund = new_v_fund = 0.0
-                # Validation for new fields
                 if scheme_data["convergence"] and not scheme_data["scheme_name"]:
                     st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
                 elif not new_work_name.strip():
@@ -304,7 +299,6 @@ def show():
     master = fetch_master_lookups()
     maps = build_maps(master)
 
-    # <--- NEW: Crash guard if no FY is found in the DB
     if not maps["fy_map"]:
         st.error("⚠️ No active Financial Years found in the database. Please contact your administrator to add a Financial Year.")
         st.stop()
@@ -330,13 +324,14 @@ def show():
             col1, col2 = st.columns(2)
             sel_fy = col1.selectbox("Financial Year*", list(maps["fy_map"].keys()))
 
-            # <--- NEW: Building Combined Department & Wings Dropdown
+            # Building Combined Department & Wings Dropdown
             dept_options = [
                 {"label": f"{d['department_name']} (Main Dept)", "dept_id": d['id'], "wing_id": None}
                 for d in master["depts"]
             ]
             for w in master["wings"]:
-                p_name = maps["dept_map"].get(w["department_id"], "Unknown")
+                # FIXED: Correctly map department_id back to department_name using dept_reverse
+                p_name = maps["dept_reverse"].get(w["department_id"], "Unknown")
                 dept_options.append({
                     "label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]",
                     "dept_id": w['department_id'],
@@ -346,7 +341,6 @@ def show():
             dept_labels = [opt['label'] for opt in dept_options]
 
             if role == "department":
-                # Auto-select if the user is a department head
                 user_dept_id = user.get("department_id")
                 user_wing_id = user.get("wing_id")
                 preselected_dept = next(
@@ -357,7 +351,6 @@ def show():
                     sel_dept_label = col2.selectbox("Department / Wing*", [preselected_dept["label"]], disabled=True)
                     selected_opt = preselected_dept
                 else:
-                    # Fallback if account mapping is broken
                     sel_dept_label = col2.selectbox("Department / Wing*", dept_labels)
                     selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
             else:
@@ -436,7 +429,6 @@ def show():
                 dept_fund = col_f3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
                 vbg_fund = col_f4.number_input("VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1)
 
-            # --- Departmental Scheme / Fund Convergence section (creation) ---
             st.markdown("---")
             scheme_defaults = {"convergence": False, "scheme_name": "", "annual_plan_status": "Not Confirmed", "scheme_remarks": ""}
             scheme_data = render_scheme_convergence_section(scheme_defaults, key_prefix="new")
@@ -460,7 +452,6 @@ def show():
                     errors.append("Financial Convergence requires a Fund allocation.")
                 if persondays <= 0:
                     errors.append("Expected Persondays must be greater than zero.")
-                # New validation
                 if scheme_data["convergence"] and not scheme_data["scheme_name"]:
                     errors.append("Scheme / Fund name is mandatory when Convergence = Yes.")
 
@@ -480,7 +471,7 @@ def show():
                         "district_id": selected_dist_id,
                         "block_id": block_id,
                         "department_id": selected_dept_id,
-                        "wing_id": selected_wing_id,  # <--- NEW: Adding wing_id to payload
+                        "wing_id": selected_wing_id,
                         "activity_description": final_work_name,
                         "thematic_category_id": theme_id,
                         "convergence_type": sel_conv_type,
@@ -511,7 +502,7 @@ def show():
                         st.error(f"Error saving record: {e}")
 
     with tab3:
-        # Bulk upload remains unchanged; new columns are not included in the template to avoid breaking existing CSV imports.
+        # Bulk upload remains unchanged
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
         st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
 
@@ -612,7 +603,7 @@ def show():
                                 "district_id": dist_id,
                                 "block_id": block_id,
                                 "department_id": dept_id,
-                                "wing_id": None, # Bulk upload doesn't support wings yet to keep it safe for CSV users
+                                "wing_id": None,
                                 "activity_description": work_name_val,
                                 "thematic_category_id": target_act["theme_id"],
                                 "convergence_type": conv_str,
