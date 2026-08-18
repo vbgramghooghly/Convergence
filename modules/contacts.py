@@ -195,6 +195,47 @@ def show():
                         else: st.error("🔴 Delete failed. Database security (RLS) prevented the action.")
                     except Exception as e: st.error(f"Error deleting contact: {e}")
 
+        # =================================================
+        # 🔥 FIX: DEPT & WING DROPDOWNS ARE NOW OUTSIDE THE FORM TO DYNAMICALLY UPDATE
+        # =================================================
+        st.markdown("##### 2. Department & Level Hierarchy")
+        col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
+
+        if role == "department":
+            selected_parent_id = user.get("department_id")
+            fixed_dept_name = dept_map.get(selected_parent_id, "Your Department")
+            col_l3.text_input("Parent Department", value=fixed_dept_name, disabled=True)
+        else:
+            curr_dept_id = existing_record.get("department_id")
+            curr_dept_name = next((k for k, v in dept_dict.items() if v == curr_dept_id), list(dept_dict.keys())[0] if dept_dict else "")
+            dept_idx = list(dept_dict.keys()).index(curr_dept_name) if curr_dept_name in dept_dict else 0
+            sel_parent_dept = col_l3.selectbox("Parent Department*", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
+            selected_parent_id = dept_dict.get(sel_parent_dept)
+
+        # Dynamically filter wings based on selected_parent_id
+        valid_wings = []
+        if selected_parent_id:
+            for w in wings:
+                if str(w.get("department_id")) == str(selected_parent_id):
+                    valid_wings.append(w)
+        wing_options = {"Directly under Parent Department": None}
+        for w in valid_wings:
+            wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
+
+        if role == "department" and not valid_wings:
+            st.caption("ℹ️ No specific wings/schemes are currently mapped to this department.")
+        if role == "department" and user.get("wing_id"):
+            wing_options = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
+
+        curr_wing_id = existing_record.get("wing_id") or user.get("wing_id")
+        curr_wing_name = next((k for k, v in wing_options.items() if v == curr_wing_id), list(wing_options.keys())[0])
+        wing_idx = list(wing_options.keys()).index(curr_wing_name) if curr_wing_name in wing_options else 0
+        sel_wing_name = st.selectbox("Specific Wing / Scheme / Parastatal", options=list(wing_options.keys()), index=wing_idx)
+        selected_wing_id = wing_options.get(sel_wing_name)
+
+        # =================================================
+        # REMAINING FORM
+        # =================================================
         with st.form("update_contact_form"):
             st.markdown("##### 1. Official Details")
             col1, col2 = st.columns(2)
@@ -204,43 +245,16 @@ def show():
             desig_idx = list(desig_dict.keys()).index(curr_desig_name) if curr_desig_name in desig_dict else 0
             sel_desig = col2.selectbox("Designation*", options=list(desig_dict.keys()) if desig_dict else ["None"], index=desig_idx)
 
-            st.markdown("##### 2. Department & Level Hierarchy")
-            col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
             curr_lvl = existing_record.get("office_level") or "District"
             lvl_idx = OFFICE_LEVELS.index(curr_lvl) if curr_lvl in OFFICE_LEVELS else 1
             sel_lvl = col_l1.selectbox("Posting Level*", OFFICE_LEVELS, index=lvl_idx)
+            
             sub_div_val = existing_record.get("sub_division") or ""
-            sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val) if sel_lvl == "Sub Division" else col_l2.text_input("Sub Division Name (If Applicable)", value=sub_div_val)
-
-            if role == "department":
-                fixed_dept_name = dept_map.get(user.get("department_id"), "Your Department")
-                col_l3.text_input("Parent Department", value=fixed_dept_name, disabled=True)
-                selected_parent_id = user.get("department_id")
-            else:
-                curr_dept_id = existing_record.get("department_id")
-                curr_dept_name = next((k for k, v in dept_dict.items() if v == curr_dept_id), list(dept_dict.keys())[0] if dept_dict else "")
-                dept_idx = list(dept_dict.keys()).index(curr_dept_name) if curr_dept_name in dept_dict else 0
-                sel_parent_dept = col_l3.selectbox("Parent Department*", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
-                selected_parent_id = dept_dict.get(sel_parent_dept)
-
-            # FIXED Wing Filtering
-            valid_wings = []
-            if selected_parent_id:
-                for w in wings:
-                    if str(w.get("department_id")) == str(selected_parent_id):
-                        valid_wings.append(w)
-            wing_options = {"Directly under Parent Department": None}
-            for w in valid_wings: wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
-            if role == "department" and not valid_wings: st.caption("ℹ️ No specific wings/schemes are currently mapped to this department.")
-            if role == "department" and user.get("wing_id"): wing_options = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
-
-            curr_wing_id = existing_record.get("wing_id") or user.get("wing_id")
-            curr_wing_name = next((k for k, v in wing_options.items() if v == curr_wing_id), list(wing_options.keys())[0])
-            wing_idx = list(wing_options.keys()).index(curr_wing_name) if curr_wing_name in wing_options else 0
-            sel_wing = st.selectbox("Specific Wing / Scheme / Parastatal", options=list(wing_options.keys()), index=wing_idx)
+            col_l2.text_input("Sub Division Name (If Applicable)", value=sub_div_val)
 
             st.markdown("##### 3. Primary Jurisdiction Mapping")
             col_j1, col_j2 = st.columns(2)
+
             curr_dist = existing_record.get("district_id") or user.get("district_id")
             if role in ["superadmin", "district"]:
                 dist_names = list(dist_dict.keys())
@@ -305,35 +319,39 @@ def show():
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Save Profile Details", type="primary"):
-                sel_sub_div, office, sub_office = sel_sub_div or "", office or "", sub_office or ""
+                # VALIDATION
                 if not name.strip(): st.error("⚠️ Full Name is mandatory.")
-                elif sel_lvl == "Sub Division" and not sel_sub_div.strip(): st.error("⚠️ Sub Division Name is required.")
-                elif (allow_block and final_block_role != "None" and not sel_comm_blocks): st.error("⚠️ Tag at least one block for the assigned Block Committee Role.")
                 else:
                     comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if allow_block else [block_dict[b] for b in default_blocks]
                     payload = {
-                        "full_name": name, "designation_id": desig_dict.get(sel_desig), "department_id": selected_parent_id,
-                        "wing_id": wing_options.get(sel_wing), "office_level": sel_lvl, "sub_division": sel_sub_div.strip() if sel_sub_div.strip() else None,
-                        "contact_number": contact_no, "whatsapp_number": whatsapp_no, "email_id": email,
-                        "office": office.strip() if office.strip() else None, "sub_office": sub_office.strip() if sub_office.strip() else None,
+                        "full_name": name,
+                        "designation_id": desig_dict.get(sel_desig),
+                        "department_id": selected_parent_id,  # Passed from outer scope
+                        "wing_id": selected_wing_id,         # Passed from outer scope
+                        "office_level": sel_lvl,
+                        "sub_division": sub_div_val if sub_div_val.strip() else None,
+                        "contact_number": contact_no,
+                        "whatsapp_number": whatsapp_no,
+                        "email_id": email,
+                        "office": office.strip() if office.strip() else None,
+                        "sub_office": sub_office.strip() if sub_office.strip() else None,
                         "district_committee_role": final_dist_role if final_dist_role != "None" else None,
                         "block_committee_role": final_block_role if final_block_role != "None" else None,
-                        "committee_blocks": comm_block_ids, "district_id": target_district_id, "block_id": target_block_id, "active": True,
+                        "committee_blocks": comm_block_ids,
+                        "district_id": target_district_id,
+                        "block_id": target_block_id,
+                        "active": True,
                     }
                     try:
                         if target_contact_id:
                             resp = supabase.table("contacts").update(payload).eq("id", target_contact_id).execute()
-                            if resp.data and len(resp.data) > 0:
-                                st.success("✅ Contact record updated successfully!")
-                                st.rerun()
-                            else:
-                                st.error("🔴 Update failed. Database security (RLS) prevented the update.")
+                            if resp.data and len(resp.data) > 0: st.success("✅ Contact record updated successfully!"); st.rerun()
+                            else: st.error("🔴 Update failed. Database security (RLS) prevented the update.")
                         else:
                             supabase.table("contacts").insert(payload).execute()
                             st.success("✅ Contact record saved successfully!")
                             st.rerun()
                     except Exception as e:
-                        # Failsafe: Check if the record saved despite RLS Error
                         check_resp = supabase.table("contacts").select("id").eq("full_name", name).execute()
                         if check_resp.data and len(check_resp.data) > 0:
                             st.success("✅ Contact record saved successfully!")
