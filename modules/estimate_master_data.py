@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 from utils.db import get_supabase
-from auth.auth import require_role, get_current_user  # <--- Updated to import get_current_user
+from auth.auth import require_role, get_current_user
 from utils.theme import apply_global_theme
 
 # ---------- CONSTANTS ----------
@@ -67,7 +67,6 @@ def fetch_estimate_master():
     }
 
 def show():
-    # Allow both SuperAdmin and District users to access this page
     require_role('superadmin', 'district')
     user = get_current_user()
     user_role = user.get('role')
@@ -79,10 +78,6 @@ def show():
 
     inject_tab_css()
     
-    # ==========================================================
-    # REMOVED: The h1 Header and caption sections completely
-    # ==========================================================
-
     supabase = get_supabase()
     master = fetch_estimate_master()
     df_specs = pd.DataFrame(master["specs"])
@@ -130,7 +125,7 @@ def show():
             if st.button("➕ Add New Specification"):
                 st.session_state['show_add_spec'] = True
         with col2:
-            if st.button("📤 Bulk Add Specifications"):
+            if st.button("📤 Bulk Upload Specifications"):
                 st.session_state['show_bulk_spec'] = True
 
         if st.session_state.get('show_add_spec'):
@@ -159,6 +154,23 @@ def show():
 
         if st.session_state.get('show_bulk_spec'):
             with st.expander("📤 Bulk Upload Specifications", expanded=True):
+                # --- NEW: Step 1: Download Template ---
+                st.markdown("### Step 1: Download Template")
+                st.caption("Format: `spec_code`, `description`, `final_unit`, `base_qty`")
+                spec_template_cols = ['spec_code', 'description', 'final_unit', 'base_qty']
+                spec_template_df = pd.DataFrame(columns=spec_template_cols)
+                spec_buf = io.StringIO()
+                spec_template_df.to_csv(spec_buf, index=False)
+                st.download_button(
+                    "📥 Download Specifications Template CSV",
+                    data=spec_buf.getvalue(),
+                    file_name="master_specifications_template.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown("---")
+                # --- Step 2: Upload & Process ---
+                st.markdown("### Step 2: Upload Filled Template")
                 uploaded = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx", "xls"], key="bulk_spec")
                 if uploaded:
                     try:
@@ -217,7 +229,7 @@ def show():
             if st.button("➕ Add Consumption Entry"):
                 st.session_state['show_add_cons'] = True
         with col2:
-            if st.button("📤 Bulk Add Consumption"):
+            if st.button("📤 Bulk Upload Consumption"):
                 st.session_state['show_bulk_cons'] = True
 
         if st.session_state.get('show_add_cons'):
@@ -246,6 +258,23 @@ def show():
 
         if st.session_state.get('show_bulk_cons'):
             with st.expander("📤 Bulk Upload Consumption", expanded=True):
+                # --- NEW: Step 1: Download Template ---
+                st.markdown("### Step 1: Download Template")
+                st.caption("Format: `spec_code`, `lmr_code`, `consumed_qty`")
+                cons_template_cols = ['spec_code', 'lmr_code', 'consumed_qty']
+                cons_template_df = pd.DataFrame(columns=cons_template_cols)
+                cons_buf = io.StringIO()
+                cons_template_df.to_csv(cons_buf, index=False)
+                st.download_button(
+                    "📥 Download Consumption Template CSV",
+                    data=cons_buf.getvalue(),
+                    file_name="consumption_matrix_template.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                st.markdown("---")
+                # --- Step 2: Upload & Process ---
+                st.markdown("### Step 2: Upload Filled Template")
                 uploaded = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx", "xls"], key="bulk_cons")
                 if uploaded:
                     try:
@@ -276,9 +305,6 @@ def show():
             df_lmr_view = df_lmr.merge(df_districts, left_on="district_id", right_on="id", how="left")
             df_lmr_view.rename(columns={"district_name": "District"}, inplace=True)
 
-            # =================================================================
-            # NEW: Filter logic based on User Role
-            # =================================================================
             if user_role == 'superadmin':
                 all_d = ["All Districts"] + sorted(df_districts['district_name'].tolist())
                 sel_dist = st.selectbox("Filter by District", options=all_d, key="lmr_filter")
@@ -286,11 +312,9 @@ def show():
                     filt_id = df_districts[df_districts['district_name'] == sel_dist]['id'].iloc[0]
                     df_lmr_view = df_lmr_view[df_lmr_view['district_id'] == filt_id]
             else:
-                # District users are locked to their own assigned district
                 user_district_name = df_districts[df_districts['id'] == user_district_id]['district_name'].iloc[0] if not df_districts.empty else "Unknown"
                 st.info(f"🔒 You are locked to editing LMR rates for: **{user_district_name}**")
                 df_lmr_view = df_lmr_view[df_lmr_view['district_id'] == user_district_id]
-            # =================================================================
 
             edited_lmr = st.data_editor(
                 df_lmr_view[['id', 'District', 'lmr_code', 'description', 'rate', 'unit']].copy(),
@@ -333,18 +357,13 @@ def show():
         if st.session_state.get('show_add_lmr'):
             with st.expander("✏️ Add New LMR Rate", expanded=True):
                 with st.form("add_lmr_form"):
-                    # =================================================================
-                    # NEW: Form logic to lock the District for District Users
-                    # =================================================================
                     if user_role == 'superadmin':
                         dist_opts = {d['id']: d['district_name'] for d in master["districts"]}
                         sel_dist_id = st.selectbox("District *", options=list(dist_opts.keys()), format_func=lambda x: dist_opts[x])
                     else:
-                        # Lock to user's own district
                         user_district_name = df_districts[df_districts['id'] == user_district_id]['district_name'].iloc[0] if not df_districts.empty else "Unknown"
                         st.markdown(f"**District:** {user_district_name}")
                         sel_dist_id = user_district_id
-                    # =================================================================
                     
                     c1, c2 = st.columns(2)
                     lmr_code = c1.text_input("LMR Code *")
@@ -370,9 +389,6 @@ def show():
                                 st.rerun()
                             except Exception as e: st.error(f"Error: {e}")
 
-        # =================================================================
-        # BULK LMR WORKFLOW (Step 1 / Step 2)
-        # =================================================================
         if st.session_state.get('show_bulk_lmr'):
             with st.expander("📤 Bulk Upload LMR (Pivot format)", expanded=True):
                 
@@ -382,11 +398,11 @@ def show():
                 
                 template_cols = ['lmr_code', 'description', 'unit'] + [f'dist_{i}_rate' for i in range(1, 24)]
                 template_df = pd.DataFrame(columns=template_cols)
-                buf = io.StringIO()
-                template_df.to_csv(buf, index=False)
+                lmr_buf = io.StringIO()
+                template_df.to_csv(lmr_buf, index=False)
                 st.download_button(
-                    "📥 Download Template CSV",
-                    data=buf.getvalue(),
+                    "📥 Download LMR Pivot Template CSV",
+                    data=lmr_buf.getvalue(),
                     file_name="lmr_pivot_template.csv",
                     mime="text/csv",
                     use_container_width=True
