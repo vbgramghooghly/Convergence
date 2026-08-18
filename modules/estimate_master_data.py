@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import re
 from utils.db import get_supabase
-from auth.auth import require_role
+from auth.auth import require_role, get_current_user  # <--- Updated to import get_current_user
 from utils.theme import apply_global_theme
 
 # ---------- CONSTANTS ----------
@@ -67,7 +67,16 @@ def fetch_estimate_master():
     }
 
 def show():
-    require_role('superadmin')
+    # Allow both SuperAdmin and District users to access this page
+    require_role('superadmin', 'district')
+    user = get_current_user()
+    user_role = user.get('role')
+    user_district_id = user.get('district_id')
+
+    if user_role == 'district' and not user_district_id:
+        st.error("🚨 Your account is missing a District assignment. Please contact Superadmin.")
+        st.stop()
+
     inject_tab_css()
     
     # ==========================================================
@@ -267,12 +276,21 @@ def show():
             df_lmr_view = df_lmr.merge(df_districts, left_on="district_id", right_on="id", how="left")
             df_lmr_view.rename(columns={"district_name": "District"}, inplace=True)
 
-            all_d = ["All Districts"] + df_districts['district_name'].tolist()
-            sel_dist = st.selectbox("Filter by District", options=all_d, key="lmr_filter")
-
-            if sel_dist != "All Districts" and sel_dist:
-                filt_id = df_districts[df_districts['district_name'] == sel_dist]['id'].iloc[0]
-                df_lmr_view = df_lmr_view[df_lmr_view['district_id'] == filt_id]
+            # =================================================================
+            # NEW: Filter logic based on User Role
+            # =================================================================
+            if user_role == 'superadmin':
+                all_d = ["All Districts"] + sorted(df_districts['district_name'].tolist())
+                sel_dist = st.selectbox("Filter by District", options=all_d, key="lmr_filter")
+                if sel_dist != "All Districts" and sel_dist:
+                    filt_id = df_districts[df_districts['district_name'] == sel_dist]['id'].iloc[0]
+                    df_lmr_view = df_lmr_view[df_lmr_view['district_id'] == filt_id]
+            else:
+                # District users are locked to their own assigned district
+                user_district_name = df_districts[df_districts['id'] == user_district_id]['district_name'].iloc[0] if not df_districts.empty else "Unknown"
+                st.info(f"🔒 You are locked to editing LMR rates for: **{user_district_name}**")
+                df_lmr_view = df_lmr_view[df_lmr_view['district_id'] == user_district_id]
+            # =================================================================
 
             edited_lmr = st.data_editor(
                 df_lmr_view[['id', 'District', 'lmr_code', 'description', 'rate', 'unit']].copy(),
@@ -310,12 +328,24 @@ def show():
         with col2:
             if st.button("📤 Bulk Upload LMR (Pivot)"):
                 st.session_state['show_bulk_lmr'] = True
+                st.rerun()
 
         if st.session_state.get('show_add_lmr'):
             with st.expander("✏️ Add New LMR Rate", expanded=True):
                 with st.form("add_lmr_form"):
-                    dist_opts = {d['id']: d['district_name'] for d in master["districts"]}
-                    sel_dist_id = st.selectbox("District *", options=list(dist_opts.keys()), format_func=lambda x: dist_opts[x])
+                    # =================================================================
+                    # NEW: Form logic to lock the District for District Users
+                    # =================================================================
+                    if user_role == 'superadmin':
+                        dist_opts = {d['id']: d['district_name'] for d in master["districts"]}
+                        sel_dist_id = st.selectbox("District *", options=list(dist_opts.keys()), format_func=lambda x: dist_opts[x])
+                    else:
+                        # Lock to user's own district
+                        user_district_name = df_districts[df_districts['id'] == user_district_id]['district_name'].iloc[0] if not df_districts.empty else "Unknown"
+                        st.markdown(f"**District:** {user_district_name}")
+                        sel_dist_id = user_district_id
+                    # =================================================================
+                    
                     c1, c2 = st.columns(2)
                     lmr_code = c1.text_input("LMR Code *")
                     desc = c2.text_input("Description *")
@@ -341,13 +371,14 @@ def show():
                             except Exception as e: st.error(f"Error: {e}")
 
         # =================================================================
-        # REWRITTEN: Step 1 / Step 2 Bulk LMR workflow
+        # BULK LMR WORKFLOW (Step 1 / Step 2)
         # =================================================================
         if st.session_state.get('show_bulk_lmr'):
             with st.expander("📤 Bulk Upload LMR (Pivot format)", expanded=True):
+                
                 # --- Step 1: Download Template ---
                 st.markdown("### Step 1: Download Template")
-                st.caption("Format: `lmr_code`, `description`, `unit`, `dist_1_rate` ... `dist_23_rate`. Leave rate blank if not applicable.")
+                st.info("Download the CSV template below. Fill it out with your district LMR rates, then proceed to Step 2.")
                 
                 template_cols = ['lmr_code', 'description', 'unit'] + [f'dist_{i}_rate' for i in range(1, 24)]
                 template_df = pd.DataFrame(columns=template_cols)
