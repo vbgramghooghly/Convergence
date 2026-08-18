@@ -13,13 +13,17 @@ def show():
     role = user["role"]
     supabase = get_supabase()
 
-    # 2. GLOBAL THEME, HEADER & BREADCRUMB
+    # 2. GLOBAL THEME (only for consistency, but header removed)
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    st.markdown("<div style='font-size: 0.85rem; color: #64748B; margin-bottom: 0.5rem;'>Home / Analytics / Master Reports</div>", unsafe_allow_html=True)
-    st.markdown(f"<h2 style='margin-bottom: 0px; color: {primary_color};'>📊 Reports & Analytics Centre</h2>", unsafe_allow_html=True)
-    st.caption("Official reporting, analytical dashboards, and statutory export engine for VB-G RAM G Convergence.")
+    # Removed breadcrumb, main heading, and caption.
+    # st.markdown("<div ...>Home / Analytics / Master Reports</div>", unsafe_allow_html=True)   # DELETED
+    # st.markdown(f"<h2 ...>📊 Reports & Analytics Centre</h2>", unsafe_allow_html=True)         # DELETED
+    # st.caption("Official reporting, ...")                                                      # DELETED
+
+    # We keep a minimal separator if needed, but the user didn't ask for it.
+    # We'll put a small line to separate from the rest.
     st.markdown("---")
 
     # ==========================================
@@ -66,7 +70,7 @@ def show():
     if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
 
     # ==========================================
-    # 5. REPORT SELECTION (Removed header)
+    # 5. REPORT SELECTION (No header above)
     # ==========================================
     col_c1, col_c2 = st.columns(2)
     report_category = col_c1.selectbox("1. Select Report Category", [
@@ -116,12 +120,7 @@ def show():
     # ==========================================
     # 6. CONTEXT-SENSITIVE FILTERS (based on report_type)
     # ==========================================
-    # Build a filtered dataframe using the selected report's filters
-    # We'll keep a copy of the original df for reset
     filtered_df = df.copy()
-
-    # Define filter options based on report type
-    # We'll collect filter values in a dict
     filter_values = {}
 
     # Determine which filters to show
@@ -134,11 +133,11 @@ def show():
                        "Pending / Delayed Activities Report", "FY 2026–27 Master Convergence Statement"]:
         show_filters = ["district", "department", "block", "theme", "status", "financial_year"]
     elif report_type == "Technical Convergence Report (NOC Status)":
-        show_filters = ["district", "department", "block", "financial_year"]  # status not needed
+        show_filters = ["district", "department", "block", "financial_year"]
     elif report_type in ["District Convergence Meeting Register", "Department-wise Resolution Statement"]:
-        show_filters = ["district", "department", "financial_year"]  # meetings have less fields
+        show_filters = ["district", "department", "financial_year"]
 
-    # Remove filters that are not applicable based on available columns
+    # Remove unavailable columns
     available_cols = set(df.columns)
     if "financial_year" not in available_cols:
         show_filters = [f for f in show_filters if f != "financial_year"]
@@ -147,27 +146,20 @@ def show():
     if "theme_name" not in available_cols:
         show_filters = [f for f in show_filters if f != "theme"]
 
-    # Build filter UI
     if show_filters:
         st.subheader("🔍 Apply Filters")
-        # Create columns for filters (3 per row)
         cols = st.columns(min(3, len(show_filters)))
-        filter_cols = {}
         for i, f in enumerate(show_filters):
             col = cols[i % 3]
             if f == "district":
-                # Get distinct districts (already mapped)
                 districts_list = sorted(df["district_name"].unique())
-                # Remove "Unknown" if present
                 if "Unknown" in districts_list:
                     districts_list.remove("Unknown")
                 selected = col.multiselect("District", districts_list, default=[])
                 filter_values["district"] = selected
             elif f == "block":
-                # Cascade: if district selected, show blocks from those districts
                 district_vals = filter_values.get("district", [])
                 if district_vals:
-                    # Get block names where district_name in district_vals
                     block_options = sorted(df[df["district_name"].isin(district_vals)]["block_name"].unique())
                 else:
                     block_options = sorted(df["block_name"].unique())
@@ -192,22 +184,18 @@ def show():
                 selected = col.multiselect("Status", status_options, default=[])
                 filter_values["status"] = selected
             elif f == "financial_year":
-                # If column exists, get unique values
                 if "financial_year" in df.columns:
                     fy_options = sorted(df["financial_year"].unique())
                     selected = col.multiselect("Financial Year", fy_options, default=[])
                     filter_values["financial_year"] = selected
                 else:
-                    # Provide a default FY selection (could be a fixed value)
-                    # We'll create a dummy filter that doesn't affect data
                     selected = col.selectbox("Financial Year", ["2026-27"], index=0)
-                    filter_values["financial_year"] = [selected]  # keep as list for consistency
+                    filter_values["financial_year"] = [selected]
 
-        # Reset button
         if st.button("Reset Filters"):
-            st.rerun()  # will reset all selections
+            st.rerun()
 
-        # Apply filters to filtered_df
+        # Apply filters
         for key, vals in filter_values.items():
             if vals:
                 if key == "district":
@@ -226,18 +214,14 @@ def show():
 
         st.markdown("---")
     else:
-        # No filters to show, use original df
         filtered_df = df.copy()
 
     # ==========================================
-    # 7. RENDER THE SELECTED REPORT (with filtered_df)
+    # 7. PRINT CSS (unchanged)
     # ==========================================
-    # We'll capture the report output in a div for print.
-    # Also add print CSS to hide UI elements.
     print_css = """
     <style>
     @media print {
-        /* Hide all streamlit UI elements */
         .stApp > header, .stApp > .stSidebar, .stApp > .stToolbar, .stApp > .stStatusWidget,
         .stApp > .stException, .stApp > .stAlert, .stApp > .stButton, .stApp > .stSelectbox,
         .stApp > .stMultiselect, .stApp > .stColumns, .stApp > .stContainer,
@@ -249,8 +233,7 @@ def show():
         .stApp > .stSlider, .stApp > .stCheckbox, .stApp > .stRadio, .stApp > .stColorPicker,
         .stApp > .stProgress, .stApp > .stSpinner, .stApp > .stBalloon,
         .stApp > .stWarning, .stApp > .stInfo, .stApp > .stSuccess, .stApp > .stError,
-        .stApp > .stPlaceholder, .stApp > .stMarkdown:not(.print-content),
-        .stApp > .stBanner, .stApp > .stNotification, .stApp > .stToast,
+        .stApp > .stPlaceholder, .stApp > .stBanner, .stApp > .stNotification, .stApp > .stToast,
         .stApp > .stSidebarContent, .stApp > .stMainBlock,
         .stApp > .stPage, .stApp > .stAppViewContainer, .stApp > .stMain,
         .stApp > .st-emotion-cache-1v3ma8w, .stApp > .st-emotion-cache-1v0mbdj,
@@ -284,7 +267,6 @@ def show():
         .stApp > .st-emotion-cache-1v0mbdj {
             display: none !important;
         }
-        /* Show only the print-content div */
         .print-content {
             display: block !important;
             visibility: visible !important;
@@ -292,7 +274,6 @@ def show():
             margin: 0 !important;
             padding: 20px !important;
         }
-        /* Table formatting */
         table {
             border-collapse: collapse;
             width: 100%;
@@ -307,44 +288,24 @@ def show():
         th {
             background-color: #f2f2f2;
         }
-        /* Landscape for wide tables */
         .landscape {
             page: landscape;
         }
-        /* Signature area */
-        .signature-area {
-            margin-top: 40px;
-            display: flex;
-            justify-content: space-between;
-        }
-        .signature-item {
-            text-align: center;
-            width: 30%;
-        }
-        .signature-line {
-            border-top: 1px solid #000;
-            margin-top: 30px;
-            padding-top: 5px;
-        }
-        /* Hide print button in print */
+        /* Signature area removed, so we don't need this */
         .no-print {
             display: none !important;
         }
     }
     </style>
     """
-
     st.markdown(print_css, unsafe_allow_html=True)
 
-    # Wrap report output in a div for print
+    # Wrap report output in a print-content div
     st.markdown('<div class="print-content">', unsafe_allow_html=True)
 
-    # Determine if we should show signature for official reports
-    show_signature = report_type in ["Official VB-G RAM G Summary Report (Template)", "District-wise Summary Report",
-                                     "Department-wise Summary Report", "Block-wise Summary Report",
-                                     "FY 2026–27 Master Convergence Statement"]
-
-    # Report rendering (with filtered_df)
+    # ==========================================
+    # 8. RENDER THE SELECTED REPORT (with filtered_df)
+    # ==========================================
     if report_type == "Official VB-G RAM G Summary Report (Template)":
         st.subheader("Summary Report on Vikshit Bharat - G RAM G Convergence Plan with Line Departments for F.Y 2026-27")
         st.caption("Official statutory statement format matching state government export guidelines.")
@@ -366,7 +327,6 @@ def show():
         official_df["Remarks / Status"] = filtered_df["current_status"]
 
         st.dataframe(official_df, use_container_width=True, hide_index=True)
-        # Excel download
         excel = dataframe_to_excel(official_df, "Official_Summary_Report")
         st.download_button("📥 Download Official Format (Excel)", data=excel, file_name="VB_GRAM_G_Summary_Report_FY26_27.xlsx", type="primary")
 
@@ -494,9 +454,7 @@ def show():
         meetings = supabase.table("meetings").select("*").eq("meeting_type", "District").execute().data or []
         if meetings:
             df_m = pd.DataFrame(meetings)
-            # Apply district filter if any
             if filter_values.get("district"):
-                # Map district names to IDs and filter
                 district_ids = [d["id"] for d in districts if d["district_name"] in filter_values["district"]]
                 if district_ids:
                     df_m = df_m[df_m["district_id"].isin(district_ids)]
@@ -512,7 +470,6 @@ def show():
         if resolutions:
             df_res = pd.DataFrame(resolutions)
             df_res["Department"] = df_res["department_id"].map(dept_map).fillna("Unknown")
-            # Apply department filter if any
             if filter_values.get("department"):
                 df_res = df_res[df_res["Department"].isin(filter_values["department"])]
             st.dataframe(df_res[["Department", "action_point", "target", "deadline", "status", "remarks"]], use_container_width=True, hide_index=True)
@@ -521,31 +478,16 @@ def show():
         else:
             st.info("No resolutions recorded in the system.")
 
-    # ==========================================
-    # 8. PRINT BUTTON (only show if data present)
-    # ==========================================
-    st.markdown('</div>', unsafe_allow_html=True)  # close print-content div
+    # Close print-content div
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Add signature area for official reports
-    if show_signature and not filtered_df.empty:
-        st.markdown("""
-        <div class="signature-area print-only">
-            <div class="signature-item">
-                <div class="signature-line">Prepared By</div>
-            </div>
-            <div class="signature-item">
-                <div class="signature-line">Checked By</div>
-            </div>
-            <div class="signature-item">
-                <div class="signature-line">Approved By</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # ==========================================
+    # 9. PRINT BUTTON (hidden in print)
+    # ==========================================
+    # Signature area removed entirely
 
-    # Print button (outside print-content, will be hidden in print)
     st.markdown('<div class="no-print">', unsafe_allow_html=True)
     if st.button("🖨️ Print Report", type="primary"):
-        # Use JavaScript to print
         st.components.v1.html(
             """
             <script>
@@ -555,8 +497,3 @@ def show():
             height=0,
         )
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # ==========================================
-    # 9. EXISTING EXPORTS (already present in each branch)
-    # ==========================================
-    # All exports remain as is.
