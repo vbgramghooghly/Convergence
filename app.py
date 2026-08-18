@@ -112,7 +112,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["Home", "Officials", "Progress", "Meetings", "Work Entry", "Reports", "Estimate Builder"]
+core_pages = ["Home", "Officials", "Progress", "Meetings", "Work Entry", "Reports", "Estimate"]
 if role == "block":
     core_pages.remove("Reports")
 
@@ -208,7 +208,7 @@ try:
     # UPDATED: Added the new import
     from modules.estimate_master_data import show as show_estimate_master_data
     
-    if st.session_state.current_page == "Estimate Builder":
+    if st.session_state.current_page == "Estimate":
         from modules.estimate_builder import show as show_estimate_builder
         show_estimate_builder()
     elif st.session_state.current_page == "Work Entry":
