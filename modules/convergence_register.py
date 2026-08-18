@@ -416,7 +416,7 @@ def show():
 
             st.markdown("##### 🎯 Targets & Financial Allocation")
             col_f1, col_f2 = st.columns(2)
-            
+
             # --- BARE MINIMUM DYNAMIC ORIGIN CHANGE ---
             if role == "district":
                 dist_name = maps["dist_reverse"].get(user.get("district_id"), "District")
