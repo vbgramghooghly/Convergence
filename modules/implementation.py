@@ -52,6 +52,10 @@ def show():
     
     dept_map = {d['id']: d['department_name'] for d in departments}
     wing_map = {w['id']: w for w in wings}
+    # 🔥 MINIMAL FIX 1: Create district and block lookup maps
+    dist_map = {d['id']: d['district_name'] for d in districts}
+    block_map = {b['id']: b['block_name'] for b in blocks}
+    
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
     
@@ -469,9 +473,29 @@ def show():
                     if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
                     return f"{d_name} (Main)"
                 df_ap['Department / Wing'] = df_ap.apply(format_dept_display, axis=1)
-                meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type").execute().data or []
+                
+                # 🔥 MINIMAL FIX 2: Fetch district_id and block_id from meetings table
+                meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type, district_id, block_id").execute().data or []
                 m_map = {m['id']: m for m in meetings_data}
-                df_ap['Meeting Context'] = df_ap['meeting_id'].map(lambda x: f"{m_map.get(x, {}).get('meeting_type', 'Unknown')} ({m_map.get(x, {}).get('meeting_date', 'Unknown')})")
+                
+                # 🔥 MINIMAL FIX 3: Map the actual District and Block names to the meeting context
+                def get_meeting_context(meeting_id):
+                    if meeting_id not in m_map: return "Unknown Meeting"
+                    m = m_map[meeting_id]
+                    m_type = m.get('meeting_type', 'Other')
+                    d_id = m.get('district_id')
+                    b_id = m.get('block_id')
+                    if m_type == 'District':
+                        d_name = dist_map.get(d_id, 'Unknown District')
+                        return f"District Meeting: {d_name}"
+                    elif m_type == 'Block':
+                        b_name = block_map.get(b_id, 'Unknown Block')
+                        d_name = dist_map.get(d_id, 'Unknown District')
+                        return f"Block Meeting: {b_name} ({d_name} District)"
+                    return f"{m_type} Meeting"
+                
+                df_ap['Meeting Context'] = df_ap['meeting_id'].apply(get_meeting_context)
+
                 pending_ap = df_ap[~df_ap['status'].isin(['Completed', 'Dropped', 'completed', 'dropped'])].copy()
                 if not pending_ap.empty:
                     pending_ap['deadline'] = pd.to_datetime(pending_ap['deadline'], errors='coerce')
