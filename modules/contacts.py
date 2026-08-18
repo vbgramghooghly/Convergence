@@ -8,7 +8,8 @@ from auth.auth import get_current_user, require_role
 from utils.db import get_supabase
 from utils.theme import apply_global_theme
 
-# ---------- PRINT PREVIEW FUNCTION (UPGRADED) ----------
+
+# ---------- PRINT PREVIEW FUNCTION ----------
 def render_print_preview(html_content):
     wrapped_html = f"""
     <!DOCTYPE html>
@@ -47,6 +48,7 @@ def render_print_preview(html_content):
     """
     components.html(wrapped_html, height=800, scrolling=True)
 
+
 # ---------- MAIN show() ----------
 def show():
     require_role("superadmin", "district", "block", "department")
@@ -57,9 +59,7 @@ def show():
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    # ---------- HEADER LINES REMOVED ----------
-    # (Previously: breadcrumb, title, subtitle, and separator)
-
+    # ---------- FETCH DROPDOWN DATA ----------
     designations = supabase.table("designations").select("id, designation_name").eq("active", True).execute().data or []
     districts = supabase.table("districts").select("id, district_name").execute().data or []
     blocks = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
@@ -75,6 +75,7 @@ def show():
     OFFICE_LEVELS = ["State / Department", "District", "Sub Division", "Block", "Gram Panchayat"]
     COMMITTEE_ROLES = ["None", "Chairperson", "Co-Chairperson", "Member-Convener", "Member"]
 
+    # ---------- FETCH CONTACTS DATA ----------
     query = supabase.table("contacts").select(
         "*, designations(designation_name), districts(district_name),"
         " blocks(block_name), departments(department_name),"
@@ -85,12 +86,15 @@ def show():
         query = query.eq("district_id", user["district_id"])
 
     if role == "department":
-        if user.get("department_id"): query = query.eq("department_id", user["department_id"])
-        if user.get("wing_id"): query = query.eq("wing_id", user["wing_id"])
+        if user.get("department_id"):
+            query = query.eq("department_id", user["department_id"])
+        if user.get("wing_id"):
+            query = query.eq("wing_id", user["wing_id"])
 
     contacts_data = query.execute().data or []
     df = pd.DataFrame(contacts_data) if contacts_data else pd.DataFrame()
 
+    # ---------- DASHBOARD METRICS ----------
     if not df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Officials Mapped", len(df))
@@ -104,28 +108,35 @@ def show():
     # --- TAB 1: DIRECTORY LIST & EXPORT ---
     with tab1:
         if not df.empty:
+            # Parse DataFrames
             df["Designation"] = df["designations"].apply(lambda x: x.get("designation_name", "Unassigned") if isinstance(x, dict) else "Unassigned")
             df["District"] = df["districts"].apply(lambda x: x.get("district_name", "District Office") if isinstance(x, dict) else "District Office")
             df["Block"] = df["blocks"].apply(lambda x: x.get("block_name", "N/A") if isinstance(x, dict) else "N/A")
             df["Parent Dept"] = df["departments"].apply(lambda x: x.get("department_name", "General Administration") if isinstance(x, dict) else "General Administration")
 
             def format_wing(x):
-                if isinstance(x, dict) and x.get("wing_name"): return f"{x.get('wing_name')} ({x.get('entity_type', 'Wing')})"
+                if isinstance(x, dict) and x.get("wing_name"):
+                    return f"{x.get('wing_name')} ({x.get('entity_type', 'Wing')})"
                 return "Direct Parent Dept"
             df["Wing / Scheme"] = df["department_wings"].apply(format_wing)
 
             def format_comm_blocks(block_ids):
-                if not block_ids: return "N/A"
+                if not block_ids:
+                    return "N/A"
                 if isinstance(block_ids, str):
-                    try: block_ids = json.loads(block_ids)
-                    except: return "N/A"
-                if not isinstance(block_ids, list) or not block_ids: return "N/A"
+                    try:
+                        block_ids = json.loads(block_ids)
+                    except:
+                        return "N/A"
+                if not isinstance(block_ids, list) or not block_ids:
+                    return "N/A"
                 str_block_ids = [str(x) for x in block_ids]
                 names = [b_name for b_name, b_id in block_dict.items() if str(b_id) in str_block_ids]
                 return ", ".join(names) if names else "N/A"
 
             for col in ["office_level", "sub_division", "office", "sub_office", "district_committee_role", "block_committee_role", "committee_blocks"]:
-                if col not in df.columns: df[col] = None
+                if col not in df.columns:
+                    df[col] = None
 
             df["Tagged Comm. Blocks"] = df["committee_blocks"].apply(format_comm_blocks)
             df["Dist. Role"] = df["district_committee_role"].fillna("None")
@@ -144,10 +155,9 @@ def show():
             st.dataframe(filtered_df, use_container_width=True, hide_index=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # --- EXPORT & PRINT BUTTONS ---
+            # Export & Print buttons
             col_dl, col_pr, col_print_preview = st.columns([1.5, 1.8, 1.8])
-            
-            # Excel download
+
             buffer = io.BytesIO()
             try:
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -156,12 +166,10 @@ def show():
             except Exception:
                 col_dl.download_button("📥 Download CSV", data=filtered_df.to_csv(index=False).encode("utf-8"), file_name="official_contact_directory.csv", mime="text/csv", use_container_width=True)
 
-            # Printable HTML download (legacy)
             html_table = filtered_df.to_html(index=False)
             printable_html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Official Contact Directory</title><style>body {{ font-family: Arial, sans-serif; padding: 20px; font-size: 11px; color: #333; }} h2 {{ text-align: center; color: {primary_color}; border-bottom: 2px solid {primary_color}; padding-bottom: 10px; }} table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }} th, td {{ border: 1px solid #dddddd; padding: 6px; text-align: left; }} th {{ background-color: #f2f2f2; color: #000; }} @page {{ size: A4 landscape; margin: 15mm; }} @media print {{ .no-print {{ display: none; }} body {{ padding: 0; }} }}</style></head><body onload="window.print()"><div class="no-print" style="text-align: center; margin-bottom: 20px; background-color: #f8f9fa; padding: 15px; border-radius: 8px;"><button onclick="window.print()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: {primary_color}; color: white; border: none; border-radius: 4px;">🖨️ Print or Save as PDF</button></div><h2>Official Contact Directory & Statutory Roles</h2>{html_table}</body></html>"""
             col_pr.download_button("🖨️ Printable HTML", data=printable_html, file_name="Contact_Directory_Print.html", mime="text/html", use_container_width=True)
 
-            # NEW: Direct Print Preview (upgraded)
             if col_print_preview.button("🖨️ Print Table", use_container_width=True):
                 html_preview = f"""
                 <div style="text-align:center; margin-bottom:20px;">
@@ -179,21 +187,23 @@ def show():
         existing_record = {}
         target_contact_id = None
 
-        # FIXED HELPER FUNCTION TO AVOID ATTRIBUTE ERROR
         def safe_contact_desig(c_obj):
             desig_obj = c_obj.get('designations')
             if isinstance(desig_obj, dict):
                 return desig_obj.get('designation_name', 'Unknown')
             return 'Unknown'
 
+        # --- SUPERADMIN / DISTRICT / BLOCK ---
         if role in ["superadmin", "district", "block"]:
             st.markdown("#### 🛠️ Master Directory Configuration")
             action = st.radio("Action", ["➕ Add New Official", "✏️ Edit Existing Official"], horizontal=True)
 
             if action == "✏️ Edit Existing Official":
                 query = supabase.table("contacts").select("*, designations(designation_name)")
-                if role == "district": query = query.eq("district_id", user["district_id"])
-                elif role == "block": query = query.eq("block_id", user["block_id"])
+                if role == "district":
+                    query = query.eq("district_id", user["district_id"])
+                elif role == "block":
+                    query = query.eq("block_id", user["block_id"])
 
                 contact_list = query.execute().data
                 if contact_list:
@@ -202,15 +212,20 @@ def show():
                     existing_record = next((c for c in contact_list if c["id"] == target_contact_id), {})
                 else:
                     st.warning("No officials found in your jurisdiction.")
+
+        # --- DEPARTMENT USERS ---
         else:
             st.markdown(f"#### 🔄 Manage Department Personnel: **{dept_map.get(user.get('department_id'), 'Your Department')}**")
             dept_contacts_query = supabase.table("contacts").select("*, designations(designation_name)").eq("department_id", user["department_id"])
-            if user.get("wing_id"): dept_contacts_query = dept_contacts_query.eq("wing_id", user["wing_id"])
-            if user.get("district_id"): dept_contacts_query = dept_contacts_query.eq("district_id", user["district_id"])
+            if user.get("wing_id"):
+                dept_contacts_query = dept_contacts_query.eq("wing_id", user["wing_id"])
+            if user.get("district_id"):
+                dept_contacts_query = dept_contacts_query.eq("district_id", user["district_id"])
 
             dept_contacts = dept_contacts_query.execute().data or []
             action_opts = ["➕ Add New Department Official"]
-            if dept_contacts: action_opts.append("✏️ Edit / Delete Department Official")
+            if dept_contacts:
+                action_opts.append("✏️ Edit / Delete Department Official")
 
             action = st.radio("Action", action_opts, horizontal=True)
 
@@ -218,7 +233,7 @@ def show():
                 contact_opts = {c["id"]: f"{c['full_name']} - {safe_contact_desig(c)}" for c in dept_contacts}
                 target_contact_id = st.selectbox("Select Official", options=list(contact_opts.keys()), format_func=lambda x: contact_opts[x])
                 existing_record = next((c for c in dept_contacts if c["id"] == target_contact_id), {})
-                
+
                 if st.button("🗑️ Delete This Contact Record", type="secondary"):
                     try:
                         resp = supabase.table("contacts").delete().eq("id", target_contact_id).execute()
@@ -227,8 +242,10 @@ def show():
                             st.rerun()
                         else:
                             st.error("🔴 Delete failed. Database security (RLS) prevented the action.")
-                    except Exception as e: st.error(f"Error deleting contact: {e}")
+                    except Exception as e:
+                        st.error(f"Error deleting contact: {e}")
 
+        # --- UNIVERSAL FORM ---
         with st.form("update_contact_form"):
             st.markdown("##### 1. Official Details")
             col1, col2 = st.columns(2)
@@ -248,8 +265,10 @@ def show():
             sel_lvl = col_l1.selectbox("Posting Level*", OFFICE_LEVELS, index=lvl_idx)
 
             sub_div_val = existing_record.get("sub_division") or ""
-            if sel_lvl == "Sub Division": sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
-            else: sel_sub_div = col_l2.text_input("Sub Division Name (If Applicable)", value=sub_div_val)
+            if sel_lvl == "Sub Division":
+                sel_sub_div = col_l2.text_input("Sub Division Name*", value=sub_div_val)
+            else:
+                sel_sub_div = col_l2.text_input("Sub Division Name (If Applicable)", value=sub_div_val)
 
             if role == "department":
                 fixed_dept_name = dept_map.get(user.get("department_id"), "Your Department")
@@ -262,22 +281,20 @@ def show():
                 sel_parent_dept = col_l3.selectbox("Parent Department*", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
                 selected_parent_id = dept_dict.get(sel_parent_dept)
 
-            # --- FIX: Explicitly handle string vs integer ID mismatches ---
-valid_wings = []
-if selected_parent_id:
-    # Convert both to string to guarantee matching
-    for w in wings:
-        if str(w.get("department_id")) == str(selected_parent_id):
-            valid_wings.append(w)
+            # ---------- WING FILTERING FIX APPLIED ----------
+            valid_wings = []
+            if selected_parent_id:
+                for w in wings:
+                    if str(w.get("department_id")) == str(selected_parent_id):
+                        valid_wings.append(w)
 
-# Build the wing options dictionary
-wing_options = {"Directly under Parent Department": None}
-for w in valid_wings:
-    wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
+            wing_options = {"Directly under Parent Department": None}
+            for w in valid_wings:
+                wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
 
-# Optional: Add a caption so the user knows if no wings are mapped
-if not valid_wings:
-    st.caption("ℹ️ No specific wings/schemes are currently mapped to this department.")
+            if role == "department" and not valid_wings:
+                st.caption("ℹ️ No specific wings/schemes are currently mapped to this department.")
+            # ------------------------------------------------
 
             if role == "department" and user.get("wing_id"):
                 wing_options = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
@@ -329,7 +346,8 @@ if not valid_wings:
             sub_office = col7.text_input("Sub Office / Room No.", value=existing_record.get("sub_office") or "")
 
             st.markdown("##### 5. Statutory Committee Memberships")
-            if role == "department": st.caption("🔒 *Committee roles are managed exclusively by District & Block Administrations.*")
+            if role == "department":
+                st.caption("🔒 *Committee roles are managed exclusively by District & Block Administrations.*")
 
             col_c1, col_c2 = st.columns(2)
             allow_dist = (role in ["superadmin", "district"]) and (sel_lvl in ["State / Department", "District", "Sub Division"])
@@ -347,14 +365,17 @@ if not valid_wings:
 
             curr_comm_blocks = existing_record.get("committee_blocks") or []
             if isinstance(curr_comm_blocks, str):
-                try: curr_comm_blocks = json.loads(curr_comm_blocks)
-                except: curr_comm_blocks = []
+                try:
+                    curr_comm_blocks = json.loads(curr_comm_blocks)
+                except:
+                    curr_comm_blocks = []
             curr_comm_blocks = [str(x) for x in curr_comm_blocks]
             default_blocks = [b for b in list(block_dict.keys()) if str(block_dict[b]) in curr_comm_blocks]
 
             if not default_blocks and target_block_id and final_block_role != "None":
                 primary_block_name = next((b_name for b_name, b_id in block_dict.items() if b_id == target_block_id), None)
-                if primary_block_name: default_blocks = [primary_block_name]
+                if primary_block_name:
+                    default_blocks = [primary_block_name]
 
             sel_comm_blocks = st.multiselect("Tagged Blocks for Committee Membership", options=list(block_dict.keys()), default=default_blocks, disabled=not allow_block)
 
@@ -362,29 +383,42 @@ if not valid_wings:
             if st.form_submit_button("Save Profile Details", type="primary"):
                 sel_sub_div, office, sub_office = sel_sub_div or "", office or "", sub_office or ""
 
-                if not name.strip(): st.error("⚠️ Full Name is mandatory.")
-                elif sel_lvl == "Sub Division" and not sel_sub_div.strip(): st.error("⚠️ Sub Division Name is required.")
-                elif (allow_block and final_block_role != "None" and not sel_comm_blocks): st.error("⚠️ Tag at least one block for the assigned Block Committee Role.")
+                if not name.strip():
+                    st.error("⚠️ Full Name is mandatory.")
+                elif sel_lvl == "Sub Division" and not sel_sub_div.strip():
+                    st.error("⚠️ Sub Division Name is required.")
+                elif (allow_block and final_block_role != "None" and not sel_comm_blocks):
+                    st.error("⚠️ Tag at least one block for the assigned Block Committee Role.")
                 else:
                     comm_block_ids = [block_dict[b] for b in sel_comm_blocks] if allow_block else [block_dict[b] for b in default_blocks]
                     payload = {
-                        "full_name": name, "designation_id": desig_dict.get(sel_desig), "department_id": selected_parent_id,
-                        "wing_id": wing_options.get(sel_wing), "office_level": sel_lvl, "sub_division": sel_sub_div.strip() if sel_sub_div.strip() else None,
-                        "contact_number": contact_no, "whatsapp_number": whatsapp_no, "email_id": email,
-                        "office": office.strip() if office.strip() else None, "sub_office": sub_office.strip() if sub_office.strip() else None,
+                        "full_name": name,
+                        "designation_id": desig_dict.get(sel_desig),
+                        "department_id": selected_parent_id,
+                        "wing_id": wing_options.get(sel_wing),
+                        "office_level": sel_lvl,
+                        "sub_division": sel_sub_div.strip() if sel_sub_div.strip() else None,
+                        "contact_number": contact_no,
+                        "whatsapp_number": whatsapp_no,
+                        "email_id": email,
+                        "office": office.strip() if office.strip() else None,
+                        "sub_office": sub_office.strip() if sub_office.strip() else None,
                         "district_committee_role": final_dist_role if final_dist_role != "None" else None,
                         "block_committee_role": final_block_role if final_block_role != "None" else None,
-                        "committee_blocks": comm_block_ids, "district_id": target_district_id, "block_id": target_block_id, "active": True,
+                        "committee_blocks": comm_block_ids,
+                        "district_id": target_district_id,
+                        "block_id": target_block_id,
+                        "active": True,
                     }
                     try:
-                        if target_contact_id: 
+                        if target_contact_id:
                             resp = supabase.table("contacts").update(payload).eq("id", target_contact_id).execute()
                             if resp.count and resp.count > 0:
                                 st.success("✅ Contact record updated successfully!")
                                 st.rerun()
                             else:
                                 st.error("🔴 Update failed. Database security (RLS) prevented the update.")
-                        else: 
+                        else:
                             supabase.table("contacts").insert(payload).execute()
                             st.success("✅ Contact record saved successfully!")
                             st.rerun()
