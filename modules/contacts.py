@@ -262,9 +262,22 @@ def show():
                 sel_parent_dept = col_l3.selectbox("Parent Department*", options=list(dept_dict.keys()) if dept_dict else ["None"], index=dept_idx)
                 selected_parent_id = dept_dict.get(sel_parent_dept)
 
-            valid_wings = [w for w in wings if w["department_id"] == selected_parent_id]
-            wing_options = {"Directly under Parent Department": None}
-            for w in valid_wings: wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
+            # --- FIX: Explicitly handle string vs integer ID mismatches ---
+valid_wings = []
+if selected_parent_id:
+    # Convert both to string to guarantee matching
+    for w in wings:
+        if str(w.get("department_id")) == str(selected_parent_id):
+            valid_wings.append(w)
+
+# Build the wing options dictionary
+wing_options = {"Directly under Parent Department": None}
+for w in valid_wings:
+    wing_options[f"{w['wing_name']} ({w['entity_type']})"] = w["id"]
+
+# Optional: Add a caption so the user knows if no wings are mapped
+if not valid_wings:
+    st.caption("ℹ️ No specific wings/schemes are currently mapped to this department.")
 
             if role == "department" and user.get("wing_id"):
                 wing_options = {k: v for k, v in wing_options.items() if v == user.get("wing_id") or v is None}
