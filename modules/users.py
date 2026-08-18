@@ -20,6 +20,13 @@ def show():
     supabase = get_supabase()
     user = get_current_user()
 
+    # 🔐 Initialize Admin Supabase Client (Bypasses RLS for Admin Operations)
+    if SERVICE_KEY:
+        admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
+    else:
+        st.error("🚨 Service Key is missing. Please configure SERVICE_KEY in your environment variables.")
+        st.stop()
+
     # ---------- FETCH MASTER DATA GLOBALLY ----------
     districts = supabase.table("districts").select("id,district_name").execute().data or []
     blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
@@ -177,8 +184,8 @@ def show():
                 "wing_id": new_wing_id if new_role == 'department' else None
             }
             try:
-                # 1. Update Database
-                supabase.table("users").update(updates).eq("id", selected_uid).execute()
+                # 🔥 FIX 1: Use admin_supabase to completely bypass RLS policies
+                admin_supabase.table("users").update(updates).eq("id", selected_uid).execute()
                 
                 # 2. Log Action
                 try:
@@ -189,7 +196,7 @@ def show():
                 st.success("User updated successfully!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Failed to update user. Note: Ensure 'wing_id' column exists in 'users' table. Error details: {e}")
+                st.error(f"Failed to update user. Details: {e}")
         
     # --- ADMIN PASSWORD ALTERNATION ---
     with st.expander("🔑 Change / Alternate User Password"):
@@ -202,7 +209,6 @@ def show():
                 st.error("Password must be at least 6 characters.")
             else:
                 try:
-                    admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
                     admin_supabase.auth.admin.update_user_by_id(
                         selected_uid,
                         {"password": new_pw}
@@ -276,7 +282,6 @@ def show():
 
         try:
             # Step 1: Create user in Supabase Authentication
-            admin_supabase = create_client(SUPABASE_URL, SERVICE_KEY)
             auth_response = admin_supabase.auth.admin.create_user({
                 "email": formatted_email,
                 "password": new_password,
@@ -299,8 +304,8 @@ def show():
             }
             
             try:
-                # Attempt DB insert
-                supabase.table("users").insert(user_record).execute()
+                # 🔥 FIX 2: Use admin_supabase to completely bypass RLS on INSERT
+                admin_supabase.table("users").insert(user_record).execute()
                 
                 # Log success
                 try:
@@ -312,11 +317,15 @@ def show():
                 st.rerun()
                 
             except Exception as db_err:
-                # AUTO-ROLLBACK: If DB fails (like missing wing_id column), delete the auth user so they aren't orphaned
+                # AUTO-ROLLBACK: If DB fails, delete the auth user so they aren't orphaned
                 admin_supabase.auth.admin.delete_user(new_uuid)
                 err_msg = str(db_err)
+                
+                # Check for missing columns (like wing_id) to give better debugging feedback
                 if "wing_id" in err_msg:
-                    st.error("🚨 Database Error: The `wing_id` column is missing from your `users` table in Supabase. Please add it. The account creation was rolled back successfully.")
+                    st.error("🚨 **Database Column Error:** The `wing_id` column is missing from your `users` table in Supabase. Please add it via the SQL Editor.")
+                elif "department_id" in err_msg:
+                    st.error("🚨 **Database Column Error:** The `department_id` column is missing from your `users` table.")
                 else:
                     st.error(f"Database Error: Account creation rolled back. Details: {db_err}")
             
