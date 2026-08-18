@@ -416,7 +416,21 @@ def show():
 
             st.markdown("##### 🎯 Targets & Financial Allocation")
             col_f1, col_f2 = st.columns(2)
-            inp_origin = col_f1.selectbox("Source of Activity Linkage", ORIGIN_SOURCES)
+            
+            # --- BARE MINIMUM DYNAMIC ORIGIN CHANGE ---
+            if role == "district":
+                dist_name = maps["dist_reverse"].get(user.get("district_id"), "District")
+                origin_options = ["District Annual Action Plan", f"District Meeting ({dist_name})"]
+            elif role == "block":
+                block_name = maps["block_reverse"].get(user.get("block_id"), "Block")
+                origin_options = ["Block Annual Action Plan", f"Block Meeting ({block_name})"]
+            else:
+                # Superadmin sees the original generic options
+                origin_options = ["District Plan", "Block Plan", "District Meeting", "Block Meeting"]
+            
+            inp_origin = col_f1.selectbox("Source of Activity Linkage", origin_options)
+            # --- END CHANGE ---
+
             persondays = col_f2.number_input("Expected Persondays*", min_value=0)
             possible_outcome = st.text_area("Expected Deliverables / Outcome", placeholder="e.g. 50 farmers benefited, 1 AWC constructed")
 
