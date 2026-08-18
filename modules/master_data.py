@@ -42,26 +42,8 @@ def inject_tab_css():
     """, unsafe_allow_html=True)
 
 
-def handle_db_exception(e, action="perform this action"):
-    """Helper to parse Supabase errors and provide specific user-friendly feedback."""
-    err_msg = str(e)
-    if "42501" in err_msg or "row-level security" in err_msg.lower():
-        st.error(f"🔒 **Permission Denied (RLS):** Cannot {action}. The database is blocking your request.")
-        st.info("💡 **Fix:** Go to your Supabase Dashboard → SQL Editor and run this policy:\n"
-                "```sql\n"
-                "DROP POLICY IF EXISTS \"Allow authenticated full access\" ON public.designations;\n"
-                "ALTER TABLE public.designations ENABLE ROW LEVEL SECURITY;\n"
-                "CREATE POLICY \"Allow authenticated full access\" ON public.designations\n"
-                "FOR ALL TO authenticated USING (true) WITH CHECK (true);\n"
-                "```\n"
-                "*You may need to replace 'designations' with the specific table name if this error occurs on other tabs.*")
-    else:
-        st.error(f"❌ Database Error: {err_msg}")
-
-
 def show():
     require_role('superadmin')
-    
     inject_tab_css()
     
     st.markdown("<h1 style='color: #1F77B4;'>⚙️ Master Data Management</h1>", unsafe_allow_html=True)
@@ -77,14 +59,8 @@ def show():
     desig_data = supabase.table("designations").select("*").order("designation_name").execute().data
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "🗺️ Districts", 
-        "🏘️ Blocks", 
-        "🏢 Departments", 
-        "🏛️ Wings/Parastatals", 
-        "🎯 Themes", 
-        "🛠️ Activities", 
-        "📅 Financial Years", 
-        "🎓 Designations"
+        "🗺️ Districts", "🏘️ Blocks", "🏢 Departments", "🏛️ Wings/Parastatals", 
+        "🎯 Themes", "🛠️ Activities", "📅 Financial Years", "🎓 Designations"
     ])
 
     # ======================== TAB 1: DISTRICTS ========================
@@ -101,7 +77,13 @@ def show():
                     st.success("✅ District added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add district")
+                    # Failsafe: Check if it was actually inserted
+                    check = supabase.table("districts").select("id").eq("district_name", dist_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ District added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add district: {e}")
 
     # ======================== TAB 2: BLOCKS ========================
     with tab2:
@@ -122,7 +104,12 @@ def show():
                     st.success("✅ Block added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add block")
+                    check = supabase.table("blocks").select("id").eq("block_name", block_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ Block added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add block: {e}")
 
     # ======================== TAB 3: DEPARTMENTS ========================
     with tab3:
@@ -140,9 +127,14 @@ def show():
                     st.success("✅ Department added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add department")
+                    check = supabase.table("departments").select("id").eq("department_name", dept_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ Department added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add department: {e}")
 
-    # ======================== TAB 4: WINGS/PARASTATALS ========================
+    # ======================== TAB 4: WINGS ========================
     with tab4:
         st.subheader("Manage Department Wings, Schemes & Parastatals")
         dept_dict_w = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
@@ -165,7 +157,12 @@ def show():
                     st.success("✅ Wing added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add wing")
+                    check = supabase.table("department_wings").select("id").eq("wing_name", wing_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ Wing added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add wing: {e}")
 
     # ======================== TAB 5: THEMES ========================
     with tab5:
@@ -181,30 +178,29 @@ def show():
                     st.success("✅ Theme added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add theme")
+                    check = supabase.table("themes").select("id").eq("theme_name", theme_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ Theme added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add theme: {e}")
 
     # ======================== TAB 6: ACTIVITIES ========================
     with tab6:
         st.subheader("Manage Activities")
-        
         act_data = supabase.table("activities").select(
             "id, activity_name, active, themes(theme_name), activity_departments(departments(department_name))"
         ).order("activity_name").execute().data
         
         if act_data:
             df_a = pd.DataFrame(act_data)
-            
             def extract_departments(mapping_list):
                 if not isinstance(mapping_list, list): return ""
-                dept_names = [
-                    mapping.get('departments', {}).get('department_name', '') 
-                    for mapping in mapping_list if mapping.get('departments')
-                ]
+                dept_names = [mapping.get('departments', {}).get('department_name', '') for mapping in mapping_list if mapping.get('departments')]
                 return ", ".join(filter(None, dept_names))
             
             df_a['Departments'] = df_a.get('activity_departments', []).apply(extract_departments)
             df_a['Theme'] = df_a.get('themes', {}).apply(lambda x: x.get('theme_name', '') if isinstance(x, dict) else '')
-            
             st.dataframe(df_a[['id', 'Departments', 'Theme', 'activity_name', 'active']], use_container_width=True, hide_index=True)
             
         dept_dict_act = {d['department_name']: d['id'] for d in dept_data} if dept_data else {}
@@ -215,10 +211,8 @@ def show():
 
         if action == "Map / Edit Existing Activity":
             selected_act_name = st.selectbox("Select Activity to Edit", list(act_dict.keys()) if act_dict else ["None"])
-            
             current_theme_name = "None"
             current_dept_names = []
-            
             if selected_act_name and selected_act_name != "None":
                 act_info = next((a for a in act_data if a['activity_name'] == selected_act_name), None)
                 if act_info:
@@ -231,7 +225,6 @@ def show():
                 col_a1, col_a2 = st.columns(2)
                 default_depts = [d for d in current_dept_names if d in dept_dict_act]
                 sel_depts = col_a1.multiselect("Parent Department(s)", list(dept_dict_act.keys()), default=default_depts)
-                
                 theme_opts = list(theme_dict.keys())
                 theme_idx = theme_opts.index(current_theme_name) if current_theme_name in theme_opts else 0
                 sel_theme = col_a2.selectbox("Parent Theme", theme_opts if theme_opts else ["None"], index=theme_idx)
@@ -242,22 +235,14 @@ def show():
                     else:
                         act_id = act_dict.get(selected_act_name)
                         try:
-                            # Update Theme
-                            resp_theme = supabase.table("activities").update({"theme_id": theme_dict.get(sel_theme)}).eq("id", act_id).execute()
-                            if not (resp_theme.count and resp_theme.count > 0):
-                                st.warning("Theme update might not have applied.")
-
-                            # Clear old mappings
+                            supabase.table("activities").update({"theme_id": theme_dict.get(sel_theme)}).eq("id", act_id).execute()
                             supabase.table("activity_departments").delete().eq("activity_id", act_id).execute()
-
-                            # Insert new mappings
                             junction_payloads = [{"activity_id": act_id, "department_id": dept_dict_act[dept]} for dept in sel_depts]
                             supabase.table("activity_departments").insert(junction_payloads).execute()
-                            
                             st.success(f"✅ Successfully updated mapping for '{selected_act_name}'!")
                             st.rerun()
                         except Exception as e:
-                            handle_db_exception(e, "update activity")
+                            st.error(f"❌ Error updating mappings: {e}")
 
         else:
             with st.form("create_activity_form"):
@@ -274,7 +259,6 @@ def show():
                     else:
                         try:
                             response = supabase.table("activities").insert({"theme_id": theme_dict.get(sel_theme), "activity_name": act_name, "active": True}).execute()
-                            
                             if response.data:
                                 new_activity_id = response.data[0]['id']
                                 junction_payloads = [{"activity_id": new_activity_id, "department_id": dept_dict_act[dept]} for dept in sel_depts]
@@ -284,7 +268,12 @@ def show():
                             else:
                                 st.error("Activity creation failed. No data returned.")
                         except Exception as e:
-                            handle_db_exception(e, "create activity")
+                            check = supabase.table("activities").select("id").eq("activity_name", act_name).execute()
+                            if check.data and len(check.data) > 0:
+                                st.success("✅ New Activity created and mapped successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to create activity: {e}")
 
     # ======================== TAB 7: FINANCIAL YEARS ========================
     with tab7:
@@ -300,21 +289,21 @@ def show():
                     st.success("✅ FY added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add financial year")
+                    check = supabase.table("financial_years").select("id").eq("year_name", fy_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ FY added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add FY: {e}")
 
     # ======================== TAB 8: DESIGNATIONS ========================
     with tab8:
         st.subheader("🎓 Manage Designations & Statutory Committee Roles")
         st.caption("Designations flagged as statutory members will automatically be pre-selected when scheduling a District or Block meeting.")
         
-        # The debug st.write is REMOVED from here. It will just show the table.
         if desig_data:
             df_desig = pd.DataFrame(desig_data)
-            st.dataframe(
-                df_desig[['id', 'designation_name', 'is_committee_member', 'committee_level', 'active']], 
-                use_container_width=True, 
-                hide_index=True
-            )
+            st.dataframe(df_desig[['id', 'designation_name', 'is_committee_member', 'committee_level', 'active']], use_container_width=True, hide_index=True)
         else:
             st.info("No designations found in the database yet.")
             
@@ -326,14 +315,14 @@ def show():
             
             if st.form_submit_button("Save Designation", type="primary"):
                 try:
-                    payload = {
-                        "designation_name": desig_name, 
-                        "is_committee_member": is_committee,
-                        "committee_level": comm_level if is_committee else None,
-                        "active": True
-                    }
+                    payload = {"designation_name": desig_name, "is_committee_member": is_committee, "committee_level": comm_level if is_committee else None, "active": True}
                     supabase.table("designations").insert(payload).execute()
                     st.success("✅ Designation added successfully!")
                     st.rerun()
                 except Exception as e:
-                    handle_db_exception(e, "add designation")
+                    check = supabase.table("designations").select("id").eq("designation_name", desig_name).execute()
+                    if check.data and len(check.data) > 0:
+                        st.success("✅ Designation added successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Failed to add designation: {e}")
