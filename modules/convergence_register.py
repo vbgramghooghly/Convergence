@@ -16,7 +16,6 @@ STATUS_OPTIONS = ["Planned", "Approved", "Under Implementation", "Completed", "D
 PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
 
 # ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING ----------
-# Note: If you have a 'gram_panchayats' table in your database, replace this dictionary with a DB query.
 HOOGHLY_GPS = {
     "CHINSURAH MOGRA": ["BANDEL", "CHANDRAHATI-I", "CHANDRAHATI-II", "DEBANANDAPUR", "DIGSUIHOYERA", "KODALIA-I", "KODALIA-II", "MOGRA-I", "MOGRA-II", "SAPTAGRAM"],
     "POLBA DADPUR": ["AKHNA", "AMNAN", "BABNAN", "DADPUR", "GOSWAMIMALIPARA", "HARIT", "MAHANAD", "MAKALPUR", "POLBA", "RAJHAT", "SATITHAN", "SUGANDHA"],
@@ -455,7 +454,6 @@ def show():
                         st.success("✅ Convergence activity successfully created and registered!")
                         st.rerun()
                     except Exception as e:
-                        # 🔒 RLS Failsafe: Double-check the database even if the API returned an error
                         check_res = supabase.table("convergence_register").select("id").eq("activity_description", final_work_name).execute()
                         if check_res.data and len(check_res.data) > 0:
                             st.success("✅ Convergence activity successfully created and registered!")
@@ -492,6 +490,14 @@ def show():
                 success_count = 0
                 error_log = []
 
+                # 🔥 NEW: FIX TYPOS IN CSV BEFORE VALIDATION
+                BLOCK_NAME_FIXES = {
+                    'KHANAKULII': 'KHANAKUL II',
+                    'KHANAKUL  II': 'KHANAKUL II',
+                    'KHNNAKUL II': 'KHANAKUL II',
+                    'KHANAKUL I ': 'KHANAKUL I',
+                }
+
                 with st.spinner("Validating master records and executing batch insertion..."):
                     for index, row in df_upload.iterrows():
                         try:
@@ -504,6 +510,11 @@ def show():
                             conv_str = str(row.get("Convergence Type", "")).strip()
                             gp_val = str(row.get("Primary GP", "")).strip() if pd.notna(row.get("Primary GP")) else ""
 
+                            # 🔥 FIX TYPOS IN BLOCK NAMES
+                            original_block_str = block_str
+                            if block_str in BLOCK_NAME_FIXES:
+                                block_str = BLOCK_NAME_FIXES[block_str]
+
                             # 2. Validate Master Records
                             fy_id = maps["fy_name_to_id"].get(fy_str)
                             dist_id = maps["dist_map"].get(dist_str)
@@ -511,16 +522,20 @@ def show():
                             dept_id = maps["dept_map"].get(dept_str)
 
                             if not all([fy_id, dist_id, block_id, dept_id]):
-                                error_log.append(f"Row {index+2}: Invalid Master Data references (FY/District/Block/Dept mismatch).")
+                                # Provide specific feedback if the typo fix didn't work
+                                if original_block_str != block_str:
+                                    error_log.append(f"Row {index+2}: Block '{original_block_str}' was auto-corrected to '{block_str}', but still not found in the Master Data.")
+                                else:
+                                    error_log.append(f"Row {index+2}: Invalid Master Data references (FY/District/Block/Dept mismatch).")
                                 continue
                             
-                            # 🛠️ FIX 1: Check if the Block actually belongs to the selected District
+                            # 3. Check if the Block actually belongs to the selected District
                             block_record = next((b for b in master["blocks"] if b["id"] == block_id), None)
                             if not block_record or str(block_record["district_id"]) != str(dist_id):
                                 error_log.append(f"Row {index+2}: Block '{block_str}' is NOT mapped to District '{dist_str}'. Please check your master block data.")
                                 continue
 
-                            # 🛠️ FIX 2: Check if the Primary GP belongs to the selected Block
+                            # 4. Check if the Primary GP belongs to the selected Block
                             block_key_upper = block_str.upper().strip()
                             gps_in_block = HOOGHLY_GPS.get(block_key_upper, [])
                             if gp_val and gp_val not in gps_in_block:
@@ -531,7 +546,7 @@ def show():
                                 error_log.append(f"Row {index+2}: Invalid Convergence Type.")
                                 continue
 
-                            # 3. Validate Department ↔ Activity Linkage
+                            # 5. Validate Department ↔ Activity Linkage
                             mapped_acts = [m["activity_id"] for m in master["act_dept_mapping"] if m["department_id"] == dept_id]
                             valid_acts_for_dept = [a for a in master["activities"] if a["id"] in mapped_acts]
                             target_act = next((a for a in valid_acts_for_dept if a["activity_name"].lower() == act_str.lower()), None)
