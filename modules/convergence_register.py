@@ -434,32 +434,43 @@ def show():
                         geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
                     if inp_lat_long: geo_string += f" | GPS: {inp_lat_long}"
 
-                    insert_data = {
-                        "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
-                        "department_id": selected_dept_id, "wing_id": selected_wing_id, "pia_type": selected_pia,
-                        "activity_description": final_work_name, "thematic_category_id": theme_id,
-                        "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
-                        "work_dimensions": possible_outcome, "dimension_unit": "Outcome", "origin_source": inp_origin,
-                        "desired_target": 1, "expected_persondays": persondays, "department_fund": dept_fund,
-                        "vbgramg_fund": vbg_fund, "current_status": "Planned",
-                        "department_scheme_convergence": scheme_data["convergence"],
-                        "department_scheme_name": scheme_data["scheme_name"],
-                        "department_annual_plan_status": scheme_data["annual_plan_status"],
-                        "department_scheme_remarks": scheme_data["scheme_remarks"],
-                    }
-                    try:
-                        res = supabase.table("convergence_register").insert(insert_data).execute()
-                        try: log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
-                        except: pass
-                        st.success("✅ Convergence activity successfully created and registered!")
-                        st.rerun()
-                    except Exception as e:
-                        check_res = supabase.table("convergence_register").select("id").eq("activity_description", final_work_name).execute()
-                        if check_res.data and len(check_res.data) > 0:
+                    # 🛡️ DUPLICATE CHECK (SINGLE ENTRY)
+                    duplicate_check = supabase.table("convergence_register").select("id")\
+                        .eq("financial_year_id", selected_fy_id)\
+                        .eq("block_id", block_id)\
+                        .eq("department_id", selected_dept_id)\
+                        .eq("activity_description", final_work_name)\
+                        .eq("geo_location", geo_string).execute()
+                    
+                    if len(duplicate_check.data) > 0:
+                        st.error(f"⛔ Duplicate Work Detected! This exact activity (Block, Dept, Work Name, and Location) already exists in the register.")
+                    else:
+                        insert_data = {
+                            "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
+                            "department_id": selected_dept_id, "wing_id": selected_wing_id, "pia_type": selected_pia,
+                            "activity_description": final_work_name, "thematic_category_id": theme_id,
+                            "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
+                            "work_dimensions": possible_outcome, "dimension_unit": "Outcome", "origin_source": inp_origin,
+                            "desired_target": 1, "expected_persondays": persondays, "department_fund": dept_fund,
+                            "vbgramg_fund": vbg_fund, "current_status": "Planned",
+                            "department_scheme_convergence": scheme_data["convergence"],
+                            "department_scheme_name": scheme_data["scheme_name"],
+                            "department_annual_plan_status": scheme_data["annual_plan_status"],
+                            "department_scheme_remarks": scheme_data["scheme_remarks"],
+                        }
+                        try:
+                            res = supabase.table("convergence_register").insert(insert_data).execute()
+                            try: log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
+                            except: pass
                             st.success("✅ Convergence activity successfully created and registered!")
                             st.rerun()
-                        else:
-                            st.error(f"Error saving record: {e}")
+                        except Exception as e:
+                            check_res = supabase.table("convergence_register").select("id").eq("activity_description", final_work_name).execute()
+                            if check_res.data and len(check_res.data) > 0:
+                                st.success("✅ Convergence activity successfully created and registered!")
+                                st.rerun()
+                            else:
+                                st.error(f"Error saving record: {e}")
 
     with tab3:
         st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
@@ -490,14 +501,6 @@ def show():
                 success_count = 0
                 error_log = []
 
-                # 🔥 NEW: FIX TYPOS IN CSV BEFORE VALIDATION
-                BLOCK_NAME_FIXES = {
-                    'KHANAKULII': 'KHANAKUL II',
-                    'KHANAKUL  II': 'KHANAKUL II',
-                    'KHNNAKUL II': 'KHANAKUL II',
-                    'KHANAKUL I ': 'KHANAKUL I',
-                }
-
                 with st.spinner("Validating master records and executing batch insertion..."):
                     for index, row in df_upload.iterrows():
                         try:
@@ -510,23 +513,23 @@ def show():
                             conv_str = str(row.get("Convergence Type", "")).strip()
                             gp_val = str(row.get("Primary GP", "")).strip() if pd.notna(row.get("Primary GP")) else ""
 
-                            # 🔥 FIX TYPOS IN BLOCK NAMES
-                            original_block_str = block_str
-                            if block_str in BLOCK_NAME_FIXES:
-                                block_str = BLOCK_NAME_FIXES[block_str]
-
-                            # 2. Validate Master Records
+                            # 2. Validate Master Records INDIVIDUALLY for strict exact matching
                             fy_id = maps["fy_name_to_id"].get(fy_str)
                             dist_id = maps["dist_map"].get(dist_str)
                             block_id = maps["block_map"].get(block_str)
                             dept_id = maps["dept_map"].get(dept_str)
 
+                            if fy_id is None:
+                                error_log.append(f"Row {index+2}: Financial Year '{fy_str}' does NOT match master data.")
+                            if dist_id is None:
+                                error_log.append(f"Row {index+2}: District '{dist_str}' does NOT match master data.")
+                            if block_id is None:
+                                error_log.append(f"Row {index+2}: Block '{block_str}' does NOT match master data. (Block names are case-sensitive. Make sure there are no extra spaces).")
+                            if dept_id is None:
+                                error_log.append(f"Row {index+2}: Department '{dept_str}' does NOT match master data.")
+
+                            # If any ID is missing, skip this row immediately
                             if not all([fy_id, dist_id, block_id, dept_id]):
-                                # Provide specific feedback if the typo fix didn't work
-                                if original_block_str != block_str:
-                                    error_log.append(f"Row {index+2}: Block '{original_block_str}' was auto-corrected to '{block_str}', but still not found in the Master Data.")
-                                else:
-                                    error_log.append(f"Row {index+2}: Invalid Master Data references (FY/District/Block/Dept mismatch).")
                                 continue
                             
                             # 3. Check if the Block actually belongs to the selected District
@@ -584,6 +587,18 @@ def show():
                             bulk_geo_string = f"Loc: {loc_val} | GP: {gp_val}"
                             if add_gp_val: bulk_geo_string += f" | Addl GP: {add_gp_val} (Portion: {add_gp_por})"
                             if gps_val: bulk_geo_string += f" | GPS: {gps_val}"
+
+                            # 🛡️ DUPLICATE CHECK (BULK INSERT)
+                            duplicate_check = supabase.table("convergence_register").select("id")\
+                                .eq("financial_year_id", fy_id)\
+                                .eq("block_id", block_id)\
+                                .eq("department_id", dept_id)\
+                                .eq("activity_description", work_name_val)\
+                                .eq("geo_location", bulk_geo_string).execute()
+                            
+                            if len(duplicate_check.data) > 0:
+                                error_log.append(f"Row {index+2}: Duplicate entry. This exact Work Name & Location already exists in the register.")
+                                continue
 
                             insert_data = {
                                 "financial_year_id": fy_id, "district_id": dist_id, "block_id": block_id,
