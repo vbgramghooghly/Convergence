@@ -101,7 +101,10 @@ def show():
     if "mtg_msg_type" not in st.session_state:
         st.session_state.mtg_msg_type = None
 
-    # 🔥 FIX 1: Display messages at the VERY start, so they pop up on any tab
+    def set_msg(msg_type, msg_text):
+        st.session_state.mtg_msg_type = msg_type
+        st.session_state.mtg_msg = msg_text
+
     def display_persisted_msg():
         if st.session_state.mtg_msg:
             if st.session_state.mtg_msg_type == "success":
@@ -112,11 +115,6 @@ def show():
                 st.warning(st.session_state.mtg_msg)
             st.session_state.mtg_msg = None
             st.session_state.mtg_msg_type = None
-    display_persisted_msg()
-
-    def set_msg(msg_type, msg_text):
-        st.session_state.mtg_msg_type = msg_type
-        st.session_state.mtg_msg = msg_text
 
     # ---------- HEADER LINES REMOVED ----------
     # (Previously: breadcrumb, title, subtitle, and separator)
@@ -125,6 +123,7 @@ def show():
     departments = supabase.table("departments").select("id, department_name").execute().data or []
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
     blocks_data = supabase.table("blocks").select("id, block_name, district_id").execute().data or []
+    districts = supabase.table("districts").select("id, district_name").execute().data or [] # Added for names
     activities_data = supabase.table("activities").select("id, activity_name").eq("active", True).execute().data or []
     act_dept_mapping = supabase.table("activity_departments").select("activity_id, department_id").execute().data or []
     designations_data = supabase.table("designations").select("id, designation_name").eq("active", True).execute().data or []
@@ -134,6 +133,7 @@ def show():
     dept_map = {d["id"]: d["department_name"] for d in departments}
     wing_map = {w["id"]: w for w in wings}
     block_dict_reverse = {b["id"]: b["block_name"] for b in blocks_data}
+    dist_map = {d["id"]: d["district_name"] for d in districts} # 🔥 NEW: District mapping
     designation_map = {d["designation_name"]: d["id"] for d in designations_data}
 
     unified_depts = []
@@ -216,6 +216,24 @@ def show():
             df_ap["Tracker Flag"] = df_ap.apply(get_flag, axis=1)
 
     # --------------------------------------------------------------
+    # 🔥 NEW: Helper to format Meeting Names with Block/District
+    # --------------------------------------------------------------
+    def format_meeting_label(row):
+        m_type = row.get('meeting_type', 'Other')
+        d_id = row.get('district_id')
+        b_id = row.get('block_id')
+        date_str = row.get('meeting_date', 'Unknown')
+        status = row.get('status', 'Scheduled')
+        if m_type == 'District':
+            d_name = dist_map.get(d_id, 'Unknown District')
+            return f"{date_str} | District Meeting: {d_name} ({status})"
+        elif m_type == 'Block':
+            b_name = block_dict_reverse.get(b_id, 'Unknown Block')
+            d_name = dist_map.get(d_id, 'Unknown District')
+            return f"{date_str} | Block Meeting: {b_name} ({d_name} District) ({status})"
+        return f"{date_str} | {m_type} Meeting ({status})"
+
+    # --------------------------------------------------------------
     # Generate meeting HTML for printing (unchanged)
     # --------------------------------------------------------------
     def generate_meeting_html(p_mtg, p_aps, doc_type):
@@ -288,9 +306,33 @@ def show():
         ])
 
     # --------------------------------------------------------------
-    # TAB 1: SLA Performance
+    # TAB 1: SLA Performance (With Yearly Calendar)
     # --------------------------------------------------------------
     with tab_sla:
+        display_persisted_msg() # Show any success/error messages
+        
+        # 🔥 NEW: Yearly Meeting Calendar
+        st.markdown("#### 🗓️ Yearly Meeting Calendar (Scheduled & Completed)")
+        if not df_meetings.empty:
+            calendar_df = df_meetings.copy()
+            calendar_df['Meeting Location'] = calendar_df.apply(format_meeting_label, axis=1)
+            st.dataframe(
+                calendar_df[['meeting_date', 'meeting_type', 'Meeting Location', 'status']].sort_values('meeting_date'),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Meeting Location": st.column_config.TextColumn("Location Details"),
+                    "meeting_date": st.column_config.DateColumn("Date"),
+                    "meeting_type": st.column_config.TextColumn("Tier"),
+                    "status": st.column_config.TextColumn("Status")
+                }
+            )
+            st.markdown("---")
+        else:
+            st.info(f"No meetings scheduled for FY {active_fy}.")
+            st.markdown("---")
+
+        # Your Original SLA Performance Logic
         if df_ap.empty:
             st.info(f"No meeting commitments recorded for FY {active_fy}.")
         else:
@@ -308,7 +350,7 @@ def show():
                 st.dataframe(mtg_perf, use_container_width=True, hide_index=True)
 
     # --------------------------------------------------------------
-    # TAB 2: Schedule Meeting
+    # TAB 2: Schedule Meeting (Unchanged)
     # --------------------------------------------------------------
     if tab_sched:
         with tab_sched:
@@ -466,7 +508,7 @@ def show():
                         st.rerun()
 
     # --------------------------------------------------------------
-    # TAB 3: Attendance & Proceedings
+    # TAB 3: Attendance & Proceedings (Updated Dropdown)
     # --------------------------------------------------------------
     if tab_proc:
         with tab_proc:
@@ -475,10 +517,12 @@ def show():
                 st.info(f"No meetings recorded for FY {active_fy}.")
             else:
                 all_meeting_ids = df_meetings["id"].tolist()
+                
+                # 🔥 UPDATED: proc_sel format_func using format_meeting_label
                 proc_sel = st.selectbox(
                     "Select Meeting Workspace",
                     all_meeting_ids,
-                    format_func=lambda x: f"{df_meetings[df_meetings['id'] == x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id'] == x]['meeting_type'].values[0]} ({df_meetings[df_meetings['id'] == x]['status'].values[0]})"
+                    format_func=lambda x: format_meeting_label(df_meetings[df_meetings['id'] == x].iloc[0])
                 )
 
                 proc_mtg = df_meetings[df_meetings["id"] == proc_sel].iloc[0]
@@ -739,7 +783,8 @@ def show():
     if tab_tracker:
         with tab_tracker:
             st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
-            
+            display_persisted_msg()
+
             if df_ap.empty:
                 st.info("No action items available.")
             else:
@@ -989,7 +1034,7 @@ def show():
                     st.success("🎉 No overdue items detected.")
 
     # --------------------------------------------------------------
-    # TAB 6: Print Centre
+    # TAB 6: Print Centre (Updated Dropdown)
     # --------------------------------------------------------------
     if tab_print:
         with tab_print:
@@ -1000,10 +1045,12 @@ def show():
                 st.info("No meetings available for printing.")
             else:
                 c_p1, c_p2 = st.columns([2, 1])
+                
+                # 🔥 UPDATED: print_sel format_func using format_meeting_label
                 print_sel = c_p1.selectbox(
                     "1. Select Meeting Record",
                     df_meetings["id"].tolist(),
-                    format_func=lambda x: f"{df_meetings[df_meetings['id'] == x]['meeting_date'].values[0]} | {df_meetings[df_meetings['id'] == x]['meeting_type'].values[0]} ({df_meetings[df_meetings['id'] == x]['status'].values[0]})"
+                    format_func=lambda x: format_meeting_label(df_meetings[df_meetings['id'] == x].iloc[0])
                 )
                 doc_type = c_p2.selectbox(
                     "2. Select Document to Print",
