@@ -78,14 +78,36 @@ def get_filtered_records(supabase, role, user):
         query = query.eq("department_id", user["department_id"]).eq("district_id", user["district_id"])
     return query.execute().data or []
 
-def render_kpi_cards(df):
-    if df.empty: return
+def get_record_count(supabase, role, user):
+    """Fetch the exact record count directly from the database."""
+    query = supabase.table("convergence_register").select("*", count="exact", head=True)
+    if role == "district":
+        query = query.eq("district_id", user["district_id"])
+    elif role == "block":
+        query = query.eq("block_id", user["block_id"])
+    elif role == "department":
+        if not user.get("department_id"): return 0
+        query = query.eq("department_id", user["department_id"]).eq("district_id", user["district_id"])
+    return query.execute().count
+
+def render_kpi_cards(df, exact_count):
+    if df.empty:
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total Works Registered", exact_count)
+        c2.metric("In Pipeline / Active", 0)
+        c3.metric("Completed Works", 0)
+        c4.metric("Converged Fund", "₹0.00 L")
+        c5.metric("Target Persondays", "0")
+        st.markdown("<br>", unsafe_allow_html=True)
+        return
+
     total_fund = pd.to_numeric(df.get("total_converged_fund", 0), errors="coerce").sum()
     total_pdays = pd.to_numeric(df.get("expected_persondays", 0), errors="coerce").sum()
     active_count = len(df[df.get("current_status", "").isin(["Planned", "Approved", "Under Implementation"])])
     completed_count = len(df[df.get("current_status", "") == "Completed"])
+    
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Total Works Registered", len(df))
+    c1.metric("Total Works Registered", exact_count)
     c2.metric("In Pipeline / Active", active_count)
     c3.metric("Completed Works", completed_count)
     c4.metric("Converged Fund", f"₹{total_fund:,.2f} L")
@@ -294,13 +316,13 @@ def show():
 
     records = get_filtered_records(supabase, role, user)
     df_records = pd.DataFrame(records) if records else pd.DataFrame()
+    exact_count = get_record_count(supabase, role, user)
 
-    render_kpi_cards(df_records)
+    render_kpi_cards(df_records, exact_count)
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2 = st.tabs([
         "📋 Master Work Register",
-        "➕ Add New Activity",
-        "📂 Bulk Upload (CSV)"
+        "➕ Add New Activity"
     ])
 
     with tab1:
@@ -434,7 +456,7 @@ def show():
                         geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
                     if inp_lat_long: geo_string += f" | GPS: {inp_lat_long}"
 
-                    # 🛡️ DUPLICATE CHECK (SINGLE ENTRY)
+                    # 🛡️ STRICT DUPLICATE CHECK (Prevents duplicates entirely)
                     duplicate_check = supabase.table("convergence_register").select("id")\
                         .eq("financial_year_id", selected_fy_id)\
                         .eq("block_id", block_id)\
@@ -471,158 +493,3 @@ def show():
                                 st.rerun()
                             else:
                                 st.error(f"Error saving record: {e}")
-
-    with tab3:
-        st.markdown("#### 📂 Bulk Upload & Batch Ingestion")
-        st.caption("Download the official CSV template, populate records, and import in bulk. **All activities are validated against approved department linkages.**")
-
-        template_cols = [
-            "Financial Year", "District", "Block", "Primary GP", "Additional GP", "Additional GP Portion",
-            "Department", "Base Activity", "Work Name", "Location Details", "Latitude Longitude",
-            "Convergence Type", "Source of Activity Linkage", "Possible Outcome", "Expected Persondays",
-            "Department Fund", "VB-G RAM G Fund"
-        ]
-        template_df = pd.DataFrame(columns=template_cols)
-        csv_template = template_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 Step 1: Download CSV Ingestion Template",
-            data=csv_template,
-            file_name="convergence_bulk_upload_template.csv",
-            mime="text/csv"
-        )
-
-        uploaded_file = st.file_uploader("Step 2: Upload Completed CSV", type="csv")
-        if uploaded_file:
-            df_upload = pd.read_csv(uploaded_file)
-            st.write("Previewing Raw Ingestion Data:")
-            st.dataframe(df_upload.head(4), use_container_width=True)
-
-            if st.button("Validate & Execute Import", type="primary"):
-                success_count = 0
-                error_log = []
-
-                with st.spinner("Validating master records and executing batch insertion..."):
-                    for index, row in df_upload.iterrows():
-                        try:
-                            # 1. Clean inputs
-                            fy_str = str(row.get("Financial Year", "")).strip()
-                            dist_str = str(row.get("District", "")).strip()
-                            block_str = str(row.get("Block", "")).strip()
-                            dept_str = str(row.get("Department", "")).strip()
-                            act_str = str(row.get("Base Activity", "")).strip()
-                            conv_str = str(row.get("Convergence Type", "")).strip()
-                            gp_val = str(row.get("Primary GP", "")).strip() if pd.notna(row.get("Primary GP")) else ""
-
-                            # 2. Validate Master Records INDIVIDUALLY for strict exact matching
-                            fy_id = maps["fy_name_to_id"].get(fy_str)
-                            dist_id = maps["dist_map"].get(dist_str)
-                            block_id = maps["block_map"].get(block_str)
-                            dept_id = maps["dept_map"].get(dept_str)
-
-                            if fy_id is None:
-                                error_log.append(f"Row {index+2}: Financial Year '{fy_str}' does NOT match master data.")
-                            if dist_id is None:
-                                error_log.append(f"Row {index+2}: District '{dist_str}' does NOT match master data.")
-                            if block_id is None:
-                                error_log.append(f"Row {index+2}: Block '{block_str}' does NOT match master data. (Block names are case-sensitive. Make sure there are no extra spaces).")
-                            if dept_id is None:
-                                error_log.append(f"Row {index+2}: Department '{dept_str}' does NOT match master data.")
-
-                            # If any ID is missing, skip this row immediately
-                            if not all([fy_id, dist_id, block_id, dept_id]):
-                                continue
-                            
-                            # 3. Check if the Block actually belongs to the selected District
-                            block_record = next((b for b in master["blocks"] if b["id"] == block_id), None)
-                            if not block_record or str(block_record["district_id"]) != str(dist_id):
-                                error_log.append(f"Row {index+2}: Block '{block_str}' is NOT mapped to District '{dist_str}'. Please check your master block data.")
-                                continue
-
-                            # 4. Check if the Primary GP belongs to the selected Block
-                            block_key_upper = block_str.upper().strip()
-                            gps_in_block = HOOGHLY_GPS.get(block_key_upper, [])
-                            if gp_val and gp_val not in gps_in_block:
-                                error_log.append(f"Row {index+2}: GP '{gp_val}' does NOT belong to Block '{block_str}' (PF mismatch).")
-                                continue
-
-                            if conv_str not in CONVERGENCE_TYPES:
-                                error_log.append(f"Row {index+2}: Invalid Convergence Type.")
-                                continue
-
-                            # 5. Validate Department ↔ Activity Linkage
-                            mapped_acts = [m["activity_id"] for m in master["act_dept_mapping"] if m["department_id"] == dept_id]
-                            valid_acts_for_dept = [a for a in master["activities"] if a["id"] in mapped_acts]
-                            target_act = next((a for a in valid_acts_for_dept if a["activity_name"].lower() == act_str.lower()), None)
-
-                            if not target_act:
-                                error_log.append(f"Row {index+2}: Base Activity '{act_str}' is NOT approved for {dept_str}.")
-                                continue
-
-                            if conv_str == "Technical Convergence (Zero Fund/NOC)":
-                                d_fund = m_fund = 0.0
-                            else:
-                                d_fund = float(row.get("Department Fund", 0) if pd.notna(row.get("Department Fund")) else 0)
-                                m_fund = float(row.get("VB-G RAM G Fund", 0) if pd.notna(row.get("VB-G RAM G Fund")) else 0)
-                                if d_fund == 0.0 and m_fund == 0.0:
-                                    error_log.append(f"Row {index+2}: Financial Convergence requires a Fund amount > 0.")
-                                    continue
-
-                            expected_pd = int(row.get("Expected Persondays", 0) if pd.notna(row.get("Expected Persondays")) else 0)
-                            if expected_pd <= 0:
-                                error_log.append(f"Row {index+2}: Expected Persondays must be > 0.")
-                                continue
-
-                            origin_val = str(row.get("Source of Activity Linkage", "District Plan")).strip() if pd.notna(row.get("Source of Activity Linkage")) else "District Plan"
-                            if origin_val not in ORIGIN_SOURCES: origin_val = "District Plan"
-
-                            loc_val = str(row.get("Location Details", "")).strip() if pd.notna(row.get("Location Details")) else "Unspecified Location"
-                            add_gp_val = str(row.get("Additional GP", "")).strip() if pd.notna(row.get("Additional GP")) else ""
-                            add_gp_por = str(row.get("Additional GP Portion", "")).strip() if pd.notna(row.get("Additional GP Portion")) else ""
-                            gps_val = str(row.get("Latitude Longitude", "")).strip() if pd.notna(row.get("Latitude Longitude")) else ""
-
-                            work_name_val = str(row.get("Work Name", "")).strip() if pd.notna(row.get("Work Name")) else ""
-                            if not work_name_val:
-                                work_name_val = f"{target_act['activity_name']} at {loc_val}"
-
-                            bulk_geo_string = f"Loc: {loc_val} | GP: {gp_val}"
-                            if add_gp_val: bulk_geo_string += f" | Addl GP: {add_gp_val} (Portion: {add_gp_por})"
-                            if gps_val: bulk_geo_string += f" | GPS: {gps_val}"
-
-                            # 🛡️ DUPLICATE CHECK (BULK INSERT)
-                            duplicate_check = supabase.table("convergence_register").select("id")\
-                                .eq("financial_year_id", fy_id)\
-                                .eq("block_id", block_id)\
-                                .eq("department_id", dept_id)\
-                                .eq("activity_description", work_name_val)\
-                                .eq("geo_location", bulk_geo_string).execute()
-                            
-                            if len(duplicate_check.data) > 0:
-                                error_log.append(f"Row {index+2}: Duplicate entry. This exact Work Name & Location already exists in the register.")
-                                continue
-
-                            insert_data = {
-                                "financial_year_id": fy_id, "district_id": dist_id, "block_id": block_id,
-                                "department_id": dept_id, "wing_id": None, "pia_type": "Department",
-                                "activity_description": work_name_val, "thematic_category_id": target_act["theme_id"],
-                                "convergence_type": conv_str, "scheme_name": None, "geo_location": bulk_geo_string,
-                                "work_dimensions": str(row.get("Possible Outcome", "")).strip() if pd.notna(row.get("Possible Outcome")) else None,
-                                "dimension_unit": "Outcome", "origin_source": origin_val, "desired_target": 1,
-                                "expected_persondays": expected_pd, "department_fund": d_fund, "vbgramg_fund": m_fund,
-                                "current_status": "Planned", "department_scheme_convergence": False,
-                                "department_scheme_name": None, "department_annual_plan_status": "Not Confirmed",
-                                "department_scheme_remarks": None,
-                            }
-                            supabase.table("convergence_register").insert(insert_data).execute()
-                            success_count += 1
-                        except Exception as e:
-                            error_log.append(f"Row {index+2}: Failed with error: {str(e)}")
-
-                if success_count > 0:
-                    st.success(f"✅ Successfully ingested {success_count} activities into the Master Register!")
-                if error_log:
-                    st.error(f"⚠️ {len(error_log)} rows failed validation:")
-                    with st.expander("Inspect Validation Error Log"):
-                        for err in error_log:
-                            st.write(err)
-                if success_count > 0 and not error_log:
-                    st.rerun()
