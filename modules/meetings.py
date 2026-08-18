@@ -101,10 +101,7 @@ def show():
     if "mtg_msg_type" not in st.session_state:
         st.session_state.mtg_msg_type = None
 
-    def set_msg(msg_type, msg_text):
-        st.session_state.mtg_msg_type = msg_type
-        st.session_state.mtg_msg = msg_text
-
+    # 🔥 FIX 1: Display messages at the VERY start, so they pop up on any tab
     def display_persisted_msg():
         if st.session_state.mtg_msg:
             if st.session_state.mtg_msg_type == "success":
@@ -115,6 +112,11 @@ def show():
                 st.warning(st.session_state.mtg_msg)
             st.session_state.mtg_msg = None
             st.session_state.mtg_msg_type = None
+    display_persisted_msg()
+
+    def set_msg(msg_type, msg_text):
+        st.session_state.mtg_msg_type = msg_type
+        st.session_state.mtg_msg = msg_text
 
     # ---------- HEADER LINES REMOVED ----------
     # (Previously: breadcrumb, title, subtitle, and separator)
@@ -468,8 +470,6 @@ def show():
     # --------------------------------------------------------------
     if tab_proc:
         with tab_proc:
-            display_persisted_msg()
-
             st.markdown("#### ✍️ Record Minutes, Attendance & Assign Directives")
             if df_meetings.empty:
                 st.info(f"No meetings recorded for FY {active_fy}.")
@@ -739,8 +739,7 @@ def show():
     if tab_tracker:
         with tab_tracker:
             st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
-            display_persisted_msg()
-
+            
             if df_ap.empty:
                 st.info("No action items available.")
             else:
