@@ -6,7 +6,7 @@ from utils.theme import apply_global_theme
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="VB-G RAM G Portal",
+    page_title="VB-G RAM G Convergence Hooghly",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -112,25 +112,24 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["🏠 Portal Home", "👥 Officials", "🚀 Progress", "🤝 Meetings", "📋 Work Entry", "📈 Reports", "📐 Estimate Builder"]
+core_pages = ["Home", "Officials", "Progress", "Meetings", "Work Entry", "Reports", "Estimate Builder"]
 if role == "block":
-    core_pages.remove("📈 Reports")
+    core_pages.remove("Reports")
 
-# UPDATED: Added the new Estimate Master Data option
+# REMOVED: "📊 Global Analytics" (Since analytics.py is being deleted)
 admin_pages = [
-    "📊 Global Analytics", 
-    "⚙️ Master Data", 
-    "📐 Estimate Master Data", 
-    "👥 User Management", 
-    "🛡️ Audit Logs", 
-    "🎨 UI / System Settings"
+    "Master Data", 
+    "Estimate Master Data", 
+    "User Management", 
+    "Audit Logs", 
+    "UI Settings"
 ]
 allowed_admin = admin_pages if role == "superadmin" else []
 
 # Set default landing page
 if 'current_page' not in st.session_state:
     if role == "superadmin":
-        st.session_state.current_page = "📊 Global Analytics"
+        st.session_state.current_page = "⚙️ Master Data" # Default for superadmin
     else:
         st.session_state.current_page = core_pages[0]
 
@@ -192,7 +191,6 @@ def render_top_navigation():
 
     if allowed_admin:
         with cols[2]:
-            is_admin_active = st.session_state.current_page in allowed_admin
             with st.popover("⚙️ Admin ▾", use_container_width=True):
                 for page in allowed_admin:
                     btn_type = "primary" if st.session_state.current_page == page else "secondary"
@@ -205,59 +203,49 @@ def render_top_navigation():
 
 render_top_navigation()
 
-# ---------- LANDING PAGE STATS ----------
-def render_landing_page():
-    try:
-        from modules.analytics import show as show_portal_analytics
-        show_portal_analytics()
-    except Exception:
-        st.error("Failed to load Portal Analytics. Please run the SQL fixes provided.")
-
 # ---------- IMPORT MODULES & ROUTING (DEFERRED TO AVOID CACHE POISON) ----------
 try:
     # UPDATED: Added the new import
     from modules.estimate_master_data import show as show_estimate_master_data
     
-    if st.session_state.current_page == "📐 Estimate Builder":
+    if st.session_state.current_page == "Estimate Builder":
         from modules.estimate_builder import show as show_estimate_builder
         show_estimate_builder()
-    elif st.session_state.current_page == "📋 Work Entry":
+    elif st.session_state.current_page == "Work Entry":
         from modules.convergence_register import show as show_convergence
         show_convergence()
-    elif st.session_state.current_page == "🚀 Progress":
+    elif st.session_state.current_page == "Progress":
         from modules.implementation import show as show_implementation
         show_implementation()
-    elif st.session_state.current_page == "🤝 Meetings":
+    elif st.session_state.current_page == "Meetings":
         from modules.meetings import show as show_meetings
         show_meetings()
-    elif st.session_state.current_page == "👥 Officials":
+    elif st.session_state.current_page == "Officials":
         from modules.contacts import show as show_contacts
         show_contacts()
-    elif st.session_state.current_page == "📈 Reports":
+    elif st.session_state.current_page == "Reports":
         from modules.reports import show as show_reports
         show_reports()
-    elif st.session_state.current_page == "📊 Global Analytics":
-        from modules.analytics import show as show_portal_analytics
-        show_portal_analytics()
-    elif st.session_state.current_page == "⚙️ Master Data":
+    elif st.session_state.current_page == "Master Data":
         from modules.master_data import show as show_masterdata
         show_masterdata()
     # UPDATED: Added the routing for the new option
-    elif st.session_state.current_page == "📐 Estimate Master Data":
+    elif st.session_state.current_page == "Estimate Master Data":
         show_estimate_master_data()
-    elif st.session_state.current_page == "👥 User Management":
+    elif st.session_state.current_page == "User Management":
         from modules.users import show as show_users
         show_users()
-    elif st.session_state.current_page == "🛡️ Audit Logs":
+    elif st.session_state.current_page == "Audit Logs":
         from modules.audit import show as show_audit
         show_audit()
-    elif st.session_state.current_page == "🎨 UI / System Settings":
+    elif st.session_state.current_page == "UI Settings":
         from modules.ui_ux_controller import show as show_ui_ux
         show_ui_ux()
     else:
-        # Fallback to the analytics dashboard if no active module matches
-        from modules.analytics import show as show_portal_analytics
-        show_portal_analytics()
+        # If no valid page is selected, it falls back to Portal Home
+        # Since analytics is removed, we can safely route to Portal Home or a basic welcome page
+        st.info("Welcome to the VB-G RAM G Convergence Portal. Please select a module from the navigation bar.")
+        
 except Exception as e:
     st.error(f"Error loading module: {e}")
     st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
