@@ -142,10 +142,10 @@ def check_password():
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         
         with st.form("login_form"):
-            st.markdown("<h3 style='margin-bottom: 5px;'>🔐 Secure Login</h3>", unsafe_allow_html=True)
+            st.markdown("<h3 style='margin-bottom: 5px;'>🔐 LOGIN</h3>", unsafe_allow_html=True)
             st.caption("Enter your credentials to access the workspace.")
             
-            username = st.text_input("Username / Email")
+            username = st.text_input("Username")
             password = st.text_input("Password", type="password")
 
             # ---------- CAPTCHA ----------
@@ -153,7 +153,7 @@ def check_password():
             captcha_input = st.text_input(f"Security Check: What is {question}?", placeholder="Your answer")
             
             st.markdown("<br>", unsafe_allow_html=True)
-            submit_btn = st.form_submit_button("Sign In to Portal", type="primary", use_container_width=True)
+            submit_btn = st.form_submit_button("LOGIN", type="primary", use_container_width=True)
 
             if submit_btn:
                 # Validate CAPTCHA
