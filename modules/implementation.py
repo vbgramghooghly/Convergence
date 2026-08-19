@@ -37,9 +37,12 @@ HOOGHLY_GPS = {
 }
 
 def safe_int(val):
-    if pd.isna(val) or val is None or val == '': return 0
-    try: return int(float(val))
-    except (ValueError, TypeError): return 0
+    if pd.isna(val) or val is None or val == '':
+        return 0
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return 0
 
 @st.cache_data(ttl=600)
 def fetch_master_data():
@@ -107,13 +110,15 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1 =================
+    # ================= TAB 1: TARGETS (with block selector) =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
             query_t = query_t.eq("department_id", user.get('department_id')).eq("district_id", user.get('district_id'))
-            if user.get('wing_id'): query_t = query_t.eq("wing_id", user.get('wing_id'))
-            else: query_t = query_t.is_("wing_id", "null")
+            if user.get('wing_id'):
+                query_t = query_t.eq("wing_id", user.get('wing_id'))
+            else:
+                query_t = query_t.is_("wing_id", "null")
         elif role in ['district', 'block']:
             query_t = query_t.eq("district_id", user.get('district_id'))
         
@@ -157,8 +162,10 @@ def show():
                         dist_sel = list(t_dist_dict.keys())[0] if t_dist_dict else None
                         dist_id = user.get('district_id')
                         st.markdown(f"<span style='color:#64748B; font-size:12px;'>DISTRICT</span><br>**{dist_sel}**<br><br>", unsafe_allow_html=True)
+                        # For department users, block is not applicable (targets are district‑wide)
                         active_block_id = None
                     else:
+                        # Superadmin or District: show full department/wing and block dropdown
                         dept_options = [{"label": f"{d['department_name']} (Main Department)", "dept_id": d['id'], "wing_id": None} for d in departments]
                         for w in wings:
                             p_name = dept_map.get(w['department_id'], "Unknown Department")
@@ -171,13 +178,13 @@ def show():
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                        # Block selector
+                        # ---- Block selector (for block‑wise targets) ----
                         if dist_id:
                             dist_blocks = [b for b in blocks if b['district_id'] == dist_id]
                         else:
                             dist_blocks = blocks
                         block_names = ["All Blocks (District Level)"] + sorted([b['block_name'] for b in dist_blocks])
-                        block_selected = st.selectbox("Block (optional, leave 'All' for district-wide target)", block_names)
+                        block_selected = st.selectbox("Block (optional, leave 'All' for district‑wide target)", block_names)
                         if block_selected != "All Blocks (District Level)":
                             active_block_id = block_name_to_id.get(block_selected)
                         else:
@@ -209,6 +216,7 @@ def show():
                     st.markdown("##### Departmental Scheme / Fund Convergence")
                     
                     existing_record = None
+                    # Build query with block_id if set
                     if active_dept_id and dist_id and activity and activity != "No activities available":
                         q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
                         if active_wing_id:
@@ -272,10 +280,14 @@ def show():
                     expected_persondays = st.number_input("Expected Persondays*", min_value=0, value=0)
 
                     if st.button("Save Target Record", type="primary", use_container_width=True):
-                        if not active_dept_id or not dist_id: st.error("Invalid Department or District.")
-                        elif not project_head or not project_head.strip(): st.error("Project Head name cannot be empty.")
-                        elif activity == "No activities available": st.error("Cannot save target without a valid approved activity.")
-                        elif expected_persondays <= 0: st.error("Expected Persondays is a mandatory field.")
+                        if not active_dept_id or not dist_id:
+                            st.error("Invalid Department or District.")
+                        elif not project_head or not project_head.strip():
+                            st.error("Project Head name cannot be empty.")
+                        elif activity == "No activities available":
+                            st.error("Cannot save target without a valid approved activity.")
+                        elif expected_persondays <= 0:
+                            st.error("Expected Persondays is a mandatory field.")
                         elif conv_choice == "Yes" and not scheme_name.strip():
                             st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
                         else:
@@ -283,7 +295,7 @@ def show():
                                 "department_id": active_dept_id,
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
-                                "block_id": active_block_id,
+                                "block_id": active_block_id,  # NEW: block‑wise target
                                 "financial_year_id": selected_fy_target_id,
                                 "financial_year": selected_fy_year,
                                 "project_head": project_head.strip(),
@@ -302,24 +314,32 @@ def show():
                             }
                             try:
                                 q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
-                                if active_wing_id: q_existing = q_existing.eq("wing_id", active_wing_id)
-                                else: q_existing = q_existing.is_("wing_id", "null")
-                                if active_block_id: q_existing = q_existing.eq("block_id", active_block_id)
-                                else: q_existing = q_existing.is_("block_id", "null")
+                                if active_wing_id:
+                                    q_existing = q_existing.eq("wing_id", active_wing_id)
+                                else:
+                                    q_existing = q_existing.is_("wing_id", "null")
+                                if active_block_id:
+                                    q_existing = q_existing.eq("block_id", active_block_id)
+                                else:
+                                    q_existing = q_existing.is_("block_id", "null")
                                 
                                 existing = q_existing.execute().data
                                 
                                 if existing:
                                     target_id = existing[0]['id']
                                     supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
-                                    try: log_action(user.get('id'), f"UPDATE department_targets {target_id}")
-                                    except: pass
+                                    try:
+                                        log_action(user.get('id'), f"UPDATE department_targets {target_id}")
+                                    except:
+                                        pass
                                     st.success("Target updated successfully!")
                                 else:
                                     result = supabase.table("department_targets").insert(target_record).execute()
                                     new_target_id = result.data[0]['id']
-                                    try: log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
-                                    except: pass
+                                    try:
+                                        log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
+                                    except:
+                                        pass
                                     st.success("Target added successfully!")
                                 st.rerun()
                             except Exception as e:
@@ -335,12 +355,18 @@ def show():
                         return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
                     return f"{d_name} (Main)"
                 df_t['Department / Wing'] = df_t.apply(format_dept_display, axis=1)
-                if 'project_head' not in df_t.columns: df_t['project_head'] = "N/A"
+                if 'project_head' not in df_t.columns:
+                    df_t['project_head'] = "N/A"
+                # Add block name if block_id exists
                 if 'block_id' in df_t.columns:
                     df_t['Block'] = df_t['block_id'].map(block_map).fillna('All Blocks')
                 df_t.rename(columns={
-                    'project_head': 'Project Head', 'activity': 'Approved Activity', 'desired_target': 'Target',
-                    'department_fund': 'Dept. Fund', 'vbgramg_fund': 'VB-G Fund', 'expected_persondays': 'Persondays'
+                    'project_head': 'Project Head',
+                    'activity': 'Approved Activity',
+                    'desired_target': 'Target',
+                    'department_fund': 'Dept. Fund',
+                    'vbgramg_fund': 'VB-G Fund',
+                    'expected_persondays': 'Persondays'
                 }, inplace=True)
                 if 'department_scheme_convergence' in df_t.columns:
                     df_t['Own Scheme Conv.'] = df_t['department_scheme_convergence'].map({True: 'Yes', False: 'No'})
@@ -352,17 +378,21 @@ def show():
                     df_t['Remarks'] = df_t['department_scheme_remarks']
                 disp_cols = ['Department / Wing', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
                 if 'Block' in df_t.columns:
-                    disp_cols.insert(1, 'Block')
+                    disp_cols.insert(1, 'Block')  # Show Block right after Department/Wing
                 extra_cols = [c for c in ['Own Scheme Conv.', 'Scheme / Fund Name', 'Own Annual Plan Status', 'Remarks'] if c in df_t.columns]
                 disp_cols.extend(extra_cols)
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_t[disp_cols].to_excel(writer, index=False, sheet_name='Targets')
-                st.download_button("📥 Export Target Plan to Excel", data=buffer.getvalue(), file_name="department_targets.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(
+                    "📥 Export Target Plan to Excel",
+                    data=buffer.getvalue(),
+                    file_name="department_targets.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
-
     # ================= TAB 2 =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
