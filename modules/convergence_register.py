@@ -23,7 +23,6 @@ from openpyxl.chart.label import DataLabelList
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.properties import WorksheetProperties
 from openpyxl.worksheet.header_footer import HeaderFooter
-from openpyxl.worksheet.print_settings import PrintOptions
 from openpyxl.packaging.core import CoreProperties
 
 # -----------------------------------------------------------------
