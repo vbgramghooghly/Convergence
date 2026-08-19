@@ -103,7 +103,6 @@ def show():
             active_fy_id = f['id']
             break
 
-    # UPDATE: Added tab5 with the new Audit Trail
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🎯 Department Targets (Planning)", 
         "🏗️ Implementation Progress (Execution)", 
@@ -112,7 +111,7 @@ def show():
         "📋 Progress Audit Trail & History"
     ])
 
-    # ================= TAB 1: REDESIGNED (Removed optional remarks) =================
+    # ================= TAB 1: REDESIGNED =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -211,39 +210,6 @@ def show():
                         "Post-Disaster Restoration"
                     ]
                     selected_theme_name = st.selectbox("Convergence Project Head*", PROJECT_HEAD_OPTIONS)
-
-                    # ---- CARD 2: ANNUAL PLAN & CONVERGENCE (compact, remarks removed) ----
-                    with st.container(border=True):
-                        st.markdown("##### Annual Plan & Convergence")
-                        col_scope, col_scheme = st.columns([1, 2])
-                        
-                        with col_scope:
-                            annual_plan_scope = st.text_area("Scope under Annual Plan", height=80)
-                        
-                        with col_scheme:
-                            # Scheme Convergence in a compact grid
-                            conv_col1, conv_col2 = st.columns(2)
-                            with conv_col1:
-                                conv_choice = st.radio(
-                                    "Convergence with Own Departmental Scheme / Fund?",
-                                    options=["No", "Yes"],
-                                    key="conv_choice_target",
-                                    index=0
-                                )
-                                scheme_name = ""
-                                if conv_choice == "Yes":
-                                    scheme_name = st.text_input(
-                                        "Name of Departmental Scheme / Fund *",
-                                        key="scheme_name_target"
-                                    )
-                            with conv_col2:
-                                status_options = ["Yes", "No", "Not Confirmed"]
-                                annual_plan_status = st.selectbox(
-                                    "Included in Department's Own Annual Plan?",
-                                    options=status_options,
-                                    key="annual_plan_status_target"
-                                )
-                                # REMOVED: Departmental Scheme / Annual Plan Remarks (Optional)
 
                     # ---- CARD 3: BLOCK-WISE TARGET ENTRIES (LARGE) ----
                     st.markdown("---")
@@ -351,7 +317,6 @@ def show():
 
                     # ---- SAVE BUTTON ----
                     if st.button("💾 Save All Targets", type="primary", use_container_width=True):
-                        # ---- LOGIC COMPLETELY UNCHANGED (except remarks removed) ----
                         errors = []
                         if not active_dept_id or not dist_id:
                             errors.append("Invalid Department or District.")
@@ -408,16 +373,16 @@ def show():
                                     "project_head": selected_theme_name,
                                     "activity": act_name,
                                     "asset_count": 0,
-                                    "annual_plan_scope": annual_plan_scope,
+                                    "annual_plan_scope": None,
                                     "desired_target": int(row['Desired Target']),
                                     "department_fund": float(row['Dept Fund (₹ Lakhs)']),
                                     "vbgramg_fund": float(row['VB-G Fund (₹ Lakhs)']),
                                     "expected_persondays": int(row['Expected Persondays']),
                                     "created_by": user['id'],
-                                    "department_scheme_convergence": conv_choice == "Yes",
-                                    "department_scheme_name": scheme_name.strip() if scheme_name else None,
-                                    "department_annual_plan_status": annual_plan_status,
-                                    "department_scheme_remarks": None,  # Removed – always NULL
+                                    "department_scheme_convergence": False,
+                                    "department_scheme_name": None,
+                                    "department_annual_plan_status": None,
+                                    "department_scheme_remarks": None,
                                 }
                                 try:
                                     supabase.table("department_targets").insert(target_record).execute()
@@ -452,19 +417,11 @@ def show():
                     'vbgramg_fund': 'VB-G Fund',
                     'expected_persondays': 'Persondays'
                 }, inplace=True)
-                if 'department_scheme_convergence' in df_t.columns:
-                    df_t['Own Scheme Conv.'] = df_t['department_scheme_convergence'].map({True: 'Yes', False: 'No'})
-                if 'department_scheme_name' in df_t.columns:
-                    df_t['Scheme / Fund Name'] = df_t['department_scheme_name']
-                if 'department_annual_plan_status' in df_t.columns:
-                    df_t['Own Annual Plan Status'] = df_t['department_annual_plan_status']
-                if 'department_scheme_remarks' in df_t.columns:
-                    df_t['Remarks'] = df_t['department_scheme_remarks']
+                
                 disp_cols = ['Department / Wing', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
                 if 'Block' in df_t.columns:
                     disp_cols.insert(1, 'Block')
-                extra_cols = [c for c in ['Own Scheme Conv.', 'Scheme / Fund Name', 'Own Annual Plan Status', 'Remarks'] if c in df_t.columns]
-                disp_cols.extend(extra_cols)
+                
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -477,6 +434,7 @@ def show():
                 )
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
+                
     # ================= TAB 2 =================
     with tab2:
         query_reg = supabase.table("convergence_register").select("*")
@@ -978,17 +936,12 @@ def show():
 
         # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
     with tab5:
-      
-        # 1. Fetch all Progress Updates with necessary joins
         try:
-            # 🔥 FIXED: Sorted by "updated_at" instead of "created_at" to match existing DB schema
             audit_query = supabase.table("progress_updates").select(
                 "*, convergence_register(id, activity_description, department_id, district_id, block_id), users(full_name, role, department_id, district_id, block_id)"
             ).order("updated_at", desc=True)
             
-            # 2. Restrict access if not Superadmin (Show only updates related to their jurisdiction)
             if role != 'superadmin':
-                # Filter by department or district/block based on the logged-in user
                 if role == 'department':
                     audit_query = audit_query.eq("convergence_register.department_id", user.get('department_id'))
                     if user.get('wing_id'):
@@ -1003,27 +956,22 @@ def show():
             if not audit_data:
                 st.info("No progress history records found for your jurisdiction.")
             else:
-                # 3. Transform Data for Display
                 audit_rows = []
                 for rec in audit_data:
-                    # Extract convergence details
                     conv = rec.get('convergence_register') or {}
                     act_desc = conv.get('activity_description', 'Unknown Scheme/Work')
                     dept_id = conv.get('department_id')
                     dist_id = conv.get('district_id')
                     block_id = conv.get('block_id')
                     
-                    # Extract user details
                     updater = rec.get('users') or {}
                     updater_name = updater.get('full_name', 'System')
                     updater_role = updater.get('role', 'Unknown')
 
-                    # Map IDs to Names
                     dept_name = dept_map.get(dept_id, 'Unknown Dept')
                     dist_name = dist_map.get(dist_id, 'Unknown Dist')
                     block_name = block_map.get(block_id, 'N/A')
 
-                    # 🔥 FIX: Check for updated_at first, fallback to created_at or now
                     date_time_val = pd.to_datetime(rec.get('updated_at') or rec.get('created_at') or datetime.now()).strftime('%d %b %Y, %H:%M')
                     
                     audit_rows.append({
@@ -1039,21 +987,18 @@ def show():
                         "Financial Achiev. (₹L)": rec.get('financial_achievement', 0.0),
                         "Persondays": rec.get('persondays_generated', 0),
                         "Remarks": rec.get('remarks', ''),
-                        "Update ID": rec['id']  # Hidden ID for superadmin actions
+                        "Update ID": rec['id'] 
                     })
 
                 df_audit = pd.DataFrame(audit_rows)
 
-                # 4. Search Functionality
                 search_audit = st.text_input("🔍 Search Audit History", placeholder="Search by Scheme, User, Department, Status...")
                 if search_audit:
                     mask = df_audit.apply(lambda row: row.astype(str).str.contains(search_audit, case=False, na=False).any(), axis=1)
                     df_audit = df_audit[mask]
 
-                # 5. Show Table
                 display_cols = ["Date & Time", "Updater (User)", "Updater Role", "Scheme / Work", "Department", "District", "Block", "Changed Status", "Physical Achiev. %", "Financial Achiev. (₹L)", "Persondays", "Remarks"]
                 
-                # If User is Superadmin, add an Action column for Deletion
                 if role == 'superadmin':
                     display_cols.append("🗑️ Action")
 
@@ -1069,7 +1014,6 @@ def show():
                     }
                 )
 
-                # 6. Downloads
                 col_dl_a1, col_dl_a2 = st.columns(2)
                 audit_buffer = io.BytesIO()
                 with pd.ExcelWriter(audit_buffer, engine='openpyxl') as writer:
@@ -1078,7 +1022,6 @@ def show():
                 
                 col_dl_a2.download_button("📥 Download Audit Trail (CSV)", data=df_audit.drop(columns=['Update ID', '🗑️ Action'], errors='ignore').to_csv(index=False).encode("utf-8"), file_name="progress_audit_trail.csv", mime="text/csv", use_container_width=True)
 
-                # 7. SUPERADMIN DELETE ACTION (Only editable by superadmin)
                 if role == 'superadmin':
                     st.markdown("---")
                     st.caption("🛠️ **Superadmin Tools:** Select a record below to permanently delete an erroneous progress update.")
@@ -1093,7 +1036,7 @@ def show():
                         try:
                             supabase.table("progress_updates").delete().eq("id", selected_delete_id).execute()
                             st.success(f"✅ Progress Update (ID: {selected_delete_id}) permanently deleted!")
-                            st.rerun() # Reset the page, preventing duplicate deletion
+                            st.rerun() 
                         except Exception as del_err:
                             st.error(f"❌ Failed to delete: {del_err}")
 
