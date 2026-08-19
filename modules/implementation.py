@@ -103,7 +103,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1 (unchanged) =================
+    # ================= TAB 1 (UPDATED: added financial_year to target_record) =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -139,6 +139,8 @@ def show():
                         options=list(fy_id_to_name.keys()),
                         format_func=lambda x: fy_id_to_name[x]
                     )
+                    # Get the year name for the selected ID (used to populate financial_year column)
+                    selected_fy_year = fy_id_to_name.get(selected_fy_target_id, '')
 
                     if role == 'department':
                         active_dept_id = user.get('department_id')
@@ -262,6 +264,8 @@ def show():
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
                                 "financial_year_id": selected_fy_target_id,
+                                # FIX: Add the financial_year column (year name) to satisfy NOT NULL constraint
+                                "financial_year": selected_fy_year,
                                 "project_head": project_head.strip(),
                                 "activity": activity,
                                 "asset_count": asset_count,
@@ -333,7 +337,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (MODIFIED – improved Block filter) =================
+    # ================= TAB 2 (unchanged) =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -372,13 +376,12 @@ def show():
             else:
                 wing_names = ["All"]
 
-            # If department is frozen, we also freeze wing to the user's wing (or show only that wing)
             if dept_frozen:
                 default_wing_name = wing_map.get(user.get('wing_id'), {}).get('wing_name', '') if user.get('wing_id') else ''
                 if default_wing_name and default_wing_name in wing_names:
                     wing_options = [default_wing_name]
                 else:
-                    wing_options = ["All"]  # fallback
+                    wing_options = ["All"]
                 sel_wing_name = col_wing.selectbox("Wing", wing_options, disabled=True)
                 sel_wing_id = user.get('wing_id') if default_wing_name in wing_names else None
             else:
@@ -389,18 +392,15 @@ def show():
                 else:
                     sel_wing_id = None
 
-            # -------- FIX: Block filter now uses master blocks (all blocks from district) --------
-            # Determine which blocks to show: if user has district_id, filter by that district
+            # Block filter: from master blocks (all blocks in district)
             if role in ['district', 'block', 'department'] and user.get('district_id'):
                 district_blocks = [b for b in blocks if b['district_id'] == user['district_id']]
             else:
-                district_blocks = blocks  # superadmin sees all
+                district_blocks = blocks
 
-            # Build block options from master list
             block_names_all = ["All"] + sorted([b['block_name'] for b in district_blocks])
             block_id_from_name = {b['block_name']: b['id'] for b in district_blocks}
 
-            # If block user, freeze to their own block
             if role == 'block':
                 user_block_name = block_map.get(user.get('block_id'), '')
                 if user_block_name and user_block_name in block_names_all:
@@ -413,13 +413,12 @@ def show():
                 selected_block_name = col_block.selectbox("Block", block_names_all)
                 selected_block_id = block_id_from_name.get(selected_block_name) if selected_block_name != "All" else None
 
-            # GP options based on selected block (from HOOGHLY_GPS) or from all activities if no block
+            # GP options
             gp_options = ["All"]
             if selected_block_id:
                 block_key = selected_block_name.upper()
                 gp_options.extend(HOOGHLY_GPS.get(block_key, []))
             else:
-                # Fallback: gather all GPs from the register data
                 all_gps = set()
                 for a in activities_reg:
                     loc = a.get('geo_location', '')
@@ -430,7 +429,7 @@ def show():
                 gp_options.extend(sorted(all_gps))
             selected_gp = col_gp.selectbox("Primary GP", gp_options)
 
-            # -------- Filter activities based on all selections --------
+            # -------- Filter activities --------
             filtered_activities = activities_reg
             if sel_dept_id:
                 filtered_activities = [a for a in filtered_activities if a.get('department_id') == sel_dept_id]
@@ -496,7 +495,6 @@ def show():
                             default_index = status_options.index(current_status) if current_status in status_options else 0
                             new_status = st.selectbox("New Status*", status_options, index=default_index)
 
-                            # PIA & Convergence Type: frozen for Block and Department
                             is_editable = role in ['superadmin', 'district']
                             curr_pia = selected_act.get("pia_type", "Select PIA")
                             pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
