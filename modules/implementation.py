@@ -667,7 +667,6 @@ def show():
                                 value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0))
                             )
 
-                            st.markdown("##### 💰 Financials & MIS Registration")
                             col_p3, col_p4 = st.columns(2)
                             fin_ach = col_p3.number_input(
                                 "Financial Achievement (₹ Lakhs)",
@@ -703,7 +702,6 @@ def show():
                                 value=int(selected_act.get('persondays_generated', 0) or 0)
                             )
 
-                            st.markdown("##### 📅 Schedule & Blockages")
                             col_p5, col_p6, col_p7 = st.columns(3)
                             start_date = col_p5.date_input(
                                 "Actual Start",
