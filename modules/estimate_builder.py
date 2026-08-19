@@ -102,7 +102,6 @@ def show():
         ('estimate_data', []),
         ('show_dpr', False),
         ('selected_work_id', None),
-        ('manual_entry', False),
         ('selected_theme', None),
         ('print_trigger', False)
     ]:
@@ -165,7 +164,6 @@ def show():
         df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
     # -------------------- CONVERGENCE REGISTER INTEGRATION --------------------
-    # Get user dict safely
     user = get_current_user() if st.session_state.get('authenticated') else {}
     if not isinstance(user, dict):
         user = {}
@@ -177,26 +175,18 @@ def show():
     conv_records = get_filtered_records(supabase, role, user) if role in ['superadmin', 'district', 'block', 'department'] else []
     df_conv = pd.DataFrame(conv_records) if conv_records else pd.DataFrame()
 
-    # Build work options (BUG FIX APPLIED HERE)
+    # Build work options from database only
     work_options = []
     if not df_conv.empty:
         for _, row in df_conv.iterrows():
+            safe_id = str(row['id'])
             work_options.append({
                 'id': row['id'],
-                'label': f"{row['activity_description']} (ID: {str(row['id'])[:8]})",
+                'label': f"{row['activity_description']} (ID: {safe_id[:8]})",
                 'work_name': row['activity_description'],
                 'theme_id': row.get('thematic_category_id'),
                 'row': row
             })
-
-    manual_option = {
-        'id': 'manual',
-        'label': '✏️ Manual Entry (no register link)',
-        'work_name': '',
-        'theme_id': None,
-        'row': None
-    }
-    work_options.insert(0, manual_option)
 
     # -------------------- WATERMARK (for print) --------------------
     try:
@@ -227,8 +217,15 @@ def show():
 
     st.markdown("---")
 
-    # ---------- WORK BASIC DETAILS ----------
+    # ---------- WORK BASIC DETAILS (FORCED PRESELECTION) ----------
     st.markdown("### 📋 Work Basic Details")
+    
+    # Check if there are actually works available to select
+    if not work_options:
+        st.warning("⚠️ No approved works found in your Convergence Register.")
+        st.info("You must add a work to the Convergence Register before preparing an estimate.")
+        st.stop()  # Halts execution to prevent errors below
+
     col_sel1, _ = st.columns([3, 1])
     with col_sel1:
         selected_label = st.selectbox(
@@ -237,100 +234,43 @@ def show():
             index=0,
             key="work_selector"
         )
+    
     selected_opt = next((opt for opt in work_options if opt['label'] == selected_label), None)
 
+    # Process Selection natively
     if selected_opt:
-        if selected_opt['id'] == 'manual':
-            st.session_state['manual_entry'] = True
-            st.session_state['selected_work_id'] = None
+        st.session_state['selected_work_id'] = selected_opt['id']
+        st.session_state['work_name'] = selected_opt['work_name']
+
+        theme_id = selected_opt['theme_id']
+        if theme_id:
+            theme_row = df_themes[df_themes['id'] == theme_id]
+            st.session_state['selected_theme'] = theme_row.iloc[0]['theme_name'] if not theme_row.empty else "Unknown Theme"
+            act_rows = df_activities[df_activities['theme_id'] == theme_id]
+            
+            # Match activity from work name prefix
+            work_name = selected_opt['work_name']
+            matched = None
+            for _, act_row in act_rows.iterrows():
+                if work_name.startswith(act_row['activity_name']):
+                    matched = act_row['activity_name']
+                    break
+            st.session_state['work_type'] = matched if matched else (act_rows.iloc[0]['activity_name'] if not act_rows.empty else "")
         else:
-            st.session_state['manual_entry'] = False
-            st.session_state['selected_work_id'] = selected_opt['id']
-            st.session_state['work_name'] = selected_opt['work_name']
+            st.session_state['selected_theme'] = "No Theme"
+            st.session_state['work_type'] = "No Base Activity"
 
-            theme_id = selected_opt['theme_id']
-            if theme_id:
-                theme_row = df_themes[df_themes['id'] == theme_id]
-                st.session_state['selected_theme'] = theme_row.iloc[0]['theme_name'] if not theme_row.empty else "Unknown Theme"
-                act_rows = df_activities[df_activities['theme_id'] == theme_id]
-                # try to match activity from work name prefix
-                work_name = selected_opt['work_name']
-                matched = None
-                for _, act_row in act_rows.iterrows():
-                    if work_name.startswith(act_row['activity_name']):
-                        matched = act_row['activity_name']
-                        break
-                st.session_state['work_type'] = matched if matched else (act_rows.iloc[0]['activity_name'] if not act_rows.empty else "")
-            else:
-                st.session_state['selected_theme'] = "No Theme"
-                st.session_state['work_type'] = ""
-
-    # Display work details
-    if st.session_state.get('manual_entry', False):
-        with st.container(border=True):
-            st.markdown("#### ✏️ Manual Entry")
-            st.session_state['work_name'] = st.text_input(
-                "Name of Work",
-                value=st.session_state['work_name'],
-                placeholder="Enter the official project title..."
-            )
-
-            if df_activities.empty:
-                st.warning("No active activities found.")
-                st.session_state['work_type'] = ""
-            else:
-                df_activities_filtered = df_activities.copy()
-                if user_role == 'department' and user_dept_id:
-                    df_act_dept['activity_id'] = df_act_dept['activity_id'].astype(str)
-                    df_activities_filtered['id'] = df_activities_filtered['id'].astype(str)
-                    mapped_ids = df_act_dept[df_act_dept['department_id'] == user_dept_id]['activity_id'].tolist()
-                    df_activities_filtered = df_activities_filtered[df_activities_filtered['id'].isin(mapped_ids)]
-
-                if df_activities_filtered.empty:
-                    st.warning("No approved activities for your department/jurisdiction.")
-                    st.session_state['work_type'] = ""
-                else:
-                    valid_theme_ids = df_activities_filtered['theme_id'].unique()
-                    df_themes_filtered = df_themes[df_themes['id'].isin(valid_theme_ids)]
-                    theme_names = ["Select Theme"] + df_themes_filtered['theme_name'].tolist()
-
-                    col_theme, col_act = st.columns(2)
-                    with col_theme:
-                        sel_theme = st.selectbox("Thematic Work Category", options=theme_names)
-                    with col_act:
-                        if sel_theme != "Select Theme":
-                            selected_theme_id = df_themes_filtered[df_themes_filtered['theme_name'] == sel_theme]['id'].iloc[0]
-                            final_activities = df_activities_filtered[df_activities_filtered['theme_id'] == selected_theme_id]
-                            final_act_names = final_activities['activity_name'].tolist()
-                        else:
-                            final_act_names = df_activities_filtered['activity_name'].tolist()
-
-                        if not final_act_names:
-                            st.warning("No activities for selected theme.")
-                            st.session_state['work_type'] = ""
-                        else:
-                            current_selection = st.session_state.get('work_type')
-                            default_index = 0
-                            if current_selection in final_act_names:
-                                default_index = final_act_names.index(current_selection)
-                            st.session_state['work_type'] = st.selectbox(
-                                "Base Activity*",
-                                options=final_act_names,
-                                index=default_index
-                            )
-    else:
-        if selected_opt and selected_opt['id'] != 'manual':
-            st.success(f"**Work Name:** {selected_opt['work_name']}")
-            st.info(f"**Theme:** {st.session_state.get('selected_theme', 'Not specified')}")
-            st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
-            conv_row = selected_opt.get('row')
-            if conv_row is not None:
-                dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A')
-                block_name = maps.get('block_reverse', {}).get(conv_row.get('block_id'), 'N/A')
-                st.caption(f"📍 **District:** {dist_name} | **Block:** {block_name}")
-            st.caption("📌 These details are from the Convergence Register. Switch to 'Manual Entry' to edit.")
-        else:
-            st.warning("Please select a work from the dropdown.")
+        # Display Selected Information
+        st.success(f"**Work Name:** {selected_opt['work_name']}")
+        st.info(f"**Theme:** {st.session_state.get('selected_theme', 'Not specified')}")
+        st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
+        
+        conv_row = selected_opt.get('row')
+        if conv_row is not None:
+            dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A')
+            block_name = maps.get('block_reverse', {}).get(conv_row.get('block_id'), 'N/A')
+            st.caption(f"📍 **District:** {dist_name} | **Block:** {block_name}")
+        st.caption("📌 These details are locked and synced directly from the Convergence Register.")
 
     # ---------- TOTALS & ACTIONS ----------
     totals = calculate_totals(st.session_state['estimate_data'])
