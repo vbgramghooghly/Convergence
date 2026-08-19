@@ -17,7 +17,6 @@ def show():
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    # Clean separation line
     st.markdown("---")
 
     # ==========================================
@@ -64,7 +63,7 @@ def show():
     if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
 
     # ==========================================
-    # 5. REPORT SELECTION & MODERN FILTERS
+    # 5. REPORT SELECTION (Same row columns)
     # ==========================================
     col_c1, col_c2 = st.columns(2)
     report_category = col_c1.selectbox("1. Select Report Category", [
@@ -75,6 +74,7 @@ def show():
         "Meeting & Resolution Register"
     ])
 
+    # Cascading report type based on category
     if report_category == "Official Statutory Reports":
         report_opts = [
             "Official VB-G RAM G Summary Report (Template)",
@@ -87,6 +87,7 @@ def show():
             "District Performance Dashboard",
             "Department Performance Dashboard",
             "Block Performance Dashboard",
+            "Activity-Wise Convergence Report", # Added for your 318 activities
             "Scheme Performance Report",
             "Personday Generation Report",
         ]
@@ -109,7 +110,9 @@ def show():
     report_type = col_c2.selectbox("2. Select Specific Report Format", report_opts)
     st.markdown("---")
 
-    # Modern Interactive Filters (Hidden inside a popover)
+    # ==========================================
+    # 6. ADVANCED FILTERS (Popover hidden by default)
+    # ==========================================
     filtered_df = df.copy()
     filter_values = {}
 
@@ -118,8 +121,9 @@ def show():
     if report_type in ["Official VB-G RAM G Summary Report (Template)", "District-wise Summary Report",
                        "Department-wise Summary Report", "Block-wise Summary Report",
                        "District Performance Dashboard", "Department Performance Dashboard",
-                       "Block Performance Dashboard", "Scheme Performance Report",
-                       "Personday Generation Report", "Financial Convergence Report (Fund Gap Analysis)",
+                       "Block Performance Dashboard", "Activity-Wise Convergence Report",
+                       "Scheme Performance Report", "Personday Generation Report",
+                       "Financial Convergence Report (Fund Gap Analysis)",
                        "Pending / Delayed Activities Report", "FY 2026–27 Master Convergence Statement"]:
         show_filters = ["district", "department", "block", "theme", "status", "financial_year"]
     elif report_type == "Technical Convergence Report (NOC Status)":
@@ -199,51 +203,18 @@ def show():
                         filtered_df = filtered_df[filtered_df["financial_year"].isin(vals)]
         
         st.markdown("---")
-    else:
-        filtered_df = df.copy()
 
     # ==========================================
-    # 6. EXECUTIVE SUMMARY KPI METRICS
-    # ==========================================
-    if not filtered_df.empty:
-        total_activities = len(filtered_df)
-        total_funds = filtered_df['total_converged_fund'].sum()
-        avg_physical = filtered_df['physical_achievement'].mean()
-        active_depts = filtered_df['department_name'].nunique()
-        
-        st.markdown("### 📊 Executive Performance Snapshot")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total Activities", total_activities)
-        k2.metric("Converged Funds (₹ Lakhs)", f"{total_funds:,.2f}")
-        k3.metric("Avg. Physical Achievement", f"{avg_physical:.1f}%")
-        k4.metric("Active Departments", active_depts)
-        st.markdown("---")
-
-    # ==========================================
-    # 7. MODERN REPORT VIEW SWITCHER
-    # ==========================================
-    view_mode = st.segmented_control(
-        "View Analysis By:",
-        options=["📋 District Convergence Plan", "🏛️ Department-Wise Analysis", "🔧 Activity-Wise Analysis"],
-        selection_mode="single",
-        default="📋 District Convergence Plan"
-    )
-    st.markdown("---")
-
-    # ==========================================
-    # 8. PRINT CSS (Robust, version-proof)
+    # 7. PRINT CSS (Robust)
     # ==========================================
     print_css = """
     <style>
     @media print {
-        /* Hide all native Streamlit UI components */
         header, footer, .stApp .stSidebar, .stApp [data-testid="stToolbar"], 
         .stApp [data-testid="stHeader"], .stApp [data-testid="stStatusWidget"],
-        .stApp .st-emotion-cache-1v0mbdj, .stApp .st-emotion-cache-1wrcr25,
-        .stApp [data-testid="stMetric"] {
+        .stApp .st-emotion-cache-1v0mbdj, .stApp .st-emotion-cache-1wrcr25 {
             display: none !important;
         }
-        /* Force full width for print content */
         .stApp .main .block-container, .print-content {
             max-width: 100% !important;
             width: 100% !important;
@@ -252,7 +223,6 @@ def show():
             display: block !important;
             visibility: visible !important;
         }
-        /* Chart and table fitting */
         table { width: 100% !important; font-size: 10px !important; }
         .stDataFrame { width: 100% !important; }
     }
@@ -263,11 +233,11 @@ def show():
     st.markdown('<div class="print-content">', unsafe_allow_html=True)
 
     # ==========================================
-    # 9. RENDER CUSTOM VIEWS (District, Dept, Activity)
+    # 8. RENDER STATUTORY REPORTS
     # ==========================================
-    interactive_df = filtered_df.copy()
-    
-    # Shared Column Config for all modern tables
+    st.markdown(f"### 📄 {report_type}")
+
+    # Shared Column Config for modern tables
     TABLE_CONFIG = {
         "desired_target": st.column_config.NumberColumn("Target", format="%d"),
         "department_fund": st.column_config.NumberColumn("Dept. Fund (₹ L)", format="₹ %.2f"),
@@ -277,68 +247,6 @@ def show():
         "current_status": st.column_config.SelectboxColumn("Status", options=["Planned", "Approved", "Completed", "Delayed", "Mismatch"]),
         "expected_persondays": st.column_config.NumberColumn("Expected Persondays", format="%d")
     }
-
-    if view_mode == "📋 District Convergence Plan":
-        st.subheader("District Convergence Fund & Target Plan")
-        district_plan = interactive_df.groupby("district_name").agg({
-            "id": "count", "desired_target": "sum", "department_fund": "sum", 
-            "vbgramg_fund": "sum", "total_converged_fund": "sum", "physical_achievement": "mean"
-        }).reset_index().rename(columns={"id": "Total Activities"})
-        
-        st.dataframe(district_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
-        
-        # Clickable chart for district funding
-        fig = px.bar(district_plan, x="district_name", y="total_converged_fund", 
-                     title="📊 District-wise Total Converged Funds", color="district_name")
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-        
-        if event and event.selection and len(event.selection.points) > 0:
-            selected_district = event.selection.points[0].get("district_name")
-            if selected_district:
-                st.info(f"🔍 Showing details for: **{selected_district}**")
-                detail_df = interactive_df[interactive_df["district_name"] == selected_district]
-                st.dataframe(detail_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
-                
-    elif view_mode == "🏛️ Department-Wise Analysis":
-        st.subheader("Department Wise Convergence & Work Allocation")
-        dept_plan = interactive_df.groupby("department_name").agg({
-            "id": "count", "desired_target": "sum", "department_fund": "sum", 
-            "total_converged_fund": "sum", "physical_achievement": "mean"
-        }).reset_index().rename(columns={"id": "Total Activities"})
-        
-        st.dataframe(dept_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
-        
-        fig = px.pie(dept_plan, names="department_name", values="total_converged_fund", 
-                     title="💰 Department-wise Fund Distribution")
-        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-        
-        if event and event.selection and len(event.selection.points) > 0:
-            selected_dept = event.selection.points[0].get("department_name")
-            if selected_dept:
-                st.info(f"🔍 Showing activities for department: **{selected_dept}**")
-                detail_df = interactive_df[interactive_df["department_name"] == selected_dept]
-                st.dataframe(detail_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
-
-    elif view_mode == "🔧 Activity-Wise Analysis":
-        st.subheader("Activity / Work Wise Analysis by Department")
-        activity_plan = interactive_df[["activity_description", "department_name", "desired_target", 
-                                       "total_converged_fund", "physical_achievement", "current_status"]]
-        st.dataframe(activity_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
-        
-        # Top 10 Activities by Fund
-        top_activities = interactive_df.groupby("activity_description").agg({
-            "total_converged_fund": "sum", "id": "count"
-        }).reset_index().sort_values(by="total_converged_fund", ascending=False).head(10)
-        
-        fig = px.bar(top_activities, x="activity_description", y="total_converged_fund", 
-                     title="🛠️ Top 10 Activities by Fund Allocation")
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ==========================================
-    # 10. RENDER THE SELECTED STATUTORY REPORTS
-    # ==========================================
-    st.markdown("---")
-    st.markdown(f"### 📄 {report_type}")
 
     if report_type == "Official VB-G RAM G Summary Report (Template)":
         official_df = pd.DataFrame()
@@ -366,6 +274,21 @@ def show():
         st.dataframe(summary_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
         excel = dataframe_to_excel(summary_df, "Summary_Report")
         st.download_button("📥 Download Summary (Excel)", excel, f"{group_col}_summary_report.xlsx")
+
+    elif report_type == "Activity-Wise Convergence Report":
+        st.subheader("Activity-Wise Convergence & Department Mapping (Across All 318 Activities)")
+        
+        # Group by activity_description
+        act_summary = filtered_df.groupby("activity_description").agg(
+            Total_Target=("desired_target", "sum"),
+            Total_Fund=("total_converged_fund", "sum"),
+            Dept_Count=("department_name", "nunique"),
+            Mapped_Departments=("department_name", lambda x: ", ".join(sorted(set(x))))
+        ).reset_index().rename(columns={"activity_description": "Activity Name"}).sort_values(by="Total_Fund", ascending=False)
+        
+        st.dataframe(act_summary, use_container_width=True, hide_index=True)
+        excel = dataframe_to_excel(act_summary, "Activity_Wise_Report")
+        st.download_button("📥 Download Activity-Wise Report (Excel)", excel, "activity_wise_convergence_report.xlsx")
 
     elif report_type in ["District Performance Dashboard", "Department Performance Dashboard", "Block Performance Dashboard"]:
         if not filtered_df.empty:
@@ -459,7 +382,7 @@ def show():
     st.markdown('</div>', unsafe_allow_html=True)
 
     # ==========================================
-    # 11. MODERN PRINT BUTTON
+    # 9. PRINT / EXPORT BUTTON
     # ==========================================
     st.markdown('<div class="no-print">', unsafe_allow_html=True)
     if st.button("🖨️ Print / Export Report", type="primary", use_container_width=True):
