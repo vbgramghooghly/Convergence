@@ -251,14 +251,16 @@ def show_home():
         block_list = [b for b in blocks if b['district_id'] == district_id]
     else:
         # Superadmin: all blocks (or all in Hooghly)
-        block_list = blocks  # You can filter by district if needed
+        block_list = blocks
 
-    # ---- Fetch targets ----
+    # ---- Fetch targets (now with block_id) ----
     q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
     if role == 'department' and department_id:
         q_t = q_t.eq("department_id", department_id)
     elif role == 'district' and district_id:
         q_t = q_t.eq("district_id", district_id)
+    elif role == 'block' and block_id:
+        q_t = q_t.eq("block_id", block_id)
     targets = q_t.execute().data or []
 
     if not targets:
@@ -266,9 +268,7 @@ def show_home():
         return
 
     # ---- Fetch register entries ----
-    q_r = supabase.table("convergence_register").select("*")
-    # Filter by financial year
-    q_r = q_r.eq("financial_year_id", fy_id)
+    q_r = supabase.table("convergence_register").select("*").eq("financial_year_id", fy_id)
     if role == 'block' and block_id:
         q_r = q_r.eq("block_id", block_id)
     elif role == 'district' and district_id:
@@ -295,12 +295,10 @@ def show_home():
             reg_dept = row.get('department_id')
             reg_wing = row.get('wing_id')
             work_desc = row.get('activity_description', '')
-            # For each target, check if it matches
             for _, trow in df_targets.iterrows():
                 t_dept = trow.get('department_id')
                 t_wing = trow.get('wing_id')
                 t_act = trow.get('activity', '')
-                # Match department and wing (wing can be null)
                 if reg_dept == t_dept and (reg_wing == t_wing or (reg_wing is None and t_wing is None)):
                     if match_activity(work_desc, t_act):
                         key = (reg_block, t_dept, t_wing, t_act)
@@ -309,6 +307,7 @@ def show_home():
     # ---- Build report table ----
     report_rows = []
     for _, trow in df_targets.iterrows():
+        t_block = trow.get('block_id')
         t_dept = trow.get('department_id')
         t_wing = trow.get('wing_id')
         t_act = trow.get('activity', '')
@@ -317,27 +316,23 @@ def show_home():
         dept_name = dept_map.get(t_dept, 'Unknown')
         wing_name = wing_map.get(t_wing, {}).get('wing_name', 'Main Dept.') if t_wing else 'Main Dept.'
         dept_display = f"{dept_name} → {wing_name}" if t_wing else dept_name
+        block_name = block_map.get(t_block, 'All Blocks') if t_block else 'All Blocks'
 
-        # For each block
-        for blk in block_list:
-            b_id = blk['id']
-            b_name = blk['block_name']
+        key = (t_block, t_dept, t_wing, t_act)
+        entries = entries_count.get(key, 0)
+        gap = entries - t_target
+        status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
 
-            key = (b_id, t_dept, t_wing, t_act)
-            entries = entries_count.get(key, 0)
-            gap = entries - t_target
-            status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
-
-            report_rows.append({
-                "District": "Hooghly",  # fixed for this portal
-                "Block": b_name,
-                "Department / Wing": dept_display,
-                "Target Activity": t_act,
-                "Target Set": t_target,
-                "Entries Captured": entries,
-                "Gap": gap,
-                "Status": status
-            })
+        report_rows.append({
+            "District": "Hooghly",
+            "Block": block_name,
+            "Department / Wing": dept_display,
+            "Target Activity": t_act,
+            "Target Set": t_target,
+            "Entries Captured": entries,
+            "Gap": gap,
+            "Status": status
+        })
 
     df_report = pd.DataFrame(report_rows)
 
