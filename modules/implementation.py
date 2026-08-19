@@ -479,7 +479,6 @@ def show():
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
     # ================= TAB 2 =================
     with tab2:
-        st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
         if role == 'district':
             query_reg = query_reg.eq("district_id", user['district_id'])
