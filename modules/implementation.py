@@ -790,7 +790,6 @@ def show():
 
     # ================= TAB 3 =================
     with tab3:
-       st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
         ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, wing_id, priority, linkage_type, action_point, target, deadline, status, remarks").execute().data
         if ap_query:
             df_ap = pd.DataFrame(ap_query)
