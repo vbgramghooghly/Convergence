@@ -2,6 +2,42 @@ import uuid
 import streamlit as st
 from utils.db import get_supabase
 
+# ---------- BUCKET ASSET FETCHER ----------
+@st.cache_data(ttl=3600)
+def fetch_bucket_assets():
+    """Dynamically fetches images and PDF from the Supabase 'Images' bucket."""
+    try:
+        supabase = get_supabase()
+        files = supabase.storage.from_("Images").list()
+        
+        pdf_file = None
+        img_files = []
+        
+        for f in files:
+            name = f.get('name', '')
+            # Identify the PDF
+            if name.lower().endswith('.pdf'):
+                pdf_file = name
+            # Identify Images
+            elif name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                img_files.append(name)
+        
+        # Sort images alphabetically (this naturally puts 'b18...' before 'fa6...')
+        img_files.sort()
+        
+        # Get Public URLs for the images
+        img_urls = [supabase.storage.from_("Images").get_public_url(img) for img in img_files]
+        
+        # Download the PDF as bytes for the download button
+        pdf_bytes = None
+        if pdf_file:
+            pdf_bytes = supabase.storage.from_("Images").download(pdf_file)
+            
+        return {"images": img_urls, "pdf_bytes": pdf_bytes, "pdf_name": pdf_file}
+        
+    except Exception as e:
+        return {"images": [], "pdf_bytes": None, "pdf_name": None}
+
 # ---------- CAPTCHA ----------
 def get_captcha():
     """Return a (question, answer) tuple. Stored in session to avoid regeneration on reruns."""
@@ -85,25 +121,43 @@ def check_password():
                 box-shadow: 0 10px 25px rgba(31, 119, 180, 0.15);
                 border: 1px solid #E2E8F0; border-top: 5px solid #0F4C81;
             }
-            .portal-title { font-size: 2.2rem; font-weight: 800; color: #0F4C81; margin-bottom: 0px; }
-            .portal-subtitle { font-size: 1.1rem; color: #64748B; margin-bottom: 25px; }
-            .feature-item { font-size: 1.05rem; color: #334155; margin-bottom: 12px; font-weight: 500; }
         </style>
     """, unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1.3, 1], gap="large")
 
+    # ---------- LEFT COLUMN: SUPABASE IMAGES & PDF DOWNLOAD ----------
     with col_left:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 class='portal-title'>🏛️ VB G RAM G Convergence Portal, Hooghly</h1>", unsafe_allow_html=True)
-        
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("### 🌟 Portal Highlights")
-        st.markdown("<div class='feature-item'>📈 <b>Real-Time Execution:</b> Monitor physical & financial achievements.</div>", unsafe_allow_html=True)
-        st.markdown("<div class='feature-item'>🏛️ <b>Multi-Tier Governance:</b> District, Block, and Department controls.</div>", unsafe_allow_html=True)
-        st.markdown("<div class='feature-item'>🤝 <b>Meeting Resolutions:</b> Automatic action point and ATR syncing.</div>", unsafe_allow_html=True)
-        st.markdown("<div class='feature-item'>🔒 <b>Enterprise Security:</b> Complete audit logging and controlled workflows.</div>", unsafe_allow_html=True)
+        
+        # Fetch assets dynamically from the "Images" bucket
+        assets = fetch_bucket_assets()
+        
+        # Render Images
+        if assets["images"]:
+            for img_url in assets["images"]:
+                st.image(img_url, use_container_width=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+        else:
+            # Fallback if bucket is empty or unreachable
+            st.markdown("<h1 style='color: #0F4C81;'>🏛️ VB-G RAM G Convergence Portal</h1>", unsafe_allow_html=True)
+            st.info("Loading portal graphics... Please ensure your Supabase 'Images' bucket is public.")
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            
+        # Render PDF Download Button
+        if assets["pdf_bytes"]:
+            st.download_button(
+                label="📥 Download VB-G RAM G Guidelines & Framework (PDF)",
+                data=assets["pdf_bytes"],
+                file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
+                mime="application/pdf",
+                type="secondary",
+                use_container_width=True
+            )
+        else:
+            st.info("📌 Convergence Guidelines PDF will be available here once loaded.")
 
+    # ---------- RIGHT COLUMN: SECURE LOGIN FORM ----------
     with col_right:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         
@@ -158,7 +212,6 @@ def check_password():
                                 st.error("🚫 Account deactivated.")
                             else:
                                 # --- AUTOMATIC SESSION OVERWRITE (Last Login Wins) ---
-                                # Automatically override any ghost sessions left from closed browsers
                                 new_session_token = str(uuid.uuid4())
                                 supabase.table("users").update({
                                     "current_session_token": new_session_token
