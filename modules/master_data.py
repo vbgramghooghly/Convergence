@@ -45,10 +45,7 @@ def inject_tab_css():
 def show():
     require_role('superadmin')
     inject_tab_css()
-    
-    st.markdown("<h1 style='color: #1F77B4;'>⚙️ Master Data Management</h1>", unsafe_allow_html=True)
-    st.markdown("---")
-
+     
     supabase = get_supabase()
 
     # Pre-fetch master data to reduce repetitive API calls
