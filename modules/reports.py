@@ -394,3 +394,13 @@ def show():
             height=0,
         )
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # ---- Display Requested Global Footer Text ----
+    st.markdown(
+        """
+        <div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>
+            Hooghly District Administration || District VB GRAM G Cell || Mail : nodal.hooghly@gmail.com
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
