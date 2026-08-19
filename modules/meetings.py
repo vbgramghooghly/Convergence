@@ -312,7 +312,7 @@ def show():
         display_persisted_msg() # Show any success/error messages
         
         # 🔥 NEW: Yearly Meeting Calendar
-        st.markdown("# 🗓️ Yearly Meeting Calendar (Scheduled & Completed)")
+        st.markdown("#### 🗓️ Yearly Meeting Calendar")
         if not df_meetings.empty:
             calendar_df = df_meetings.copy()
             calendar_df['Meeting Location'] = calendar_df.apply(format_meeting_label, axis=1)
@@ -355,8 +355,7 @@ def show():
     if tab_sched:
         with tab_sched:
             st.markdown("#### 🗓️ Schedule Convergence Committee Meeting")
-            st.caption("Mixed-Mode: Invite specific officials if registered, or generally invite the Department/Wing.")
-
+            
             col_m1, col_m2, col_m3 = st.columns(3)
             meeting_type = col_m1.radio("Meeting Tier", ["District", "Block"], horizontal=True) if role in ["superadmin", "district"] else "Block"
             col_m2.text_input("Financial Year", value=active_fy, disabled=True)
@@ -782,7 +781,7 @@ def show():
     # --------------------------------------------------------------
     if tab_tracker:
         with tab_tracker:
-            st.markdown("#### 🎯 Resolution Tracker & Action Taken Reports (ATR)")
+            st.markdown("#### 🎯 Resolution Tracker")
             display_persisted_msg()
 
             if df_ap.empty:
@@ -1038,9 +1037,7 @@ def show():
     # --------------------------------------------------------------
     if tab_print:
         with tab_print:
-            st.markdown("#### 🖨️ Meeting Print Centre")
-            st.caption("Select a meeting and the document type. The system generates an immediate preview and opens your browser's native print dialog.")
-
+           
             if df_meetings.empty:
                 st.info("No meetings available for printing.")
             else:
