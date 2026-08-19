@@ -171,7 +171,7 @@ def check_password():
         st.markdown("<br>", unsafe_allow_html=True)
         
         img1_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/fa60c42a-2c6c-48be-a571-67aa4c5c7b34.png"
-        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
+        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2.png"
         
         try:
             st.markdown(f'<div class="banner-card"><img src="{img1_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
@@ -201,7 +201,7 @@ def check_password():
             st.markdown('<p class="login-header">🔐 Portal Sign In</p>', unsafe_allow_html=True)
             st.markdown('<p class="login-subheader">Enter your authorized credentials to continue.</p>', unsafe_allow_html=True)
             
-            username = st.text_input("Username / Email", placeholder="e.g. admin or email@hooghly.gov.in")
+            username = st.text_input("Username", placeholder="e.g. admin ")
             password = st.text_input("Password", type="password", placeholder="••••••••")
 
             # ---------- CAPTCHA ----------
