@@ -110,7 +110,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1: REDESIGNED UI =================
+    # ================= TAB 1: REDESIGNED (Removed optional remarks) =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -178,7 +178,7 @@ def show():
                         dist_sel = col3.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                    # Project Head in its own row (compact)
+                    # Project Head in its own row
                     PROJECT_HEAD_OPTIONS = [
                         "Canals, Check Dams & Dykes",
                         "Ponds & Water Harvesting",
@@ -210,7 +210,7 @@ def show():
                     ]
                     selected_theme_name = st.selectbox("Convergence Project Head*", PROJECT_HEAD_OPTIONS)
 
-                    # ---- CARD 2: ANNUAL PLAN & CONVERGENCE (compact) ----
+                    # ---- CARD 2: ANNUAL PLAN & CONVERGENCE (compact, remarks removed) ----
                     with st.container(border=True):
                         st.markdown("##### Annual Plan & Convergence")
                         col_scope, col_scheme = st.columns([1, 2])
@@ -241,11 +241,7 @@ def show():
                                     options=status_options,
                                     key="annual_plan_status_target"
                                 )
-                                scheme_remarks = st.text_area(
-                                    "Departmental Scheme / Annual Plan Remarks (Optional)",
-                                    key="scheme_remarks_target",
-                                    height=70
-                                )
+                                # REMOVED: Departmental Scheme / Annual Plan Remarks (Optional)
 
                     # ---- CARD 3: BLOCK-WISE TARGET ENTRIES (LARGE) ----
                     st.markdown("---")
@@ -259,7 +255,7 @@ def show():
                     block_options = {b['block_name']: b['id'] for b in dist_blocks}
                     block_names = list(block_options.keys())
 
-                    # Get activities for the department (filtered by dept, not theme)
+                    # Get activities for the department
                     valid_activity_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == active_dept_id]
                     valid_activities = [a for a in activities if a['id'] in valid_activity_ids]
                     activity_options = {a['activity_name']: a['id'] for a in valid_activities}
@@ -311,7 +307,7 @@ def show():
                         df_editor,
                         use_container_width=True,
                         num_rows="dynamic",
-                        height=450,  # 👈 GIVES LARGE SPACE TO THE TABLE
+                        height=450,
                         column_config={
                             "Block": st.column_config.SelectboxColumn(
                                 "Block*",
@@ -351,9 +347,9 @@ def show():
                         hide_index=True
                     )
 
-                    # ---- SAVE BUTTON (prominent) ----
+                    # ---- SAVE BUTTON ----
                     if st.button("💾 Save All Targets", type="primary", use_container_width=True):
-                        # ---- LOGIC COMPLETELY UNCHANGED ----
+                        # ---- LOGIC COMPLETELY UNCHANGED (except remarks removed) ----
                         errors = []
                         if not active_dept_id or not dist_id:
                             errors.append("Invalid Department or District.")
@@ -419,7 +415,7 @@ def show():
                                     "department_scheme_convergence": conv_choice == "Yes",
                                     "department_scheme_name": scheme_name.strip() if scheme_name else None,
                                     "department_annual_plan_status": annual_plan_status,
-                                    "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
+                                    "department_scheme_remarks": None,  # Removed – always NULL
                                 }
                                 try:
                                     supabase.table("department_targets").insert(target_record).execute()
