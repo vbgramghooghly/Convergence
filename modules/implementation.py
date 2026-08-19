@@ -873,8 +873,6 @@ def show():
 
     # ================= TAB 4 =================
     with tab4:
-        st.markdown("#### 🚨 Departmental Target Compliance Tracker")
-
         q_t = supabase.table("department_targets").select("*")
         q_r = supabase.table("convergence_register").select("*")
 
