@@ -100,6 +100,26 @@ def check_password():
             }
             .block-container { padding-top: 2rem !important; padding-bottom: 2rem !important; max-width: 95% !important; }
             
+            /* Balanced Glass Cards for Graphics */
+            .banner-card {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.5);
+                border-radius: 12px;
+                padding: 12px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+                margin-bottom: 14px;
+                text-align: center;
+            }
+            .banner-card img {
+                max-width: 100% !important;
+                height: auto !important;
+                object-fit: contain;
+                margin: 0 auto;
+                display: block;
+                border-radius: 8px;
+            }
+            
             /* Clean Form Container */
             [data-testid="stForm"] {
                 background: #FFFFFF !important;
@@ -148,7 +168,7 @@ def check_password():
 
     col_left, col_right = st.columns([1.3, 1], gap="large")
 
-    # ---------- LEFT COLUMN: NORMAL-SIZED IMAGES & PDF ----------
+    # ---------- LEFT COLUMN: BANNER IMAGES & PDF ----------
     with col_left:
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -156,10 +176,8 @@ def check_password():
         img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
         
         try:
-            # Using width=450 for clean, standard resolution sizing
-            st.image(img1_url, width=450)
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.image(img2_url, width=450)
+            st.markdown(f'<div class="banner-card"><img src="{img1_url}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="banner-card"><img src="{img2_url}"></div>', unsafe_allow_html=True)
         except Exception:
             st.error("⚠️ Could not load graphics from Supabase.")
             
@@ -174,7 +192,7 @@ def check_password():
                 file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
                 mime="application/pdf",
                 type="secondary",
-                use_container_width=False
+                use_container_width=True
             )
 
     # ---------- RIGHT COLUMN: CLEAN LOGIN FORM ----------
