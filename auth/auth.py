@@ -1,42 +1,20 @@
 import uuid
+import requests
 import streamlit as st
 from utils.db import get_supabase
 
-# ---------- BUCKET ASSET FETCHER ----------
+# ---------- PDF ASSET FETCHER ----------
 @st.cache_data(ttl=3600)
-def fetch_bucket_assets():
-    """Dynamically fetches images and PDF from the Supabase 'Images' bucket."""
+def fetch_pdf_bytes():
+    """Fetches the PDF as bytes directly from the Supabase public URL for the download button."""
     try:
-        supabase = get_supabase()
-        files = supabase.storage.from_("Images").list()
-        
-        pdf_file = None
-        img_files = []
-        
-        for f in files:
-            name = f.get('name', '')
-            # Identify the PDF
-            if name.lower().endswith('.pdf'):
-                pdf_file = name
-            # Identify Images
-            elif name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                img_files.append(name)
-        
-        # Sort images alphabetically (this naturally puts 'b18...' before 'fa6...')
-        img_files.sort()
-        
-        # Get Public URLs for the images
-        img_urls = [supabase.storage.from_("Images").get_public_url(img) for img in img_files]
-        
-        # Download the PDF as bytes for the download button
-        pdf_bytes = None
-        if pdf_file:
-            pdf_bytes = supabase.storage.from_("Images").download(pdf_file)
-            
-        return {"images": img_urls, "pdf_bytes": pdf_bytes, "pdf_name": pdf_file}
-        
-    except Exception as e:
-        return {"images": [], "pdf_bytes": None, "pdf_name": None}
+        url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/CONVERGENCE_FINAL_compressed.pdf"
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.content
+    except Exception:
+        return None
+    return None
 
 # ---------- CAPTCHA ----------
 def get_captcha():
@@ -62,6 +40,7 @@ def get_captcha():
 def clear_captcha():
     if "captcha" in st.session_state:
         del st.session_state.captcha
+
 
 # ---------- SESSION VALIDATOR ----------
 def check_active_session():
@@ -94,6 +73,7 @@ def check_active_session():
         return True
     except Exception:
         return False
+
 
 # ---------- AUTHENTICATION ----------
 def check_password():
@@ -130,32 +110,32 @@ def check_password():
     with col_left:
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Fetch assets dynamically from the "Images" bucket
-        assets = fetch_bucket_assets()
+        # 1. Render Specific Images from Direct Supabase URLs
+        img1_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
+        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/fa60c42a-2c6c-48be-a571-67aa4c5c7b34.png"
         
-        # Render Images
-        if assets["images"]:
-            for img_url in assets["images"]:
-                st.image(img_url, use_container_width=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-        else:
-            # Fallback if bucket is empty or unreachable
-            st.markdown("<h1 style='color: #0F4C81;'>🏛️ VB-G RAM G Convergence Portal</h1>", unsafe_allow_html=True)
-            st.info("Loading portal graphics... Please ensure your Supabase 'Images' bucket is public.")
-            st.markdown("<br><br>", unsafe_allow_html=True)
+        try:
+            st.image(img1_url, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.image(img2_url, use_container_width=True)
+        except Exception:
+            st.error("⚠️ Could not load graphics. Please ensure the Supabase URLs are accessible.")
             
-        # Render PDF Download Button
-        if assets["pdf_bytes"]:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+            
+        # 2. Render PDF Download Button
+        pdf_bytes = fetch_pdf_bytes()
+        if pdf_bytes:
             st.download_button(
                 label="📥 Download VB-G RAM G Guidelines & Framework (PDF)",
-                data=assets["pdf_bytes"],
+                data=pdf_bytes,
                 file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
                 mime="application/pdf",
                 type="secondary",
                 use_container_width=True
             )
         else:
-            st.info("📌 Convergence Guidelines PDF will be available here once loaded.")
+            st.info("📌 Convergence Guidelines PDF is currently unavailable.")
 
     # ---------- RIGHT COLUMN: SECURE LOGIN FORM ----------
     with col_right:
