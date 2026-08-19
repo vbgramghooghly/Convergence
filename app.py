@@ -433,7 +433,7 @@ def show_home():
 
     # ---- Quick Reference Guide (Now executed regardless of the above data) ----
     st.markdown("---")
-    st.markdown("#### 📌 Quick Reference Guide")
+    st.markdown("#### 📌 Quick Reference")
     col_dep, col_block, col_dist, col_error = st.columns(4)
 
     with col_dep:
