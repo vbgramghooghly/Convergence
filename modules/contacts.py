@@ -79,10 +79,15 @@ def show():
     df = pd.DataFrame(contacts_data) if contacts_data else pd.DataFrame()
 
     if not df.empty:
+        # 🔥 FIXED: Convert SQL null values to string "None" before counting metrics
+        df['district_committee_role'] = df['district_committee_role'].fillna('None')
+        df['block_committee_role'] = df['block_committee_role'].fillna('None')
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Officials Mapped", len(df))
         c2.metric("District Level", len(df[df['office_level'] == 'District']))
         c3.metric("Block Level", len(df[df['office_level'] == 'Block']))
+        # Now this correctly counts only those with active roles
         c4.metric("Committee Members", len(df[(df['district_committee_role'] != 'None') | (df['block_committee_role'] != 'None')]))
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -196,7 +201,7 @@ def show():
                     except Exception as e: st.error(f"Error deleting contact: {e}")
 
         # =================================================
-        # 🔥 FIX: DEPT & WING DROPDOWNS ARE NOW OUTSIDE THE FORM TO DYNAMICALLY UPDATE
+        # DYNAMIC DEPT & WING DROPDOWN CHAINING
         # =================================================
         st.markdown("##### 2. Department & Level Hierarchy")
         col_l1, col_l2, col_l3 = st.columns([1, 1, 1])
@@ -326,8 +331,8 @@ def show():
                     payload = {
                         "full_name": name,
                         "designation_id": desig_dict.get(sel_desig),
-                        "department_id": selected_parent_id,  # Passed from outer scope
-                        "wing_id": selected_wing_id,         # Passed from outer scope
+                        "department_id": selected_parent_id,
+                        "wing_id": selected_wing_id,
                         "office_level": sel_lvl,
                         "sub_division": sub_div_val if sub_div_val.strip() else None,
                         "contact_number": contact_no,
