@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import io
-import re  # used for compliance matching
+import re
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
@@ -77,7 +77,6 @@ def show():
     dist_map = {d['id']: d['district_name'] for d in districts}
     block_map = {b['id']: b['block_name'] for b in blocks}
     block_name_to_id = {b['block_name']: b['id'] for b in blocks}
-    # Build department -> wings mapping for dynamic wing dropdown
     dept_to_wings = {}
     for w in wings:
         dept_to_wings.setdefault(w['department_id'], []).append(w)
@@ -97,7 +96,6 @@ def show():
             active_fy_id = f['id']
             break
 
-    # ---------- TABS DEFINITION (FIX: missing tabs) ----------
     tab1, tab2, tab3, tab4 = st.tabs([
         "🎯 Department Targets (Planning)", 
         "🏗️ Implementation Progress (Execution)", 
@@ -105,7 +103,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1 =================
+    # ================= TAB 1 (unchanged) =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -337,7 +335,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 =================
+    # ================= TAB 2 (MODIFIED LAYOUT) =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -351,12 +349,11 @@ def show():
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
+            # -------- Filters (unchanged) --------
             col_dept, col_wing, col_block, col_gp = st.columns(4)
-
             dept_options_all = [{"id": d['id'], "name": d['department_name']} for d in departments]
             dept_names = ["All"] + [d['name'] for d in dept_options_all]
             dept_id_map = {d['name']: d['id'] for d in dept_options_all}
-
             dept_frozen = (role == 'department')
             if dept_frozen:
                 default_dept_name = dept_map.get(user.get('department_id'), '')
@@ -365,13 +362,11 @@ def show():
             else:
                 sel_dept_name = col_dept.selectbox("Department", dept_names)
                 sel_dept_id = dept_id_map.get(sel_dept_name) if sel_dept_name != "All" else None
-
             if sel_dept_id:
                 dept_wings = dept_to_wings.get(sel_dept_id, [])
                 wing_names = ["All"] + [w['wing_name'] for w in dept_wings]
             else:
                 wing_names = ["All"]
-
             if dept_frozen:
                 default_wing_name = wing_map.get(user.get('wing_id'), {}).get('wing_name', '') if user.get('wing_id') else ''
                 if default_wing_name and default_wing_name in wing_names:
@@ -392,10 +387,8 @@ def show():
                 district_blocks = [b for b in blocks if b['district_id'] == user['district_id']]
             else:
                 district_blocks = blocks
-
             block_names_all = ["All"] + sorted([b['block_name'] for b in district_blocks])
             block_id_from_name = {b['block_name']: b['id'] for b in district_blocks}
-
             if role == 'block':
                 user_block_name = block_map.get(user.get('block_id'), '')
                 if user_block_name and user_block_name in block_names_all:
@@ -462,6 +455,8 @@ def show():
                     with col_p_left:
                         st.markdown("##### 📝 Update Progress Status")
                         with st.form("update_progress_form"):
+                            # -------- Row 1: New Status & MIS Code --------
+                            col_status, col_mis = st.columns(2)
                             status_options = [
                                 "Planned",
                                 "Approved",
@@ -486,12 +481,20 @@ def show():
                             if current_status not in status_options:
                                 current_status = "Planned"
                             default_index = status_options.index(current_status) if current_status in status_options else 0
-                            new_status = st.selectbox("New Status*", status_options, index=default_index)
+                            new_status = col_status.selectbox("New Status*", status_options, index=default_index)
 
+                            mis_code_val = col_mis.text_input(
+                                "MIS Code (Mandatory if Active/Done)",
+                                value=selected_act.get('mis_code', '') or '',
+                                placeholder="e.g. 3206002005/FP/VB/320201060600000"
+                            )
+
+                            # -------- Row 2: PIA & Convergence Type --------
+                            col_pia, col_conv = st.columns(2)
                             is_editable = role in ['superadmin', 'district']
                             curr_pia = selected_act.get("pia_type", "Select PIA")
                             pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
-                            pia_type_sel = st.selectbox(
+                            pia_type_sel = col_pia.selectbox(
                                 "Implementing Agency (PIA)*",
                                 PIA_OPTIONS,
                                 index=pia_index,
@@ -500,36 +503,82 @@ def show():
 
                             curr_conv = selected_act.get("convergence_type", CONVERGENCE_TYPES[0])
                             conv_index = CONVERGENCE_TYPES.index(curr_conv) if curr_conv in CONVERGENCE_TYPES else 0
-                            new_conv_type = st.selectbox(
+                            new_conv_type = col_conv.selectbox(
                                 "Type of Convergence*",
                                 CONVERGENCE_TYPES,
                                 index=conv_index,
                                 disabled=not is_editable
                             )
 
-                            phys_ach = st.slider("Physical Achievement (%)*", min_value=0, max_value=100, value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0)))
+                            # -------- Row 3: Physical Achievement slider --------
+                            phys_ach = st.slider(
+                                "Physical Achievement (%)*",
+                                min_value=0, max_value=100,
+                                value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0))
+                            )
 
+                            # -------- Row 4: Financials & MIS Registration --------
                             st.markdown("##### 💰 Financials & MIS Registration")
                             col_p3, col_p4 = st.columns(2)
-                            mis_code_val = col_p3.text_input("MIS Code (Mandatory if Active/Done)", value=selected_act.get('mis_code', '') or '')
-                            fin_ach = col_p4.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_act.get('financial_achievement', 0.0) or 0.0))
+                            fin_ach = col_p3.number_input(
+                                "Financial Achievement (₹ Lakhs)",
+                                min_value=0.0,
+                                value=float(selected_act.get('financial_achievement', 0.0) or 0.0)
+                            )
 
+                            # Sanction fields in columns
                             col_s1, col_s2, col_s3 = st.columns(3)
-                            sanction_wages = col_s1.number_input("Sanction Wages (₹)", min_value=0, value=int(selected_act.get('sanction_wages', 0) or 0), step=1000)
-                            sanction_material = col_s2.number_input("Sanction Material (₹)", min_value=0, value=int(selected_act.get('sanction_material', 0) or 0), step=1000)
+                            sanction_wages = col_s1.number_input(
+                                "Sanction Wages (₹)",
+                                min_value=0,
+                                value=int(selected_act.get('sanction_wages', 0) or 0),
+                                step=1000
+                            )
+                            sanction_material = col_s2.number_input(
+                                "Sanction Material (₹)",
+                                min_value=0,
+                                value=int(selected_act.get('sanction_material', 0) or 0),
+                                step=1000
+                            )
                             total_sanction = sanction_wages + sanction_material
                             col_s3.text_input("Total Sanction (₹)", value=f"{total_sanction:,}", disabled=True)
 
-                            current_fy_mandays = st.number_input("Mandays Generated (Current FY)", min_value=0, value=int(selected_act.get('current_fy_mandays', 0) or 0))
-                            persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_act.get('persondays_generated', 0) or 0))
+                            # -------- Row 5: Mandays (Current FY) & Persondays (Cumulative) --------
+                            col_mandays, col_persondays = st.columns(2)
+                            current_fy_mandays = col_mandays.number_input(
+                                "Mandays Generated (Current FY)",
+                                min_value=0,
+                                value=int(selected_act.get('current_fy_mandays', 0) or 0)
+                            )
+                            persondays_gen = col_persondays.number_input(
+                                "Persondays Generated (Cumulative)",
+                                min_value=0,
+                                value=int(selected_act.get('persondays_generated', 0) or 0)
+                            )
 
+                            # -------- Row 6: Schedule & Blockages --------
                             st.markdown("##### 📅 Schedule & Blockages")
                             col_p5, col_p6, col_p7 = st.columns(3)
-                            start_date = col_p5.date_input("Actual Start", value=safe_parse_date(selected_act.get('actual_start_date')))
-                            exp_date = col_p6.date_input("Expected End", value=safe_parse_date(selected_act.get('expected_completion_date')))
-                            act_date = col_p7.date_input("Actual End", value=safe_parse_date(selected_act.get('actual_completion_date')))
-                            remarks = st.text_area("Remarks / Blockage Details", value=selected_act.get('remarks', '') or '')
+                            start_date = col_p5.date_input(
+                                "Actual Start",
+                                value=safe_parse_date(selected_act.get('actual_start_date'))
+                            )
+                            exp_date = col_p6.date_input(
+                                "Expected End",
+                                value=safe_parse_date(selected_act.get('expected_completion_date'))
+                            )
+                            act_date = col_p7.date_input(
+                                "Actual End",
+                                value=safe_parse_date(selected_act.get('actual_completion_date'))
+                            )
 
+                            # -------- Row 7: Remarks --------
+                            remarks = st.text_area(
+                                "Remarks / Blockage Details",
+                                value=selected_act.get('remarks', '') or ''
+                            )
+
+                            # -------- Submit button --------
                             if st.form_submit_button("Commit Progress Update", type="primary", use_container_width=True):
                                 mis_required = new_status not in ["Planned", "Delayed", "Dropped"]
                                 if mis_required and not mis_code_val.strip():
@@ -595,7 +644,7 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3 =================
+    # ================= TAB 3 (unchanged) =================
     with tab3:
         st.markdown("#### 🤝 Synchronized Departmental Meeting Commitments")
         st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
@@ -680,7 +729,7 @@ def show():
         else:
             st.info("No resolution records found in the global governance system.")
 
-    # ================= TAB 4 (FIXED: robust matching) =================
+    # ================= TAB 4 (unchanged) =================
     with tab4:
         st.markdown("#### 🚨 Departmental Target Compliance Tracker")
 
@@ -733,12 +782,10 @@ def show():
                 if not df_tab4_reg.empty:
                     dept_reg = df_tab4_reg[df_tab4_reg['department_id'] == d_id]
                     if 'activity_description' in dept_reg.columns:
-                        # ---- ROBUST KEYWORD MATCHING ----
                         def is_match(work_desc):
                             work_lower = str(work_desc).lower()
                             return all(word in work_lower for word in ['construction', 'kitchen', 'shed'])
                         entered_count = dept_reg['activity_description'].apply(is_match).sum()
-                        # ---------------------------------
 
                 gap = entered_count - target_val
                 status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
