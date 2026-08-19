@@ -3,7 +3,7 @@ import pandas as pd
 import uuid
 import streamlit.components.v1 as components
 from utils.db import get_supabase
-from auth.auth import logout, get_current_user
+from auth.auth import get_current_user
 
 # ============================================================
 # HELPER FUNCTIONS (self-contained, with safe checks)
@@ -45,7 +45,6 @@ def build_maps(data):
 
 def get_filtered_records(supabase, role, user):
     """Fetch convergence records filtered by user's role (district/block/department)."""
-    # Ensure user is a dictionary; if not, return empty list
     if not isinstance(user, dict):
         return []
 
@@ -166,7 +165,7 @@ def show():
         df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
     # -------------------- CONVERGENCE REGISTER INTEGRATION --------------------
-    # Safely get user dict
+    # Get user dict safely
     user = get_current_user() if st.session_state.get('authenticated') else {}
     if not isinstance(user, dict):
         user = {}
@@ -326,7 +325,6 @@ def show():
             st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
             conv_row = selected_opt.get('row')
             if conv_row is not None:
-                # Safely get district and block names from maps
                 dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A')
                 block_name = maps.get('block_reverse', {}).get(conv_row.get('block_id'), 'N/A')
                 st.caption(f"📍 **District:** {dist_name} | **Block:** {block_name}")
@@ -584,13 +582,6 @@ def show():
                     }).execute()
                     st.toast("Template saved!")
                     st.rerun()
-
-    # ---------- LOGOUT ----------
-    if st.session_state.get('authenticated'):
-        st.markdown("---")
-        if st.button("🔒 Logout", use_container_width=True):
-            logout()
-
 
     # ============================================================
     # HELPER FUNCTIONS (defined inside show to capture dataframes)
