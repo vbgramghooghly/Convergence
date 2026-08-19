@@ -56,10 +56,10 @@ def fetch_master_data():
         act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
         fys = supabase.table("financial_years").select("*").eq("active", True).execute().data or []
         users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
-        return departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data
+        themes = supabase.table("themes").select("id,theme_name").eq("active", True).execute().data or []
+        return departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data, themes
     except Exception:
-        # Return empty lists to avoid unpacking errors
-        return [], [], [], [], [], [], [], []
+        return [], [], [], [], [], [], [], [], []
 
 def safe_parse_date(date_val):
     if pd.isna(date_val) or not date_val:
@@ -77,7 +77,7 @@ def show():
     role = user['role']
     supabase = get_supabase()
     
-    departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data = fetch_master_data()
+    departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data, themes = fetch_master_data()
     
     dept_map = {d['id']: d['department_name'] for d in departments}
     wing_map = {w['id']: w for w in wings}
@@ -110,7 +110,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1: TARGETS (with block selector) =================
+    # ================= TAB 1: BLOCK‑WISE TARGET FORM =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -136,13 +136,14 @@ def show():
         col_t1, col_t2 = st.columns([1.6, 1], gap="large")
         
         with col_t2:
-            st.markdown("#### 📝 Add / Update Target")
+            st.markdown("#### 📝 Add / Update Block‑wise Targets")
             if role == 'block':
                 st.info("Target setting is managed at the District/Department level.")
             else:
                 with st.container(border=True):
-                    active_dept_id, active_wing_id, dist_id, active_block_id = None, None, None, None
+                    active_dept_id, active_wing_id, dist_id = None, None, None
                     
+                    # ---- Common Fields ----
                     selected_fy_target_id = st.selectbox(
                         "Financial Year*",
                         options=list(fy_id_to_name.keys()),
@@ -162,10 +163,7 @@ def show():
                         dist_sel = list(t_dist_dict.keys())[0] if t_dist_dict else None
                         dist_id = user.get('district_id')
                         st.markdown(f"<span style='color:#64748B; font-size:12px;'>DISTRICT</span><br>**{dist_sel}**<br><br>", unsafe_allow_html=True)
-                        # For department users, block is not applicable (targets are district‑wide)
-                        active_block_id = None
                     else:
-                        # Superadmin or District: show full department/wing and block dropdown
                         dept_options = [{"label": f"{d['department_name']} (Main Department)", "dept_id": d['id'], "wing_id": None} for d in departments]
                         for w in wings:
                             p_name = dept_map.get(w['department_id'], "Unknown Department")
@@ -178,172 +176,238 @@ def show():
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                        # ---- Block selector (for block‑wise targets) ----
-                        if dist_id:
-                            dist_blocks = [b for b in blocks if b['district_id'] == dist_id]
-                        else:
-                            dist_blocks = blocks
-                        block_names = ["All Blocks (District Level)"] + sorted([b['block_name'] for b in dist_blocks])
-                        block_selected = st.selectbox("Block (optional, leave 'All' for district‑wide target)", block_names)
-                        if block_selected != "All Blocks (District Level)":
-                            active_block_id = block_name_to_id.get(block_selected)
-                        else:
-                            active_block_id = None
+                    # Project Head (Theme)
+                    theme_options = ["Select Theme"] + [t['theme_name'] for t in themes]
+                    theme_id_map = {t['theme_name']: t['id'] for t in themes}
+                    selected_theme_name = st.selectbox("Convergence Project Head*", theme_options)
+                    selected_theme_id = theme_id_map.get(selected_theme_name) if selected_theme_name != "Select Theme" else None
 
-                    project_head_options = [
-                        "AWC (Anganwadi Center)", "Plantation", "Water Conservation & Harvesting",
-                        "Solid/Liquid Waste Management", "Rural Infrastructure", "Livelihood & Agriculture", "Other (Specify Custom)"
-                    ]
-                    ph_sel = st.selectbox("Convergence Project Head*", project_head_options)
-                    project_head = st.text_input("Type Custom Project Head Name*") if ph_sel == "Other (Specify Custom)" else ph_sel
-
-                    mapped_act_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == active_dept_id]
-                    valid_activities = [a for a in activities if a['id'] in mapped_act_ids]
-                    valid_act_names = [a['activity_name'] for a in valid_activities]
-                    
-                    if not valid_act_names:
-                        st.warning("No approved activities mapped to this parent department.")
-                        activity = st.selectbox("Approved Activity / Work Category*", ["No activities available"], disabled=True)
-                    else:
-                        activity = st.selectbox("Approved Activity / Work Category*", valid_act_names)
-
-                    col_tf1, col_tf2 = st.columns(2)
-                    desired_target = col_tf1.number_input("Desired Target (FY)*", min_value=1, value=1)
-                    asset_count = col_tf2.number_input("Number of assets/works", min_value=0, value=0)
-                    
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
 
+                    # Scheme Convergence section (common)
                     st.markdown("##### Departmental Scheme / Fund Convergence")
-                    
-                    existing_record = None
-                    # Build query with block_id if set
-                    if active_dept_id and dist_id and activity and activity != "No activities available":
-                        q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
-                        if active_wing_id:
-                            q_check = q_check.eq("wing_id", active_wing_id)
-                        else:
-                            q_check = q_check.is_("wing_id", "null")
-                        if active_block_id:
-                            q_check = q_check.eq("block_id", active_block_id)
-                        else:
-                            q_check = q_check.is_("block_id", "null")
-                        
-                        exec_result = q_check.execute()
-                        existing_records = exec_result.data if exec_result else []
-                        
-                        if existing_records:
-                            existing_record = existing_records[0]
-
-                    if existing_record:
-                        default_convergence = existing_record.get("department_scheme_convergence", False)
-                        default_scheme_name = existing_record.get("department_scheme_name", "")
-                        default_annual_plan_status = existing_record.get("department_annual_plan_status", "Not Confirmed")
-                        default_scheme_remarks = existing_record.get("department_scheme_remarks", "")
-                    else:
-                        default_convergence = False
-                        default_scheme_name = ""
-                        default_annual_plan_status = "Not Confirmed"
-                        default_scheme_remarks = ""
-
                     conv_choice = st.radio(
                         "Convergence with Own Departmental Scheme / Fund?",
                         options=["No", "Yes"],
-                        index=0 if not default_convergence else 1,
                         key="conv_choice_target"
                     )
                     scheme_name = ""
                     if conv_choice == "Yes":
                         scheme_name = st.text_input(
                             "Name of Departmental Scheme / Fund *",
-                            value=default_scheme_name,
                             key="scheme_name_target"
                         )
                     status_options = ["Yes", "No", "Not Confirmed"]
-                    if default_annual_plan_status not in status_options:
-                        default_annual_plan_status = "Not Confirmed"
-                    default_index = status_options.index(default_annual_plan_status)
                     annual_plan_status = st.selectbox(
                         "Included in Department's Own Annual Plan?",
                         options=status_options,
-                        index=default_index,
                         key="annual_plan_status_target"
                     )
                     scheme_remarks = st.text_area(
                         "Departmental Scheme / Annual Plan Remarks (Optional)",
-                        value=default_scheme_remarks,
                         key="scheme_remarks_target"
                     )
 
-                    col_tf3, col_tf4 = st.columns(2)
-                    dept_fund = col_tf3.number_input("Dept Fund (₹ Lakhs)", min_value=0.0, format="%.2f")
-                    vbg_fund = col_tf4.number_input("VB-G Fund (₹ Lakhs)", min_value=0.0, format="%.2f")
-                    expected_persondays = st.number_input("Expected Persondays*", min_value=0, value=0)
+                    # ---- Dynamic Table for Block‑wise Targets ----
+                    st.markdown("---")
+                    st.markdown("#### 📋 Block‑wise Target Entries")
 
-                    if st.button("Save Target Record", type="primary", use_container_width=True):
-                        if not active_dept_id or not dist_id:
-                            st.error("Invalid Department or District.")
-                        elif not project_head or not project_head.strip():
-                            st.error("Project Head name cannot be empty.")
-                        elif activity == "No activities available":
-                            st.error("Cannot save target without a valid approved activity.")
-                        elif expected_persondays <= 0:
-                            st.error("Expected Persondays is a mandatory field.")
-                        elif conv_choice == "Yes" and not scheme_name.strip():
-                            st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
+                    # Get blocks for the district
+                    if dist_id:
+                        dist_blocks = [b for b in blocks if b['district_id'] == dist_id]
+                    else:
+                        dist_blocks = blocks
+                    block_options = {b['block_name']: b['id'] for b in dist_blocks}
+                    block_names = list(block_options.keys())
+
+                    # Get activities for the department and theme
+                    valid_activity_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == active_dept_id]
+                    valid_activities = [a for a in activities if a['id'] in valid_activity_ids]
+                    if selected_theme_id:
+                        valid_activities = [a for a in valid_activities if a.get('theme_id') == selected_theme_id]
+                    activity_options = {a['activity_name']: a['id'] for a in valid_activities}
+                    activity_names = list(activity_options.keys())
+
+                    # Fetch existing targets for this combination
+                    existing_targets = []
+                    if active_dept_id and dist_id and selected_fy_target_id:
+                        q_existing = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id)
+                        if active_wing_id:
+                            q_existing = q_existing.eq("wing_id", active_wing_id)
                         else:
-                            target_record = {
-                                "department_id": active_dept_id,
-                                "wing_id": active_wing_id,
-                                "district_id": dist_id,
-                                "block_id": active_block_id,  # NEW: block‑wise target
-                                "financial_year_id": selected_fy_target_id,
-                                "financial_year": selected_fy_year,
-                                "project_head": project_head.strip(),
-                                "activity": activity,
-                                "asset_count": asset_count,
-                                "annual_plan_scope": annual_plan_scope,
-                                "desired_target": desired_target,
-                                "department_fund": dept_fund,
-                                "vbgramg_fund": vbg_fund,
-                                "expected_persondays": expected_persondays,
-                                "created_by": user['id'],
-                                "department_scheme_convergence": conv_choice == "Yes",
-                                "department_scheme_name": scheme_name.strip() if scheme_name else None,
-                                "department_annual_plan_status": annual_plan_status,
-                                "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
-                            }
+                            q_existing = q_existing.is_("wing_id", "null")
+                        if selected_theme_id:
+                            # We need to join with activities to filter by theme? Or we can filter later.
+                            pass
+                        existing_targets = q_existing.execute().data or []
+
+                    # Create a DataFrame for the data editor
+                    if existing_targets:
+                        # Pre‑populate with existing targets
+                        rows = []
+                        for t in existing_targets:
+                            # We need to find the activity name
+                            act_id = t.get('activity')
+                            # activity is the activity name stored as text? Actually it's stored as activity name (string) in department_targets.
+                            act_name = t.get('activity', '')
+                            block_id = t.get('block_id')
+                            block_name = block_map.get(block_id, '')
+                            if not block_name:
+                                # If block_id is NULL, this is a district‑wide target; we'll skip or treat as "All Blocks"
+                                continue
+                            rows.append({
+                                "Block": block_name,
+                                "Approved Activity": act_name,
+                                "Desired Target": t.get('desired_target', 0),
+                                "Dept Fund (₹ Lakhs)": float(t.get('department_fund', 0.0)),
+                                "VB-G Fund (₹ Lakhs)": float(t.get('vbgramg_fund', 0.0)),
+                                "Expected Persondays": t.get('expected_persondays', 0)
+                            })
+                        df_editor = pd.DataFrame(rows)
+                    else:
+                        # Empty table with one row as placeholder
+                        df_editor = pd.DataFrame({
+                            "Block": [""],
+                            "Approved Activity": [""],
+                            "Desired Target": [1],
+                            "Dept Fund (₹ Lakhs)": [0.0],
+                            "VB-G Fund (₹ Lakhs)": [0.0],
+                            "Expected Persondays": [0]
+                        })
+
+                    # Use data_editor with dynamic rows
+                    edited_df = st.data_editor(
+                        df_editor,
+                        use_container_width=True,
+                        num_rows="dynamic",
+                        column_config={
+                            "Block": st.column_config.SelectboxColumn(
+                                "Block",
+                                options=block_names,
+                                required=True
+                            ),
+                            "Approved Activity": st.column_config.SelectboxColumn(
+                                "Approved Activity / Work Category*",
+                                options=activity_names,
+                                required=True
+                            ),
+                            "Desired Target": st.column_config.NumberColumn(
+                                "Desired Target",
+                                min_value=0,
+                                step=1,
+                                required=True
+                            ),
+                            "Dept Fund (₹ Lakhs)": st.column_config.NumberColumn(
+                                "Dept Fund (₹ Lakhs)",
+                                min_value=0.0,
+                                step=0.1,
+                                format="%.2f"
+                            ),
+                            "VB-G Fund (₹ Lakhs)": st.column_config.NumberColumn(
+                                "VB-G Fund (₹ Lakhs)",
+                                min_value=0.0,
+                                step=0.1,
+                                format="%.2f"
+                            ),
+                            "Expected Persondays": st.column_config.NumberColumn(
+                                "Expected Persondays*",
+                                min_value=0,
+                                step=1,
+                                required=True
+                            )
+                        },
+                        hide_index=True
+                    )
+
+                    # Save button
+                    if st.button("💾 Save All Targets", type="primary", use_container_width=True):
+                        # Validate
+                        errors = []
+                        if not active_dept_id or not dist_id:
+                            errors.append("Invalid Department or District.")
+                        if not selected_theme_id:
+                            errors.append("Please select a valid Convergence Project Head.")
+                        if edited_df.empty or edited_df.isnull().all().all():
+                            errors.append("At least one row with valid data is required.")
+                        else:
+                            # Check for empty rows
+                            for idx, row in edited_df.iterrows():
+                                if pd.isna(row['Block']) or row['Block'] == '':
+                                    errors.append(f"Row {idx+1}: Block is required.")
+                                if pd.isna(row['Approved Activity']) or row['Approved Activity'] == '':
+                                    errors.append(f"Row {idx+1}: Approved Activity is required.")
+                                if row['Desired Target'] < 1:
+                                    errors.append(f"Row {idx+1}: Desired Target must be at least 1.")
+                                if row['Expected Persondays'] < 1:
+                                    errors.append(f"Row {idx+1}: Expected Persondays must be at least 1.")
+                        if errors:
+                            for err in errors:
+                                st.error(f"⚠️ {err}")
+                        else:
+                            # Delete existing targets for this combination (district, dept, wing, fy, theme)
+                            q_del = supabase.table("department_targets").delete() \
+                                .eq("department_id", active_dept_id) \
+                                .eq("district_id", dist_id) \
+                                .eq("financial_year_id", selected_fy_target_id)
+                            if active_wing_id:
+                                q_del = q_del.eq("wing_id", active_wing_id)
+                            else:
+                                q_del = q_del.is_("wing_id", "null")
+                            # We need to filter by theme: we have to get activities with that theme and delete targets where activity in those.
+                            # Since activity is stored as name, we need to get activity names for the theme.
+                            theme_act_names = [a['activity_name'] for a in valid_activities if a.get('theme_id') == selected_theme_id]
+                            if theme_act_names:
+                                q_del = q_del.in_("activity", theme_act_names)
+                            else:
+                                st.warning("No activities found for the selected theme. Nothing to delete.")
+                                # Still proceed to insert new ones
                             try:
-                                q_existing = supabase.table("department_targets").select("id").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
-                                if active_wing_id:
-                                    q_existing = q_existing.eq("wing_id", active_wing_id)
-                                else:
-                                    q_existing = q_existing.is_("wing_id", "null")
-                                if active_block_id:
-                                    q_existing = q_existing.eq("block_id", active_block_id)
-                                else:
-                                    q_existing = q_existing.is_("block_id", "null")
-                                
-                                existing = q_existing.execute().data
-                                
-                                if existing:
-                                    target_id = existing[0]['id']
-                                    supabase.table("department_targets").update(target_record).eq("id", target_id).execute()
-                                    try:
-                                        log_action(user.get('id'), f"UPDATE department_targets {target_id}")
-                                    except:
-                                        pass
-                                    st.success("Target updated successfully!")
-                                else:
-                                    result = supabase.table("department_targets").insert(target_record).execute()
-                                    new_target_id = result.data[0]['id']
-                                    try:
-                                        log_action(user.get('id'), f"CREATE department_targets {new_target_id}")
-                                    except:
-                                        pass
-                                    st.success("Target added successfully!")
-                                st.rerun()
+                                q_del.execute()
                             except Exception as e:
-                                st.error(f"Error saving target: {e}")
+                                st.warning(f"Could not delete old targets: {e}")
+
+                            # Insert new targets from the table
+                            inserted = 0
+                            for idx, row in edited_df.iterrows():
+                                if pd.isna(row['Block']) or row['Block'] == '':
+                                    continue
+                                block_id = block_options.get(row['Block'])
+                                if not block_id:
+                                    continue
+                                act_name = row['Approved Activity']
+                                if not act_name:
+                                    continue
+                                target_record = {
+                                    "department_id": active_dept_id,
+                                    "wing_id": active_wing_id,
+                                    "district_id": dist_id,
+                                    "block_id": block_id,
+                                    "financial_year_id": selected_fy_target_id,
+                                    "financial_year": selected_fy_year,
+                                    "project_head": selected_theme_name,  # store theme name
+                                    "activity": act_name,
+                                    "asset_count": 0,  # removed, set to 0
+                                    "annual_plan_scope": annual_plan_scope,
+                                    "desired_target": int(row['Desired Target']),
+                                    "department_fund": float(row['Dept Fund (₹ Lakhs)']),
+                                    "vbgramg_fund": float(row['VB-G Fund (₹ Lakhs)']),
+                                    "expected_persondays": int(row['Expected Persondays']),
+                                    "created_by": user['id'],
+                                    "department_scheme_convergence": conv_choice == "Yes",
+                                    "department_scheme_name": scheme_name.strip() if scheme_name else None,
+                                    "department_annual_plan_status": annual_plan_status,
+                                    "department_scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
+                                }
+                                try:
+                                    supabase.table("department_targets").insert(target_record).execute()
+                                    inserted += 1
+                                except Exception as e:
+                                    st.error(f"Error inserting row {idx+1}: {e}")
+                            if inserted > 0:
+                                st.success(f"✅ {inserted} target(s) saved successfully!")
+                                st.rerun()
+                            else:
+                                st.warning("No new targets were inserted.")
 
         with col_t1:
             st.markdown("#### 📊 Target Analytics Dashboard")
@@ -357,7 +421,6 @@ def show():
                 df_t['Department / Wing'] = df_t.apply(format_dept_display, axis=1)
                 if 'project_head' not in df_t.columns:
                     df_t['project_head'] = "N/A"
-                # Add block name if block_id exists
                 if 'block_id' in df_t.columns:
                     df_t['Block'] = df_t['block_id'].map(block_map).fillna('All Blocks')
                 df_t.rename(columns={
@@ -378,7 +441,7 @@ def show():
                     df_t['Remarks'] = df_t['department_scheme_remarks']
                 disp_cols = ['Department / Wing', 'Project Head', 'Approved Activity', 'Target', 'Dept. Fund', 'VB-G Fund', 'Persondays']
                 if 'Block' in df_t.columns:
-                    disp_cols.insert(1, 'Block')  # Show Block right after Department/Wing
+                    disp_cols.insert(1, 'Block')
                 extra_cols = [c for c in ['Own Scheme Conv.', 'Scheme / Fund Name', 'Own Annual Plan Status', 'Remarks'] if c in df_t.columns]
                 disp_cols.extend(extra_cols)
                 st.dataframe(df_t[disp_cols], use_container_width=True, hide_index=True)
