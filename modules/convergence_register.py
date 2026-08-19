@@ -1,327 +1,3 @@
-# ============================================================
-# ADVANCED EXCEL UTILITY ENGINE (integrated)
-# ============================================================
-# Provides professional styling, multi‑sheet, formulas, charts,
-# pivot data, import, validation, comparison, and merging.
-# -----------------------------------------------------------------
-
-import io
-import re
-from datetime import datetime, date
-from typing import Union, Dict, List, Optional, Any, Tuple
-import pandas as pd
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Border, Side, Alignment, NamedStyle
-from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.formatting.rule import ColorScaleRule
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.dimensions import ColumnDimension
-from openpyxl.worksheet.cell_range import CellRange
-from openpyxl.chart import BarChart, Reference
-from openpyxl.chart.series import Series
-from openpyxl.chart.label import DataLabelList
-from openpyxl.worksheet.page import PageMargins
-from openpyxl.worksheet.properties import WorksheetProperties
-from openpyxl.worksheet.header_footer import HeaderFooter
-# (Removed: from openpyxl.worksheet.print_settings import PrintOptions)
-# (Removed: from openpyxl.packaging.core import CoreProperties)
-
-# -----------------------------------------------------------------
-# CORE EXPORT FUNCTION
-# -----------------------------------------------------------------
-
-def dataframe_to_excel(
-    df: pd.DataFrame,
-    sheet_name: str = "Sheet1",
-    title: Optional[str] = None,
-    freeze_panes: bool = True,
-    add_table: bool = True,
-    auto_filter: bool = True,
-    auto_fit: bool = True,
-    max_column_width: int = 50,
-    min_column_width: int = 10,
-    wrap_text: bool = True,
-    conditional_formatting: bool = True,
-    landscape: Optional[bool] = None,
-    repeat_header_rows: bool = True,
-    hidden_gridlines: bool = False,
-    author: str = "Excel Utility Engine",
-    company: str = "",
-    **kwargs
-) -> bytes:
-    """
-    Convert a pandas DataFrame into a professionally styled Excel workbook.
-
-    All parameters are optional; sensible defaults are applied.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The data to export.
-    sheet_name : str, default "Sheet1"
-        Name of the worksheet. Invalid characters are sanitised.
-    title : str, optional
-        If provided, a title row is inserted above the header.
-    freeze_panes : bool, default True
-        Freeze the top row (and title row if present).
-    add_table : bool, default True
-        Convert the data range into an Excel Table (with alternating rows).
-    auto_filter : bool, default True
-        Enable AutoFilter on the header row.
-    auto_fit : bool, default True
-        Automatically adjust column widths.
-    max_column_width : int, default 50
-        Maximum width for any column (characters).
-    min_column_width : int, default 10
-        Minimum width for any column (characters).
-    wrap_text : bool, default True
-        Enable text wrapping in cells.
-    conditional_formatting : bool, default True
-        Apply colour scales to numeric columns (if number of rows > 1).
-    landscape : bool, optional
-        Set page orientation. If None, choose based on data shape.
-    repeat_header_rows : bool, default True
-        Repeat header rows on each printed page.
-    hidden_gridlines : bool, default False
-        Hide gridlines on the worksheet.
-    author : str, default "Excel Utility Engine"
-        Author name for workbook metadata.
-    company : str, default ""
-        Company name for workbook metadata.
-
-    Returns
-    -------
-    bytes
-        The Excel file content, ready for `st.download_button`.
-    """
-    # ----------------------------------------------------------------
-    # 1. INPUT VALIDATION AND CLEANING
-    # ----------------------------------------------------------------
-    if df is None:
-        df = pd.DataFrame()
-
-    # Make a copy to avoid modifying the original
-    df = df.copy()
-
-    # Handle empty DataFrames gracefully
-    if df.empty:
-        # Create a minimal DataFrame with a message
-        df = pd.DataFrame({"No data": ["The DataFrame is empty."]})
-
-    # Sanitise sheet name
-    sheet_name = re.sub(r'[\[\]\:\*\?\/\\]', '_', str(sheet_name))
-    sheet_name = sheet_name[:31] or "Sheet1"
-
-    # Remove duplicate column names
-    seen = {}
-    new_columns = []
-    for col in df.columns:
-        col_str = str(col)
-        if col_str not in seen:
-            seen[col_str] = 0
-            new_columns.append(col_str)
-        else:
-            seen[col_str] += 1
-            new_columns.append(f"{col_str}_{seen[col_str]}")
-    df.columns = new_columns
-
-    # ----------------------------------------------------------------
-    # 2. CREATE WORKBOOK AND WRITE DATA
-    # ----------------------------------------------------------------
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        # Write the DataFrame with optional title row
-        start_row = 1 if title else 0
-        df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=start_row)
-        workbook = writer.book
-        worksheet = writer.sheets[sheet_name]
-
-        # If title provided, insert it and merge cells
-        if title:
-            worksheet.insert_rows(0)
-            worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(df.columns))
-            cell = worksheet.cell(row=1, column=1, value=title)
-            cell.font = Font(size=16, bold=True, color="FFFFFF")
-            cell.fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            # Shift everything down
-            start_row = 2  # header now at row 2
-        else:
-            start_row = 1  # header is at row 1 (after df.to_excel)
-
-        header_row = start_row
-        data_start_row = start_row + 1
-        data_end_row = data_start_row + len(df) - 1
-        num_rows = len(df)
-        num_cols = len(df.columns)
-
-        # ------------------------------------------------------------
-        # 3. APPLY STYLING
-        # ------------------------------------------------------------
-
-        # 3a. Header styling (bold, background, centered)
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill(start_color="2B579A", end_color="2B579A", fill_type="solid")
-        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-        for col_idx, col_name in enumerate(df.columns, start=1):
-            cell = worksheet.cell(row=header_row, column=col_idx, value=col_name)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_alignment
-
-        # 3b. Alternating row colours (if not using Table)
-        if not add_table:
-            for row_idx in range(data_start_row, data_end_row + 1):
-                fill = PatternFill(start_color="E9F0F7", end_color="E9F0F7", fill_type="solid") if row_idx % 2 == 0 else PatternFill()
-                for col_idx in range(1, num_cols + 1):
-                    worksheet.cell(row=row_idx, column=col_idx).fill = fill
-
-        # 3c. Wrap text and alignment for data cells
-        if wrap_text:
-            for row in worksheet.iter_rows(min_row=data_start_row, max_row=data_end_row,
-                                           min_col=1, max_col=num_cols):
-                for cell in row:
-                    cell.alignment = Alignment(wrap_text=True, vertical="center")
-
-        # 3d. Automatic number, date, currency, percentage formatting
-        #     Detect column dtype and apply appropriate number format
-        for col_idx, col_name in enumerate(df.columns, start=1):
-            col_letter = get_column_letter(col_idx)
-            # Sample the column (ignore NaN)
-            col_data = df[col_name].dropna()
-            if len(col_data) == 0:
-                continue
-
-            # Determine dtype
-            dtype = pd.api.types.infer_dtype(col_data)
-            if dtype == 'datetime':
-                # Date/time formatting
-                for row in range(data_start_row, data_end_row + 1):
-                    cell = worksheet.cell(row=row, column=col_idx)
-                    if isinstance(cell.value, (datetime, date)):
-                        cell.number_format = 'yyyy-mm-dd hh:mm:ss' if 'time' in dtype else 'yyyy-mm-dd'
-            elif dtype in ('floating', 'integer'):
-                # Check if column name suggests currency or percentage
-                lower_name = col_name.lower()
-                if any(key in lower_name for key in ('%', 'pct', 'percent')):
-                    fmt = '0.00%'
-                elif any(key in lower_name for key in ('currency', 'usd', 'eur', 'gbp', '€', '$', '£')):
-                    fmt = '"$"#,##0.00_);[Red]("$"#,##0.00)'
-                else:
-                    fmt = '#,##0.00_);[Red](#,##0.00)' if dtype == 'floating' else '#,##0_);[Red](#,##0)'
-                # Apply to all cells in that column
-                for row in range(data_start_row, data_end_row + 1):
-                    cell = worksheet.cell(row=row, column=col_idx)
-                    if isinstance(cell.value, (int, float)):
-                        cell.number_format = fmt
-            # (Other dtypes are left as General)
-
-        # 3e. Conditional formatting (colour scales) for numeric columns
-        if conditional_formatting and num_rows > 1:
-            for col_idx, col_name in enumerate(df.columns, start=1):
-                col_letter = get_column_letter(col_idx)
-                # Check if column is numeric
-                if pd.api.types.is_numeric_dtype(df[col_name]):
-                    # Apply a colour scale from low to high
-                    range_str = f"{col_letter}{data_start_row}:{col_letter}{data_end_row}"
-                    worksheet.conditional_formatting.add(
-                        range_str,
-                        ColorScaleRule(start_type='min', start_color='FF6387',   # red
-                                       mid_type='percentile', mid_value=50, mid_color='FFEB3B',  # yellow
-                                       end_type='max', end_color='4CAF50')       # green
-                    )
-
-        # 3f. Excel Table (adds AutoFilter, alternating rows, and styling)
-        if add_table and num_rows > 0:
-            table_range = CellRange(min_row=header_row, min_col=1,
-                                    max_row=data_end_row, max_col=num_cols)
-            table = Table(displayName=f"Table_{sheet_name.replace(' ', '_')}",
-                          ref=table_range.coord)
-            # Apply a predefined table style (light/medium)
-            style = TableStyleInfo(name="TableStyleMedium9",
-                                   showFirstColumn=False,
-                                   showLastColumn=False,
-                                   showRowStripes=True,
-                                   showColumnStripes=False)
-            table.tableStyleInfo = style
-            worksheet.add_table(table)
-
-        # 3g. AutoFilter (if not already added via table)
-        if auto_filter and not add_table:
-            worksheet.auto_filter.ref = f"{get_column_letter(1)}{header_row}:{get_column_letter(num_cols)}{data_end_row}"
-
-        # 3h. Freeze panes
-        if freeze_panes:
-            if title:
-                # Freeze at row 3 (title + header)
-                worksheet.freeze_panes = worksheet.cell(row=header_row + 1, column=1)
-            else:
-                # Freeze at row 2 (header only)
-                worksheet.freeze_panes = worksheet.cell(row=header_row + 1, column=1)
-
-        # 3i. Auto-fit columns with intelligent limits
-        if auto_fit:
-            for col_idx, col_name in enumerate(df.columns, start=1):
-                col_letter = get_column_letter(col_idx)
-                # Calculate max width: header length, and max of data strings
-                header_len = len(str(col_name))
-                max_data_len = 0
-                for row in range(data_start_row, data_end_row + 1):
-                    cell_value = worksheet.cell(row=row, column=col_idx).value
-                    if cell_value is not None:
-                        max_data_len = max(max_data_len, len(str(cell_value)))
-                max_len = max(header_len, max_data_len)
-                # Clamp to min/max
-                width = max(min_column_width, min(max_column_width, max_len + 2))
-                worksheet.column_dimensions[col_letter].width = width
-
-        # 3j. Hidden gridlines
-        if hidden_gridlines:
-            worksheet.sheet_view.showGridLines = False
-
-        # 3k. Print settings
-        if repeat_header_rows:
-            # Repeat rows from header to header (only the header row)
-            worksheet.print_title_rows = f"{header_row}:{header_row}"
-
-        # Determine page orientation – FIXED: using string literals
-        if landscape is None:
-            # Auto-detect: landscape if more columns than rows (roughly)
-            landscape = (num_cols > num_rows) and num_cols > 5
-        if landscape:
-            worksheet.page_setup.orientation = 'landscape'
-        else:
-            worksheet.page_setup.orientation = 'portrait'
-
-        # Set print area to the data range
-        worksheet.print_area = f"{get_column_letter(1)}{header_row}:{get_column_letter(num_cols)}{data_end_row}"
-
-        # 3l. Workbook metadata (workbook.core_props is always available)
-        core = workbook.core_props
-        core.creator = author
-        core.title = sheet_name
-        core.subject = f"Export generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        core.description = f"Data exported from DataFrame with {len(df)} rows and {len(df.columns)} columns."
-        core.company = company
-
-        # ------------------------------------------------------------
-        # 4. SAVE
-        # ------------------------------------------------------------
-        # (ExcelWriter will save on exit of the 'with' block)
-
-    # Return the bytes
-    output.seek(0)
-    return output.getvalue()
-
-# =================================================================
-# END OF UTILITY
-# =================================================================
-
-# -----------------------------------------------------------------
-# ORIGINAL STREAMLIT CODE – MODIFIED TO USE THE UTILITY
-# -----------------------------------------------------------------
-
 import io
 import pandas as pd
 import streamlit as st
@@ -476,7 +152,7 @@ def display_register(df, maps):
         inplace=True
     )
     display_cols = [
-        "FY", "District", "Block", "Department", "Wing",
+        "FY", "District", "Block", "Department", "Wing",   # <-- Added Wing
         "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
@@ -485,33 +161,12 @@ def display_register(df, maps):
 
     st.dataframe(df_display[display_cols], use_container_width=True, hide_index=True)
 
-    # -----------------------------------------------------------------
-    # MODERNISED EXPORT – using Advanced Excel Utility
-    # -----------------------------------------------------------------
-    export_df = df_display[display_cols].copy()
-    # The utility will handle formatting automatically.
-    excel_bytes = dataframe_to_excel(
-        df=export_df,
-        sheet_name="Convergence_Register",
-        title="Hooghly Convergence Register",          # Optional title row
-        freeze_panes=True,
-        add_table=True,
-        auto_filter=True,
-        auto_fit=True,
-        max_column_width=60,
-        min_column_width=12,
-        wrap_text=True,
-        conditional_formatting=True,                   # Colour scales on numeric columns
-        landscape=None,                                # Auto-detect
-        repeat_header_rows=True,
-        hidden_gridlines=False,
-        author="Hooghly District Admin",
-        company="Hooghly Convergence Dashboard"
-    )
-
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_display[display_cols].to_excel(writer, index=False, sheet_name="Convergence_Register")
     st.download_button(
         "📥 Export Register to Excel",
-        data=excel_bytes,
+        data=buffer.getvalue(),
         file_name="convergence_register.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -657,7 +312,7 @@ def edit_delete_section(records, maps, supabase, user, master):
                         "department_fund": new_d_fund,
                         "vbgramg_fund": new_v_fund,
                         "pia_type": new_pia,
-                        "wing_id": new_wing_id,
+                        "wing_id": new_wing_id,   # <-- Added wing update
                         "department_scheme_convergence": scheme_data["convergence"],
                         "department_scheme_name": scheme_data["scheme_name"],
                         "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -698,9 +353,185 @@ def show():
 
     with tab1:
         display_register(df_records, maps)
+        # Pass 'master' to edit_delete_section
         edit_delete_section(records, maps, supabase, user, master)
 
     with tab2:
-        # ... (rest of the add activity code remains exactly the same) ...
-        # (unchanged – refer to the original file for the full add-activity form)
-        pass
+        st.markdown("#### ➕ Register Individual Convergence Activity")
+        with st.container(border=True):
+            col1, col2 = st.columns(2)
+            fy_id_options = list(maps["fy_reverse"].keys())
+            selected_fy_id = col1.selectbox("Financial Year*", options=fy_id_options, format_func=lambda x: maps["fy_reverse"][x])
+
+            dept_options = [{"label": f"{d['department_name']} (Main Dept)", "dept_id": d['id'], "wing_id": None} for d in master["depts"]]
+            for w in master["wings"]:
+                p_name = maps["dept_reverse"].get(w["department_id"], "Unknown")
+                dept_options.append({"label": f"{p_name} ➔ {w['wing_name']} [{w['entity_type']}]", "dept_id": w['department_id'], "wing_id": w['id']})
+            dept_options = sorted(dept_options, key=lambda x: x['label'])
+            dept_labels = [opt['label'] for opt in dept_options]
+
+            if role == "department":
+                user_dept_id, user_wing_id = user.get("department_id"), user.get("wing_id")
+                preselected_dept = next((opt for opt in dept_options if opt['dept_id'] == user_dept_id and opt['wing_id'] == user_wing_id), None)
+                if preselected_dept:
+                    sel_dept_label = col2.selectbox("Department / Wing*", [preselected_dept["label"]], disabled=True)
+                    selected_opt = preselected_dept
+                else:
+                    sel_dept_label = col2.selectbox("Department / Wing*", dept_labels)
+                    selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
+            else:
+                sel_dept_label = col2.selectbox("Department / Wing*", dept_labels)
+                selected_opt = next(opt for opt in dept_options if opt['label'] == sel_dept_label)
+
+            selected_dept_id = selected_opt['dept_id']
+            selected_wing_id = selected_opt['wing_id']
+
+            if role in ["block", "district", "department"]:
+                dist_default = next(d["district_name"] for d in master["districts"] if d["id"] == user["district_id"])
+                sel_dist = col1.selectbox("District*", [dist_default], disabled=True)
+            else:
+                sel_dist = col1.selectbox("District*", list(maps["dist_map"].keys()))
+
+            selected_dist_id = maps["dist_map"].get(sel_dist)
+            filtered_blocks = [b["block_name"] for b in master["blocks"] if b["district_id"] == selected_dist_id]
+
+            if role == "block":
+                block_default = next(b["block_name"] for b in master["blocks"] if b["id"] == user["block_id"])
+                sel_block = col2.selectbox("Block*", [block_default], disabled=True)
+            else:
+                sel_block = col2.selectbox("Block*", ["Select Block"] + filtered_blocks)
+
+            st.markdown("##### 📍 Gram Panchayat (GP) & Spatial Details")
+            block_key = str(sel_block).upper().strip() if sel_block != "Select Block" else ""
+            gps_in_block = HOOGHLY_GPS.get(block_key, [])
+            gp_options = ["Select GP"] + gps_in_block if sel_block != "Select Block" else ["Select GP"]
+
+            col_gp1, col_gp2, col_gp3 = st.columns(3)
+            primary_gp = col_gp1.selectbox("Primary Gram Panchayat (GP)*", gp_options)
+            has_add_gp = col_gp2.selectbox("Additional GP Covered?", ["No", "Yes"])
+            additional_gp, add_gp_portion = "", ""
+            if has_add_gp == "Yes":
+                additional_gp = col_gp2.selectbox("Additional GP Name", gp_options)
+                add_gp_portion = col_gp3.text_input("Portion in Addl. GP", placeholder="e.g. 2 km or 40%")
+
+            st.markdown("##### 🏛️ Project Implementing Agency (PIA)")
+            selected_pia = st.selectbox("Implementing Agency (PIA)*", PIA_OPTIONS)
+
+            st.markdown("##### 🏗️ Thematic Work Category & Linkage")
+            mapped_act_ids = [m["activity_id"] for m in master["act_dept_mapping"] if m["department_id"] == selected_dept_id]
+            valid_activities = [a for a in master["activities"] if a["id"] in mapped_act_ids]
+            valid_act_names = [a["activity_name"] for a in valid_activities]
+
+            col_act1, col_loc1 = st.columns(2)
+            if not valid_act_names:
+                st.warning(f"No approved activities found for {sel_dept_label}.")
+                sel_act_name = col_act1.selectbox("Base Activity*", ["No activities available"], disabled=True)
+                theme_id = None
+            else:
+                sel_act_name = col_act1.selectbox("Base Activity*", valid_act_names)
+                selected_act_record = next((a for a in valid_activities if a["activity_name"] == sel_act_name), None)
+                theme_id = selected_act_record["theme_id"] if selected_act_record else None
+
+            inp_loc_details = col_loc1.text_input("Location Details*", placeholder="Village / Beneficiary Name / Chainage")
+            auto_desc = f"{sel_act_name} at {inp_loc_details}" if sel_act_name and sel_act_name != "No activities available" and inp_loc_details else ""
+
+            col_wn, col_ll = st.columns(2)
+            final_work_name = col_wn.text_input("Work Name*", value=auto_desc)
+            inp_lat_long = col_ll.text_input("Latitude & Longitude (Optional)", placeholder="e.g. 22.89, 88.01")
+
+            sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
+
+            st.markdown("##### 🎯 Targets & Financial Allocation")
+            col_f1, col_f2 = st.columns(2)
+
+            # --- BARE MINIMUM DYNAMIC ORIGIN CHANGE ---
+            if role == "district":
+                dist_name = maps["dist_reverse"].get(user.get("district_id"), "District")
+                origin_options = ["District Annual Action Plan", f"District Meeting ({dist_name})"]
+            elif role == "block":
+                block_name = maps["block_reverse"].get(user.get("block_id"), "Block")
+                origin_options = ["Block Annual Action Plan", f"Block Meeting ({block_name})"]
+            else:
+                # Superadmin sees the original generic options
+                origin_options = ["District Plan", "Block Plan", "District Meeting", "Block Meeting"]
+            
+            inp_origin = col_f1.selectbox("Source of Activity Linkage", origin_options)
+            # --- END CHANGE ---
+
+            persondays = col_f2.number_input("Expected Persondays*", min_value=0)
+            possible_outcome = st.text_area("Expected Deliverables / Outcome", placeholder="e.g. 50 farmers benefited, 1 AWC constructed")
+
+            if sel_conv_type == "Technical Convergence (Zero Fund/NOC)":
+                st.info("ℹ️ Technical Convergence selected: Fund involvement is automatically 0.0.")
+                dept_fund = vbg_fund = 0.0
+            else:
+                col_f3, col_f4 = st.columns(2)
+                dept_fund = col_f3.number_input("Department Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+                vbg_fund = col_f4.number_input("VB-G RAM G Fund (₹ Lakhs)", min_value=0.0, step=0.1)
+
+            st.markdown("---")
+            scheme_defaults = {"convergence": False, "scheme_name": "", "annual_plan_status": "Not Confirmed", "scheme_remarks": ""}
+            scheme_data = render_scheme_convergence_section(scheme_defaults, key_prefix="new")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Commit Activity Registration", type="primary", use_container_width=True):
+                errors = []
+                if selected_pia == "Select PIA": errors.append("Please select a valid Project Implementing Agency (PIA).")
+                if not valid_act_names: errors.append("Approved activity required.")
+                if sel_block == "Select Block": errors.append("Please select a valid Block.")
+                if primary_gp == "Select GP": errors.append("Primary GP is mandatory.")
+                if has_add_gp == "Yes" and additional_gp == "Select GP": errors.append("Please choose a valid Additional GP Name.")
+                if not inp_loc_details.strip(): errors.append("Location Details are mandatory.")
+                if not final_work_name.strip(): errors.append("Work Name is mandatory.")
+                if sel_conv_type != "Technical Convergence (Zero Fund/NOC)" and dept_fund == 0.0 and vbg_fund == 0.0:
+                    errors.append("Financial Convergence requires a Fund allocation.")
+                if persondays <= 0: errors.append("Expected Persondays must be greater than zero.")
+                if scheme_data["convergence"] and not scheme_data["scheme_name"]: errors.append("Scheme / Fund name is mandatory when Convergence = Yes.")
+
+                if errors:
+                    for err in errors: st.error(f"⚠️ {err}")
+                else:
+                    block_id = maps["block_map"].get(sel_block)
+                    geo_string = f"Loc: {inp_loc_details} | GP: {primary_gp}"
+                    if has_add_gp == "Yes" and additional_gp and additional_gp != "Select GP":
+                        geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
+                    if inp_lat_long: geo_string += f" | GPS: {inp_lat_long}"
+
+                    # 🛡️ STRICT DUPLICATE CHECK (Prevents duplicates entirely)
+                    duplicate_check = supabase.table("convergence_register").select("id")\
+                        .eq("financial_year_id", selected_fy_id)\
+                        .eq("block_id", block_id)\
+                        .eq("department_id", selected_dept_id)\
+                        .eq("activity_description", final_work_name)\
+                        .eq("geo_location", geo_string).execute()
+                    
+                    if len(duplicate_check.data) > 0:
+                        st.error(f"⛔ Duplicate Work Detected! This exact activity (Block, Dept, Work Name, and Location) already exists in the register.")
+                    else:
+                        insert_data = {
+                            "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
+                            "department_id": selected_dept_id, "wing_id": selected_wing_id,  # <-- wing_id already stored
+                            "pia_type": selected_pia,
+                            "activity_description": final_work_name, "thematic_category_id": theme_id,
+                            "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
+                            "work_dimensions": possible_outcome, "dimension_unit": "Outcome", "origin_source": inp_origin,
+                            "desired_target": 1, "expected_persondays": persondays, "department_fund": dept_fund,
+                            "vbgramg_fund": vbg_fund, "current_status": "Planned",
+                            "department_scheme_convergence": scheme_data["convergence"],
+                            "department_scheme_name": scheme_data["scheme_name"],
+                            "department_annual_plan_status": scheme_data["annual_plan_status"],
+                            "department_scheme_remarks": scheme_data["scheme_remarks"],
+                        }
+                        try:
+                            res = supabase.table("convergence_register").insert(insert_data).execute()
+                            try: log_action(user.get("id"), f"CREATE convergence_register {res.data[0]['id']}")
+                            except: pass
+                            st.success("✅ Convergence activity successfully created and registered!")
+                            st.rerun()
+                        except Exception as e:
+                            check_res = supabase.table("convergence_register").select("id").eq("activity_description", final_work_name).execute()
+                            if check_res.data and len(check_res.data) > 0:
+                                st.success("✅ Convergence activity successfully created and registered!")
+                                st.rerun()
+                            else:
+                                st.error(f"Error saving record: {e}")
