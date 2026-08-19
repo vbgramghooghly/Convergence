@@ -17,8 +17,6 @@ def show():
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    st.markdown("---")
-
     # ==========================================
     # 3. BASE QUERY & ROLE SCOPE
     # ==========================================
