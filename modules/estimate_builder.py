@@ -3,25 +3,74 @@ import pandas as pd
 import uuid
 import streamlit.components.v1 as components
 from utils.db import get_supabase
+from auth.auth import get_current_user
 
 # ============================================================
-# CONSTANTS
+# HELPER FUNCTIONS (self-contained, with safe checks)
 # ============================================================
-DISTRICT_NAMES = {
-    1: "Alipurduar", 2: "Bankura", 3: "Birbhum", 4: "Cooch Behar",
-    5: "Dakshin Dinajpur", 6: "Darjeeling", 7: "Hooghly", 8: "Howrah",
-    9: "Jalpaiguri", 10: "Jhargram", 11: "Kalimpong", 12: "Kolkata",
-    13: "Malda", 14: "Murshidabad", 15: "Nadia", 16: "North 24 Parganas",
-    17: "Paschim Bardhaman", 18: "Paschim Medinipur", 19: "Purba Bardhaman",
-    20: "Purba Medinipur", 21: "Purulia", 22: "South 24 Parganas", 23: "Uttar Dinajpur"
-}
 
-UNSKILLED_CODES = ['0115']
-SKILLED_SEMI_CODES = ['0116', '0160', '0161']
+@st.cache_data(ttl=600)
+def fetch_master_lookups():
+    """Fetch active master data for themes, activities, departments, etc."""
+    supabase = get_supabase()
+    try:
+        return {
+            "fys": supabase.table("financial_years").select("*").eq("active", True).execute().data or [],
+            "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
+            "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
+            "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
+            "wings": supabase.table("department_wings").select("*").execute().data or [],
+            "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
+            "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
+            "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
+        }
+    except Exception:
+        return {}
+
+def build_maps(data):
+    """Build lookup dictionaries for ids ↔ names."""
+    if not data:
+        return {}
+    return {
+        "fy_name_to_id": {str(f["year_name"]).strip(): f["id"] for f in data.get("fys", [])},
+        "dist_map": {str(d["district_name"]).strip(): d["id"] for d in data.get("districts", [])},
+        "block_map": {str(b["block_name"]).strip(): b["id"] for b in data.get("blocks", [])},
+        "dept_map": {str(d["department_name"]).strip(): d["id"] for d in data.get("depts", [])},
+        "wing_map": {w["id"]: w for w in data.get("wings", [])},
+        "fy_reverse": {f["id"]: f["year_name"] for f in data.get("fys", [])},
+        "dist_reverse": {d["id"]: d["district_name"] for d in data.get("districts", [])},
+        "block_reverse": {b["id"]: b["block_name"] for b in data.get("blocks", [])},
+        "dept_reverse": {d["id"]: d["department_name"] for d in data.get("depts", [])},
+    }
+
+def get_filtered_records(supabase, role, user):
+    """Fetch convergence records filtered by user's role (district/block/department)."""
+    if not isinstance(user, dict):
+        return []
+
+    query = supabase.table("convergence_register").select("*")
+    if role == "district":
+        if not user.get("district_id"):
+            return []
+        query = query.eq("district_id", user["district_id"])
+    elif role == "block":
+        if not user.get("block_id"):
+            return []
+        query = query.eq("block_id", user["block_id"])
+    elif role == "department":
+        if not user.get("department_id") or not user.get("district_id"):
+            return []
+        query = query.eq("department_id", user["department_id"]).eq("district_id", user["district_id"])
+    # For superadmin, no filter
+    try:
+        return query.execute().data or []
+    except Exception:
+        return []
 
 # ============================================================
 # MAIN APP
 # ============================================================
+
 def show():
     # -------------------- SECURITY --------------------
     if not st.session_state.get('authenticated', False) and not st.session_state.get('is_guest', False):
@@ -30,8 +79,21 @@ def show():
     st.set_page_config(
         page_title="SECUReX | Estimate Builder",
         layout="wide",
-        initial_sidebar_state="collapsed"   # no sidebar
+        initial_sidebar_state="collapsed"   # hide sidebar completely
     )
+
+    # -------------------- CONSTANTS --------------------
+    DISTRICT_NAMES = {
+        1: "Alipurduar", 2: "Bankura", 3: "Birbhum", 4: "Cooch Behar",
+        5: "Dakshin Dinajpur", 6: "Darjeeling", 7: "Hooghly", 8: "Howrah",
+        9: "Jalpaiguri", 10: "Jhargram", 11: "Kalimpong", 12: "Kolkata",
+        13: "Malda", 14: "Murshidabad", 15: "Nadia", 16: "North 24 Parganas",
+        17: "Paschim Bardhaman", 18: "Paschim Medinipur", 19: "Purba Bardhaman",
+        20: "Purba Medinipur", 21: "Purulia", 22: "South 24 Parganas", 23: "Uttar Dinajpur"
+    }
+
+    UNSKILLED_CODES = ['0115']
+    SKILLED_SEMI_CODES = ['0116', '0160', '0161']
 
     # -------------------- SESSION STATE INIT --------------------
     for key, default in [
@@ -47,19 +109,12 @@ def show():
         if key not in st.session_state:
             st.session_state[key] = default
 
-    # -------------------- USER INFO FROM SESSION STATE (safe) --------------------
-    role = st.session_state.get('role', 'guest')
-    user_district = st.session_state.get('district_id', 1)
-    user_dept_id = st.session_state.get('department_id')
-    user_block_id = st.session_state.get('block_id')
-    active_district_name = DISTRICT_NAMES.get(user_district, f"District {user_district}")
-
     # -------------------- SUPABASE CLIENT --------------------
     supabase = get_supabase()
 
-    # -------------------- LOAD MASTER DATA (specs, matrix, LMR, themes, activities) --------------------
+    # -------------------- DATA LOADERS --------------------
     @st.cache_data(ttl=600)
-    def load_master_data(district_id):
+    def load_master_data(district_id, role, department_id):
         try:
             def fetch_all(table, cols="*", filter_col=None, filter_val=None):
                 data = []
@@ -97,36 +152,38 @@ def show():
         except Exception:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    df_specs, df_matrix, df_lmr, df_themes, df_activities, df_act_dept = load_master_data(user_district)
+    user_role = st.session_state.get('role')
+    user_dept_id = st.session_state.get('department_id')
+    user_district = st.session_state.get('district_id', 1)
+    active_district_name = DISTRICT_NAMES.get(user_district, f"District {user_district}")
+
+    df_specs, df_matrix, df_lmr, df_themes, df_activities, df_act_dept = load_master_data(
+        user_district, user_role, user_dept_id
+    )
 
     if not df_lmr.empty:
         df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
-    # -------------------- CONVERGENCE REGISTER QUERY (direct) --------------------
-    def get_convergence_records():
-        query = supabase.table("convergence_register").select("*")
-        if role == "district" and user_district:
-            query = query.eq("district_id", user_district)
-        elif role == "block" and user_block_id:
-            query = query.eq("block_id", user_block_id)
-        elif role == "department" and user_dept_id and user_district:
-            query = query.eq("department_id", user_dept_id).eq("district_id", user_district)
-        # For superadmin, no filter
-        try:
-            return query.execute().data or []
-        except:
-            return []
+    # -------------------- CONVERGENCE REGISTER INTEGRATION --------------------
+    # Get user dict safely
+    user = get_current_user() if st.session_state.get('authenticated') else {}
+    if not isinstance(user, dict):
+        user = {}
+    role = user.get('role', 'guest')
 
-    conv_records = get_convergence_records() if role in ['superadmin', 'district', 'block', 'department'] else []
+    master_lookups = fetch_master_lookups()
+    maps = build_maps(master_lookups)
+
+    conv_records = get_filtered_records(supabase, role, user) if role in ['superadmin', 'district', 'block', 'department'] else []
     df_conv = pd.DataFrame(conv_records) if conv_records else pd.DataFrame()
 
-    # Build work options
+    # Build work options (BUG FIX APPLIED HERE)
     work_options = []
     if not df_conv.empty:
         for _, row in df_conv.iterrows():
             work_options.append({
                 'id': row['id'],
-                'label': f"{row['activity_description']} (ID: {row['id'][:8]})",
+                'label': f"{row['activity_description']} (ID: {str(row['id'])[:8]})",
                 'work_name': row['activity_description'],
                 'theme_id': row.get('thematic_category_id'),
                 'row': row
@@ -196,6 +253,7 @@ def show():
                 theme_row = df_themes[df_themes['id'] == theme_id]
                 st.session_state['selected_theme'] = theme_row.iloc[0]['theme_name'] if not theme_row.empty else "Unknown Theme"
                 act_rows = df_activities[df_activities['theme_id'] == theme_id]
+                # try to match activity from work name prefix
                 work_name = selected_opt['work_name']
                 matched = None
                 for _, act_row in act_rows.iterrows():
@@ -222,7 +280,7 @@ def show():
                 st.session_state['work_type'] = ""
             else:
                 df_activities_filtered = df_activities.copy()
-                if role == 'department' and user_dept_id:
+                if user_role == 'department' and user_dept_id:
                     df_act_dept['activity_id'] = df_act_dept['activity_id'].astype(str)
                     df_activities_filtered['id'] = df_activities_filtered['id'].astype(str)
                     mapped_ids = df_act_dept[df_act_dept['department_id'] == user_dept_id]['activity_id'].tolist()
@@ -267,10 +325,8 @@ def show():
             st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
             conv_row = selected_opt.get('row')
             if conv_row is not None:
-                dist_id = conv_row.get('district_id')
-                dist_name = DISTRICT_NAMES.get(dist_id, f"District {dist_id}") if dist_id else "N/A"
-                block_id = conv_row.get('block_id')
-                block_name = f"Block {block_id}" if block_id else "N/A"
+                dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A')
+                block_name = maps.get('block_reverse', {}).get(conv_row.get('block_id'), 'N/A')
                 st.caption(f"📍 **District:** {dist_name} | **Block:** {block_name}")
             st.caption("📌 These details are from the Convergence Register. Switch to 'Manual Entry' to edit.")
         else:
