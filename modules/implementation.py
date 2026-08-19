@@ -1042,3 +1042,14 @@ def show():
 
         except Exception as e:
             st.error(f"Could not load audit trail. Please ensure database tables and relationships are correctly configured. Error: {e}")
+    
+    # ---- Display Requested Global Footer Text ----
+    st.markdown(
+        """
+        <div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>
+            Hooghly District Administration || District VB GRAM G Cell || Mail : nodal.hooghly@gmail.com
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
