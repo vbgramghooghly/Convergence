@@ -983,17 +983,17 @@ def show():
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
 
-          # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
+        # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
     with tab5:
         st.markdown("#### 📋 Global Progress Audit Trail & History")
         st.caption("View every single progress update across all schemes. Only Superadmins can delete erroneous records.")
 
         # 1. Fetch all Progress Updates with necessary joins
         try:
-            # Assuming the database has these tables linked correctly
+            # 🔥 FIXED: Sorted by "updated_at" instead of "created_at" to match existing DB schema
             audit_query = supabase.table("progress_updates").select(
                 "*, convergence_register(id, activity_description, department_id, district_id, block_id), users(full_name, role, department_id, district_id, block_id)"
-            ).order("created_at", desc=True)
+            ).order("updated_at", desc=True)
             
             # 2. Restrict access if not Superadmin (Show only updates related to their jurisdiction)
             if role != 'superadmin':
@@ -1032,8 +1032,8 @@ def show():
                     dist_name = dist_map.get(dist_id, 'Unknown Dist')
                     block_name = block_map.get(block_id, 'N/A')
 
-                    # 🔥 FIX: Check for created_at, fallback to updated_at to prevent DB crash
-                    date_time_val = pd.to_datetime(rec.get('created_at') or rec.get('updated_at') or datetime.now()).strftime('%d %b %Y, %H:%M')
+                    # 🔥 FIX: Check for updated_at first, fallback to created_at or now
+                    date_time_val = pd.to_datetime(rec.get('updated_at') or rec.get('created_at') or datetime.now()).strftime('%d %b %Y, %H:%M')
                     
                     audit_rows.append({
                         "Date & Time": date_time_val,
