@@ -4,7 +4,7 @@ import pandas as pd
 import io
 import re
 from utils.db import get_supabase
-from utils.theme import apply_global_theme
+from utils.theme import load_theme, get_css  # <-- New theme engine
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -39,11 +39,16 @@ if user:
 
 role = user['role']
 
-# ---------- APPLY CENTRAL UI/UX THEME ----------
-theme = apply_global_theme()
-primary_color = theme.get("primary_color", "#0F4C81")
+# ---------- APPLY GLOBAL THEME ----------
+# Load the active theme and inject its CSS into the page
+theme = load_theme()
+st.markdown(f"<style>{get_css(theme)}</style>", unsafe_allow_html=True)
+
+# Extract primary colour for use in navbar and other dynamic elements
+primary_color = theme.get('primary_color', '#0F4C81')
 
 # ---------- GLOBAL CSS (ENTERPRISE NAVBAR & LANDING PAGE STYLES) ----------
+# Note: The theme CSS covers most styling; we keep only navbar-specific styles here.
 st.markdown(f"""
     <style>
         [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
@@ -59,7 +64,7 @@ st.markdown(f"""
             max-width: 98% !important;
         }}
 
-        /* 2. TOP NAVIGATION BAR */
+        /* TOP NAVIGATION BAR – uses theme primary colour */
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] {{
             background: #FFFFFF;
             border-bottom: 1px solid #E2E8F0;
@@ -99,6 +104,7 @@ st.markdown(f"""
             background-color: #F1F5F9 !important;
         }}
 
+        /* Tab styling */
         div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
             gap: 24px; border-bottom: 1px solid #E2E8F0; padding-bottom: 0px;
         }}
@@ -111,7 +117,7 @@ st.markdown(f"""
             color: {primary_color} !important; border-bottom: 3px solid {primary_color} !important;
         }}
 
-        /* Additional styling for the info boxes */
+        /* Info boxes for home page */
         .info-box {{
             background: #F8FAFC;
             border: 1px solid #E2E8F0;
@@ -259,7 +265,6 @@ def show_home():
     block_id = user_session.get('block_id')
     department_id = user_session.get('department_id')
 
-    # Fetch master data
     @st.cache_data(ttl=600)
     def fetch_master():
         departments = supabase.table("departments").select("id,department_name").execute().data or []
@@ -274,7 +279,6 @@ def show_home():
     block_map = {b['id']: b['block_name'] for b in blocks}
     block_name_to_id = {b['block_name']: b['id'] for b in blocks}
 
-    # Determine active FY
     active_fy = st.session_state.get("selected_fy", "2026-27")
     fy_id = None
     for f in fys:
@@ -320,7 +324,6 @@ def show_home():
     df_targets = pd.DataFrame(targets)
     df_register = pd.DataFrame(register)
 
-    # ---- Helper: token-based matching ----
     def match_activity(work_desc, target_act):
         target_words = set(re.findall(r'\w+', str(target_act).lower()))
         work_words = set(re.findall(r'\w+', str(work_desc).lower()))
@@ -429,17 +432,13 @@ def show_home():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # ============================================================
-    # NEW SECTION: INFORMATIONAL BOX (DEPARTMENT, BLOCK, DISTRICT, SYSTEM ERROR)
-    # ============================================================
+    # ---- Quick Reference Guide ----
     st.markdown("---")
     st.markdown("#### 📌 Quick Reference Guide")
-
-    # Create 4 columns
     col_dep, col_block, col_dist, col_error = st.columns(4)
 
     with col_dep:
-        st.markdown("""
+        st.markdown(f"""
         <div class="info-box">
             <h5>🏛️ DEPARTMENT</h5>
             <ul>
@@ -452,7 +451,7 @@ def show_home():
         """, unsafe_allow_html=True)
 
     with col_block:
-        st.markdown("""
+        st.markdown(f"""
         <div class="info-box">
             <h5>📌 BLOCK</h5>
             <ul>
@@ -466,7 +465,7 @@ def show_home():
         """, unsafe_allow_html=True)
 
     with col_dist:
-        st.markdown("""
+        st.markdown(f"""
         <div class="info-box">
             <h5>📍 DISTRICT</h5>
             <ul>
