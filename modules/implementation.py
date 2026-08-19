@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import io
+import re  # used for compliance matching
 from utils.db import get_supabase
 from auth.auth import require_role, get_current_user
 from utils.audit import log_action
@@ -13,7 +14,7 @@ CONVERGENCE_TYPES = [
 ]
 PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
 
-# ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING (for search filter) ----------
+# ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING ----------
 HOOGHLY_GPS = {
     "CHINSURAH MOGRA": ["BANDEL", "CHANDRAHATI-I", "CHANDRAHATI-II", "DEBANANDAPUR", "DIGSUIHOYERA", "KODALIA-I", "KODALIA-II", "MOGRA-I", "MOGRA-II", "SAPTAGRAM"],
     "POLBA DADPUR": ["AKHNA", "AMNAN", "BABNAN", "DADPUR", "GOSWAMIMALIPARA", "HARIT", "MAHANAD", "MAKALPUR", "POLBA", "RAJHAT", "SATITHAN", "SUGANDHA"],
@@ -96,6 +97,7 @@ def show():
             active_fy_id = f['id']
             break
 
+    # ---------- TABS DEFINITION (FIX: missing tabs) ----------
     tab1, tab2, tab3, tab4 = st.tabs([
         "🎯 Department Targets (Planning)", 
         "🏗️ Implementation Progress (Execution)", 
@@ -103,7 +105,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1 (UPDATED: added financial_year to target_record) =================
+    # ================= TAB 1 =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -139,7 +141,6 @@ def show():
                         options=list(fy_id_to_name.keys()),
                         format_func=lambda x: fy_id_to_name[x]
                     )
-                    # Get the year name for the selected ID (used to populate financial_year column)
                     selected_fy_year = fy_id_to_name.get(selected_fy_target_id, '')
 
                     if role == 'department':
@@ -264,7 +265,6 @@ def show():
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
                                 "financial_year_id": selected_fy_target_id,
-                                # FIX: Add the financial_year column (year name) to satisfy NOT NULL constraint
                                 "financial_year": selected_fy_year,
                                 "project_head": project_head.strip(),
                                 "activity": activity,
@@ -337,7 +337,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (unchanged) =================
+    # ================= TAB 2 =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -351,15 +351,12 @@ def show():
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
-            # -------- Single row: Department, Wing, Block, GP --------
             col_dept, col_wing, col_block, col_gp = st.columns(4)
 
-            # Department options
             dept_options_all = [{"id": d['id'], "name": d['department_name']} for d in departments]
             dept_names = ["All"] + [d['name'] for d in dept_options_all]
             dept_id_map = {d['name']: d['id'] for d in dept_options_all}
 
-            # Determine frozen state for Department and Wing
             dept_frozen = (role == 'department')
             if dept_frozen:
                 default_dept_name = dept_map.get(user.get('department_id'), '')
@@ -369,7 +366,6 @@ def show():
                 sel_dept_name = col_dept.selectbox("Department", dept_names)
                 sel_dept_id = dept_id_map.get(sel_dept_name) if sel_dept_name != "All" else None
 
-            # Wing options based on department selection
             if sel_dept_id:
                 dept_wings = dept_to_wings.get(sel_dept_id, [])
                 wing_names = ["All"] + [w['wing_name'] for w in dept_wings]
@@ -392,7 +388,6 @@ def show():
                 else:
                     sel_wing_id = None
 
-            # Block filter: from master blocks (all blocks in district)
             if role in ['district', 'block', 'department'] and user.get('district_id'):
                 district_blocks = [b for b in blocks if b['district_id'] == user['district_id']]
             else:
@@ -413,7 +408,6 @@ def show():
                 selected_block_name = col_block.selectbox("Block", block_names_all)
                 selected_block_id = block_id_from_name.get(selected_block_name) if selected_block_name != "All" else None
 
-            # GP options
             gp_options = ["All"]
             if selected_block_id:
                 block_key = selected_block_name.upper()
@@ -429,7 +423,6 @@ def show():
                 gp_options.extend(sorted(all_gps))
             selected_gp = col_gp.selectbox("Primary GP", gp_options)
 
-            # -------- Filter activities --------
             filtered_activities = activities_reg
             if sel_dept_id:
                 filtered_activities = [a for a in filtered_activities if a.get('department_id') == sel_dept_id]
@@ -602,7 +595,7 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3 (unchanged) =================
+    # ================= TAB 3 =================
     with tab3:
         st.markdown("#### 🤝 Synchronized Departmental Meeting Commitments")
         st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
@@ -687,84 +680,84 @@ def show():
         else:
             st.info("No resolution records found in the global governance system.")
 
-   # ================= TAB 4 (FIXED: robust matching using core keywords) =================
-with tab4:
-    st.markdown("#### 🚨 Departmental Target Compliance Tracker")
+    # ================= TAB 4 (FIXED: robust matching) =================
+    with tab4:
+        st.markdown("#### 🚨 Departmental Target Compliance Tracker")
 
-    q_t = supabase.table("department_targets").select("*")
-    q_r = supabase.table("convergence_register").select("*")
+        q_t = supabase.table("department_targets").select("*")
+        q_r = supabase.table("convergence_register").select("*")
 
-    if role == 'district' and user.get('district_id'):
-        q_t = q_t.eq("district_id", user['district_id'])
-        q_r = q_r.eq("district_id", user['district_id'])
-    elif role == 'block':
-        if user.get('district_id'): q_t = q_t.eq("district_id", user['district_id'])
-        if user.get('block_id'): q_r = q_r.eq("block_id", user['block_id'])
-    elif role == 'department':
-        if user.get('department_id'):
-            q_t = q_t.eq("department_id", user['department_id'])
-            q_r = q_r.eq("department_id", user['department_id'])
-        if user.get('district_id'):
+        if role == 'district' and user.get('district_id'):
             q_t = q_t.eq("district_id", user['district_id'])
             q_r = q_r.eq("district_id", user['district_id'])
+        elif role == 'block':
+            if user.get('district_id'): q_t = q_t.eq("district_id", user['district_id'])
+            if user.get('block_id'): q_r = q_r.eq("block_id", user['block_id'])
+        elif role == 'department':
+            if user.get('department_id'):
+                q_t = q_t.eq("department_id", user['department_id'])
+                q_r = q_r.eq("department_id", user['department_id'])
+            if user.get('district_id'):
+                q_t = q_t.eq("district_id", user['district_id'])
+                q_r = q_r.eq("district_id", user['district_id'])
 
-    df_tab4_tgts = pd.DataFrame(q_t.execute().data or [])
-    df_tab4_reg = pd.DataFrame(q_r.execute().data or [])
+        df_tab4_tgts = pd.DataFrame(q_t.execute().data or [])
+        df_tab4_reg = pd.DataFrame(q_r.execute().data or [])
 
-    if not df_tab4_tgts.empty:
-        if 'financial_year_id' in df_tab4_tgts.columns and active_fy_id is not None:
-            df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year_id'] == active_fy_id]
-        elif 'financial_year' in df_tab4_tgts.columns:
-            df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year'] == active_fy]
-        if 'desired_target' in df_tab4_tgts.columns:
-            df_tab4_tgts['desired_target'] = pd.to_numeric(df_tab4_tgts['desired_target'], errors='coerce').fillna(0)
+        if not df_tab4_tgts.empty:
+            if 'financial_year_id' in df_tab4_tgts.columns and active_fy_id is not None:
+                df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year_id'] == active_fy_id]
+            elif 'financial_year' in df_tab4_tgts.columns:
+                df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year'] == active_fy]
+            if 'desired_target' in df_tab4_tgts.columns:
+                df_tab4_tgts['desired_target'] = pd.to_numeric(df_tab4_tgts['desired_target'], errors='coerce').fillna(0)
 
-    if not df_tab4_reg.empty:
-        if 'financial_year_id' in df_tab4_reg.columns and active_fy_id is not None:
-            df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year_id'] == active_fy_id]
-        elif 'financial_year' in df_tab4_reg.columns:
-            df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year'] == active_fy]
+        if not df_tab4_reg.empty:
+            if 'financial_year_id' in df_tab4_reg.columns and active_fy_id is not None:
+                df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year_id'] == active_fy_id]
+            elif 'financial_year' in df_tab4_reg.columns:
+                df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year'] == active_fy]
 
-    compliance_data = []
-    if not df_tab4_tgts.empty:
-        for idx, row in df_tab4_tgts.iterrows():
-            d_id = row['department_id']
-            w_id = row.get('wing_id')
-            target_val = safe_int(row.get('desired_target', 0))
-            target_w_id_safe = None if pd.isna(w_id) else w_id
-            dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_map[target_w_id_safe].get('wing_name', 'Unknown')}" if target_w_id_safe and target_w_id_safe in wing_map else f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
-            
-            contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
-            
-            entered_count = 0
-            if not df_tab4_reg.empty:
-                dept_reg = df_tab4_reg[df_tab4_reg['department_id'] == d_id]
-                if 'activity_description' in dept_reg.columns:
-                    # ---- NEW ROBUST MATCHING: count works containing 'construction', 'kitchen', 'shed' ----
-                    def is_match(work_desc):
-                        work_lower = str(work_desc).lower()
-                        return all(word in work_lower for word in ['construction', 'kitchen', 'shed'])
-                    entered_count = dept_reg['activity_description'].apply(is_match).sum()
-                    # --------------------------------------------------------------------------------
+        compliance_data = []
+        if not df_tab4_tgts.empty:
+            for idx, row in df_tab4_tgts.iterrows():
+                d_id = row['department_id']
+                w_id = row.get('wing_id')
+                target_val = safe_int(row.get('desired_target', 0))
+                target_w_id_safe = None if pd.isna(w_id) else w_id
+                dept_display = f"{dept_map.get(d_id, 'Unknown')} ➔ {wing_map[target_w_id_safe].get('wing_name', 'Unknown')}" if target_w_id_safe and target_w_id_safe in wing_map else f"{dept_map.get(d_id, 'Unknown')} (Main Dept)"
+                
+                contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
+                
+                entered_count = 0
+                if not df_tab4_reg.empty:
+                    dept_reg = df_tab4_reg[df_tab4_reg['department_id'] == d_id]
+                    if 'activity_description' in dept_reg.columns:
+                        # ---- ROBUST KEYWORD MATCHING ----
+                        def is_match(work_desc):
+                            work_lower = str(work_desc).lower()
+                            return all(word in work_lower for word in ['construction', 'kitchen', 'shed'])
+                        entered_count = dept_reg['activity_description'].apply(is_match).sum()
+                        # ---------------------------------
 
-            gap = entered_count - target_val
-            status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
-            compliance_data.append({
-                "Department / Wing": dept_display, 
-                "Nodal Person": " | ".join(contacts) if contacts else "⚠️ No Login",
-                "Target Activity": row['activity'], 
-                "Target Set": target_val, 
-                "Entries Captured": entered_count, 
-                "Gap": gap, 
-                "Status": status
-            })
+                gap = entered_count - target_val
+                status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
+                compliance_data.append({
+                    "Department / Wing": dept_display, 
+                    "Nodal Person": " | ".join(contacts) if contacts else "⚠️ No Login",
+                    "Target Activity": row['activity'], 
+                    "Target Set": target_val, 
+                    "Entries Captured": entered_count, 
+                    "Gap": gap, 
+                    "Status": status
+                })
 
-    def style_compliance(row):
-        if row['Status'] != "Target Matched":
-            return ['background-color: #ffebee; color: #b71c1c; font-weight: bold;'] * len(row)
-        return ['background-color: #e8f5e9; color: #1b5e20; font-weight: bold;'] * len(row)
+        def style_compliance(row):
+            if row['Status'] != "Target Matched":
+                return ['background-color: #ffebee; color: #b71c1c; font-weight: bold;'] * len(row)
+            return ['background-color: #e8f5e9; color: #1b5e20; font-weight: bold;'] * len(row)
 
-    if compliance_data:
-        st.dataframe(pd.DataFrame(compliance_data).style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
-    else:
-        st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
+        if compliance_data:
+            st.dataframe(pd.DataFrame(compliance_data).style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
