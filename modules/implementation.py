@@ -176,11 +176,43 @@ def show():
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                    # Project Head (Theme)
-                    theme_options = ["Select Theme"] + [t['theme_name'] for t in themes]
+                    # ---- NEW: Static list of Project Heads (Themes) ----
+                    PROJECT_HEAD_OPTIONS = [
+                        "Canals, Check Dams & Dykes",
+                        "Ponds & Water Harvesting",
+                        "Wells & Micro-Irrigation",
+                        "Waterlogged Land Reclamation",
+                        "Afforestation & Plantations",
+                        "Rooftop Rainwater Harvesting",
+                        "Rural Roads & Culverts",
+                        "GP Bhawans & Public Buildings",
+                        "School Infrastructure & Playgrounds",
+                        "Crematoria & Graveyards",
+                        "Solid & Liquid Waste Management",
+                        "Solar & Renewable Energy",
+                        "Parking, Sheds & Amenities",
+                        "Rural Housing (PMAY-G)",
+                        "Jal Jeevan Mission Maintenance",
+                        "Skill Centres & Work Sheds",
+                        "Rural Haats & Markets",
+                        "Agri-Storage & Cold Chains",
+                        "SHG & Federation Buildings",
+                        "Compost Structures",
+                        "Livestock Shelters & Dairy",
+                        "Fisheries & Aquaculture",
+                        "Nurseries & Building Materials",
+                        "Circular Economy Processing Units",
+                        "Disaster & Cyclone Shelters",
+                        "Embankments & Mitigation Works",
+                        "Post-Disaster Restoration"
+                    ]
+                    # Map project head to theme id (by name)
                     theme_id_map = {t['theme_name']: t['id'] for t in themes}
-                    selected_theme_name = st.selectbox("Convergence Project Head*", theme_options)
-                    selected_theme_id = theme_id_map.get(selected_theme_name) if selected_theme_name != "Select Theme" else None
+                    selected_theme_name = st.selectbox("Convergence Project Head*", PROJECT_HEAD_OPTIONS)
+                    selected_theme_id = theme_id_map.get(selected_theme_name, None)
+                    if not selected_theme_id:
+                        st.warning("Selected Project Head not found in Themes master. Please add it or choose an existing one.")
+                    # --------------------------------------------
 
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
 
@@ -228,33 +260,32 @@ def show():
                     activity_options = {a['activity_name']: a['id'] for a in valid_activities}
                     activity_names = list(activity_options.keys())
 
-                    # Fetch existing targets for this combination
+                    # Fetch existing targets for this combination (department, wing, district, fy, theme)
                     existing_targets = []
-                    if active_dept_id and dist_id and selected_fy_target_id:
-                        q_existing = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id)
+                    if active_dept_id and dist_id and selected_fy_target_id and selected_theme_id:
+                        q_existing = supabase.table("department_targets").select("*") \
+                            .eq("department_id", active_dept_id) \
+                            .eq("district_id", dist_id) \
+                            .eq("financial_year_id", selected_fy_target_id)
                         if active_wing_id:
                             q_existing = q_existing.eq("wing_id", active_wing_id)
                         else:
                             q_existing = q_existing.is_("wing_id", "null")
-                        if selected_theme_id:
-                            # We need to join with activities to filter by theme? Or we can filter later.
-                            pass
+                        # Filter by theme via activity name (since activity names are unique, we can get them from valid_activities)
+                        theme_act_names = [a['activity_name'] for a in valid_activities if a.get('theme_id') == selected_theme_id]
+                        if theme_act_names:
+                            q_existing = q_existing.in_("activity", theme_act_names)
                         existing_targets = q_existing.execute().data or []
 
-                    # Create a DataFrame for the data editor
+                    # Build DataFrame for data editor
                     if existing_targets:
-                        # Pre‑populate with existing targets
                         rows = []
                         for t in existing_targets:
-                            # We need to find the activity name
-                            act_id = t.get('activity')
-                            # activity is the activity name stored as text? Actually it's stored as activity name (string) in department_targets.
                             act_name = t.get('activity', '')
                             block_id = t.get('block_id')
                             block_name = block_map.get(block_id, '')
                             if not block_name:
-                                # If block_id is NULL, this is a district‑wide target; we'll skip or treat as "All Blocks"
-                                continue
+                                continue  # skip district‑wide targets
                             rows.append({
                                 "Block": block_name,
                                 "Approved Activity": act_name,
@@ -265,7 +296,6 @@ def show():
                             })
                         df_editor = pd.DataFrame(rows)
                     else:
-                        # Empty table with one row as placeholder
                         df_editor = pd.DataFrame({
                             "Block": [""],
                             "Approved Activity": [""],
@@ -275,14 +305,14 @@ def show():
                             "Expected Persondays": [0]
                         })
 
-                    # Use data_editor with dynamic rows
+                    # Data editor with dynamic rows
                     edited_df = st.data_editor(
                         df_editor,
                         use_container_width=True,
                         num_rows="dynamic",
                         column_config={
                             "Block": st.column_config.SelectboxColumn(
-                                "Block",
+                                "Block*",
                                 options=block_names,
                                 required=True
                             ),
@@ -330,7 +360,6 @@ def show():
                         if edited_df.empty or edited_df.isnull().all().all():
                             errors.append("At least one row with valid data is required.")
                         else:
-                            # Check for empty rows
                             for idx, row in edited_df.iterrows():
                                 if pd.isna(row['Block']) or row['Block'] == '':
                                     errors.append(f"Row {idx+1}: Block is required.")
@@ -353,20 +382,18 @@ def show():
                                 q_del = q_del.eq("wing_id", active_wing_id)
                             else:
                                 q_del = q_del.is_("wing_id", "null")
-                            # We need to filter by theme: we have to get activities with that theme and delete targets where activity in those.
-                            # Since activity is stored as name, we need to get activity names for the theme.
+                            # Filter by theme
                             theme_act_names = [a['activity_name'] for a in valid_activities if a.get('theme_id') == selected_theme_id]
                             if theme_act_names:
                                 q_del = q_del.in_("activity", theme_act_names)
                             else:
                                 st.warning("No activities found for the selected theme. Nothing to delete.")
-                                # Still proceed to insert new ones
                             try:
                                 q_del.execute()
                             except Exception as e:
                                 st.warning(f"Could not delete old targets: {e}")
 
-                            # Insert new targets from the table
+                            # Insert new targets
                             inserted = 0
                             for idx, row in edited_df.iterrows():
                                 if pd.isna(row['Block']) or row['Block'] == '':
@@ -384,9 +411,9 @@ def show():
                                     "block_id": block_id,
                                     "financial_year_id": selected_fy_target_id,
                                     "financial_year": selected_fy_year,
-                                    "project_head": selected_theme_name,  # store theme name
+                                    "project_head": selected_theme_name,
                                     "activity": act_name,
-                                    "asset_count": 0,  # removed, set to 0
+                                    "asset_count": 0,  # removed
                                     "annual_plan_scope": annual_plan_scope,
                                     "desired_target": int(row['Desired Target']),
                                     "department_fund": float(row['Dept Fund (₹ Lakhs)']),
