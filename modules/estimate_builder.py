@@ -163,7 +163,7 @@ def show():
 
 
     # ============================================================
-    # INNER HELPER FUNCTIONS (Defined here to avoid UnboundLocalError)
+    # INNER HELPER FUNCTIONS
     # ============================================================
     def format_spec_dropdown(code):
         if not code: return "Select Specification..."
@@ -374,6 +374,7 @@ def show():
         active_watermark = settings_res.data[0]['watermark_text'] if settings_res.data else 'SECUReX DRAFT'
     except: active_watermark = 'SECUReX DRAFT'
 
+
     # ============================================================
     # UI RENDERING STARTS HERE
     # ============================================================
@@ -389,60 +390,13 @@ def show():
             st.rerun()
     st.markdown("---")
 
-    # ---------- COMPACT WORK DETAILS (FORCED PRESELECTION) ----------
+    # ---------- SIDE-BY-SIDE: WORK SELECTION & TOTALS ----------
     if not work_options:
         st.warning("⚠️ No approved works found in your Convergence Register.")
         st.info("You must add a work to the Convergence Register before preparing an estimate.")
         st.stop()  # Halts execution to prevent errors below
 
-    st.markdown("##### 📋 Work Selection")
-    
-    selected_label = st.selectbox(
-        "Select Work from Convergence Register",
-        options=[opt['label'] for opt in work_options],
-        index=0,
-        key="work_selector",
-        label_visibility="collapsed" # Hides the label to save space
-    )
-    
-    selected_opt = next((opt for opt in work_options if opt['label'] == selected_label), None)
-
-    if selected_opt:
-        st.session_state['selected_work_id'] = selected_opt['id']
-        st.session_state['work_name'] = selected_opt['work_name']
-
-        theme_id = selected_opt['theme_id']
-        if theme_id:
-            theme_row = df_themes[df_themes['id'] == theme_id]
-            st.session_state['selected_theme'] = theme_row.iloc[0]['theme_name'] if not theme_row.empty else "Unknown Theme"
-            act_rows = df_activities[df_activities['theme_id'] == theme_id]
-            
-            # Match activity from work name prefix
-            work_name = selected_opt['work_name']
-            matched = None
-            for _, act_row in act_rows.iterrows():
-                if work_name.startswith(act_row['activity_name']):
-                    matched = act_row['activity_name']
-                    break
-            st.session_state['work_type'] = matched if matched else (act_rows.iloc[0]['activity_name'] if not act_rows.empty else "")
-        else:
-            st.session_state['selected_theme'] = "No Theme"
-            st.session_state['work_type'] = "No Base Activity"
-
-        # Very shortened UI container without the block name
-        conv_row = selected_opt.get('row')
-        dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A') if conv_row is not None else 'N/A'
-        
-        st.markdown(f"""
-        <div style='font-size: 13.5px; color: #333; background-color: #e9f2f9; padding: 10px 15px; border-left: 4px solid #1F77B4; border-radius: 4px; margin-bottom: 20px;'>
-            <b>Work:</b> {selected_opt['work_name']}<br>
-            <b>Theme:</b> {st.session_state.get('selected_theme', 'N/A')} &nbsp;|&nbsp; 
-            <b>Activity:</b> {st.session_state.get('work_type', 'N/A')} &nbsp;|&nbsp; 
-            📍 <b>{dist_name}</b>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # ---------- TOTALS & ACTIONS ----------
+    # Calculate totals early so they can be rendered in the right column
     totals = calculate_totals(st.session_state['estimate_data'])
     total_a = totals['unskilled']
     total_b = totals['skilled'] + totals['material'] + totals['gst']
@@ -451,16 +405,72 @@ def show():
     unskilled_rate = df_lmr[df_lmr['lmr_code'] == '0115']['rate'].iloc[0] if not df_lmr.empty and '0115' in df_lmr['lmr_code'].values else 1
     person_days = (total_a / unskilled_rate) if unskilled_rate > 0 else 0
 
-    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 2, 2, 1])
-    col_t1.metric("Component A (Unskilled Labour)", f"₹ {total_a:,.2f}", f"👷 {person_days:,.2f} Person Days", delta_color="off")
-    col_t2.metric("Component B (Skilled + Material + GST)", f"₹ {total_b:,.2f}")
-    col_t3.success(f"### Grand Total: ₹ {grand_total:,.2f}")
-    with col_t4:
-        if st.button("🖨️ Print Estimate", use_container_width=True):
-            st.session_state['print_trigger'] = True
-            st.rerun()
+    # Layout Containers: Left for Work Details, Right for Financial Cards
+    col_work, col_totals = st.columns([1.1, 1.3], gap="large")
 
-    # Print trigger
+    with col_work:
+        st.markdown("##### 📋 Work Selection")
+        
+        selected_label = st.selectbox(
+            "Select Work from Convergence Register",
+            options=[opt['label'] for opt in work_options],
+            index=0,
+            key="work_selector",
+            label_visibility="collapsed"
+        )
+        
+        selected_opt = next((opt for opt in work_options if opt['label'] == selected_label), None)
+
+        if selected_opt:
+            st.session_state['selected_work_id'] = selected_opt['id']
+            st.session_state['work_name'] = selected_opt['work_name']
+
+            theme_id = selected_opt['theme_id']
+            if theme_id:
+                theme_row = df_themes[df_themes['id'] == theme_id]
+                st.session_state['selected_theme'] = theme_row.iloc[0]['theme_name'] if not theme_row.empty else "Unknown Theme"
+                act_rows = df_activities[df_activities['theme_id'] == theme_id]
+                
+                work_name = selected_opt['work_name']
+                matched = None
+                for _, act_row in act_rows.iterrows():
+                    if work_name.startswith(act_row['activity_name']):
+                        matched = act_row['activity_name']
+                        break
+                st.session_state['work_type'] = matched if matched else (act_rows.iloc[0]['activity_name'] if not act_rows.empty else "")
+            else:
+                st.session_state['selected_theme'] = "No Theme"
+                st.session_state['work_type'] = "No Base Activity"
+
+            conv_row = selected_opt.get('row')
+            dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A') if conv_row is not None else 'N/A'
+            
+            st.markdown(f"""
+            <div style='font-size: 13.5px; color: #333; background-color: #e9f2f9; padding: 10px 15px; border-left: 4px solid #1F77B4; border-radius: 4px; margin-bottom: 20px;'>
+                <b>Work:</b> {selected_opt['work_name']}<br>
+                <b>Theme:</b> {st.session_state.get('selected_theme', 'N/A')} &nbsp;|&nbsp; 
+                <b>Activity:</b> {st.session_state.get('work_type', 'N/A')} &nbsp;|&nbsp; 
+                📍 <b>{dist_name}</b>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with col_totals:
+        st.markdown("##### 💰 Estimate Summary")
+        
+        # Nested columns to create the component cards
+        t_col1, t_col2 = st.columns(2)
+        t_col1.metric("Component A (Unskilled Labour)", f"₹ {total_a:,.2f}", f"👷 {person_days:,.2f} Person Days", delta_color="off")
+        t_col2.metric("Component B (Skilled + Material + GST)", f"₹ {total_b:,.2f}")
+
+        t_col3, t_col4 = st.columns([2.5, 1])
+        t_col3.success(f"### Grand Total: ₹ {grand_total:,.2f}")
+        with t_col4:
+            st.write("") # Quick spacer to align the button vertically with the success box
+            if st.button("🖨️ Print Estimate", use_container_width=True):
+                st.session_state['print_trigger'] = True
+                st.rerun()
+
+    # Print trigger logic
     if st.session_state.get('print_trigger', False):
         st.session_state['print_trigger'] = False
         html_report = generate_print_html(
