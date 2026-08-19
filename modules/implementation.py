@@ -15,14 +15,58 @@ CONVERGENCE_TYPES = [
 PIA_OPTIONS = ["Select PIA", "GP", "Block", "Department", "Other"]
 
 # ---------- HOOGHLY DISTRICT BLOCK → GP MAPPING ----------
-HOOGHLY_GPS = { ... }  # (unchanged, keep as before)
+HOOGHLY_GPS = {
+    "CHINSURAH MOGRA": ["BANDEL", "CHANDRAHATI-I", "CHANDRAHATI-II", "DEBANANDAPUR", "DIGSUIHOYERA", "KODALIA-I", "KODALIA-II", "MOGRA-I", "MOGRA-II", "SAPTAGRAM"],
+    "POLBA DADPUR": ["AKHNA", "AMNAN", "BABNAN", "DADPUR", "GOSWAMIMALIPARA", "HARIT", "MAHANAD", "MAKALPUR", "POLBA", "RAJHAT", "SATITHAN", "SUGANDHA"],
+    "DHANIAKHALI": ["BELMURI", "BHANDARHATI-I", "BHANDARHATI-II", "BHASTARA", "DASHGHARA-I", "DASHGHARA-II", "DHANEKHALI-I", "DHANEKHALI-II", "GOPINATHPUR-I", "GOPINATHPUR-II", "GUDUBARI-I", "GUDUBARI-II", "GURAP", "KHAJUDAHAMILKI", "MANDRA", "PERAMBUASAHABAZAR", "SOMASPUR-I", "SOMASPUR-II"],
+    "PANDUA": ["BANTIKABAINCHI", "BELOONDHAMASIN", "BERELAKONCHMALI", "HARALDASPUR", "ITACHUNAKHANYAN", "JAMNA", "JAMNAGARMONDALAII", "JAYERDWARBASINI", "KSHIRKUNDI-NAMAJGRAM-NIYASA", "LCHHOBADASPUR", "PANCHAGARA-TOREGRAM", "PANDUA", "RAMESWARPUR-GOPALNAGAR", "SARAI-TINNA", "SHIKHIRACHANPTA", "SIMLAGARHVITASIN"],
+    "BALAGARH": ["BAKLIADHOBAPARA", "CHARKRISHNABATI", "DUMURDAHANITYANANDAPUR-I", "DUMURDAHANITYANANDAPUR-II", "EKTARPUR", "GUPTIPARA-I", "GUPTIPARA-II", "JIRAT", "MOHIPALPUR", "SIJAKAMALPUR", "SOMRA-I", "SOMRA-II", "SRIPUR-BALAGARH"],
+    "SINGUR": ["ANANDANAGAR", "BAGDANGACHINAMORE", "BAINCHIPOTA", "BALARAMBATI", "BARUIPARAPALTAGARH", "BASUBATI", "BERABERI", "BIGHATI", "BORA", "BORAIPAHALAMPUR", "GOPALNAGAR", "KAMARKUNDUGOPALNAGARDALUIGACHHA", "MIRZAPURBANKIPUR", "NASIBPUR", "SINGUR-I", "SINGUR-II"],
+    "HARIPAL": ["HARIPALASHUTOSH", "ALIPURKASHIPUR", "BANDIPUR", "CHANDANPUR", "DWARHATTA", "HARIPALKINGKARBATI", "HARIPALSAHADEV", "JEJUR", "KAIKALA", "NALIKULPASCHIM", "NALIKULPURBA", "NARAYANPURBAHIRKHANDA", "PASCHIMGOPINATHPUR", "PYANTRA", "SRIPATIPURILIPUR"],
+    "TARAKESWAR": ["ASHTARADATTAPUR", "BALIGORI-I", "BALIGORI-II", "BHANJIPUR", "CHAMPADANGA", "KESABCHAK", "NAITAMALPAHARPUR", "PURBARAMNAGAR", "SANTOSHPUR", "TALPUR"],
+    "SERAMPORE UTTARPARA": ["KANAIPUR", "NABAGRAM", "PAYARAPUR", "RAGHUNATHPUR", "RAJYADHARPUR", "RISHRA"],
+    "CHANDITALA I": ["AINYA", "BHAGABATIPUR", "GANGADHARPUR", "HARIPUR", "KRISHNARAMPUR", "KUMIRMORE", "MASAT", "NABABPUR", "SHIYAKHALA"],
+    "CHANDITALA II": ["BAKSA", "BARIJHATI", "BEGUMPUR", "CHANDITALA", "GARALGACHHA", "JANAI", "KAPASARIA", "NAITI", "PANCHGHORA"],
+    "JANGIPARA": ["ANTPUR", "DILAKASH", "FURFURA", "JANGIPARA", "KOTALPUR", "MUNDALIKA", "RADHANAGAR", "RAJBALHAT-I", "RAJBALHAT-II", "RASIDPUR"],
+    "GOGHAT I": ["BALI", "BHADUR", "GOGHAT", "KUMARSA", "NAKUNDA", "RAGHUBATI", "SAORA"],
+    "GOGHAT II": ["BADANGANJ-FALUI-I", "BADANGANJ-FALUI-II", "BENGAI", "HAZIPUR", "KAMARPUKUR", "KUMARGANJ", "MANDARAN", "PASCHIMPARA", "SHYAMBAZAR"],
+    "ARAMBAGH": ["ARANDI-I", "ARANDI-II", "BATANAL", "GOURHATI-I", "GOURHATI-II", "HARINKHOLA-I", "HARINKHOLA-II", "MADHABPUR", "MALAYPUR-I", "MALAYPUR-II", "MAYAPUR-I", "MAYAPUR-II", "SALEPUR-I", "SALEPUR-II", "TIROLE"],
+    "KHANAKUL I": ["ARUNDA", "BALIPUR", "GHOSHPUR", "KHANAKUL-I", "KHANAKUL-II", "KISHOREPUR-I", "KISHOREPUR-II", "POLE-I", "POLE-II", "RAMMOHAN-I", "RAMMOHAN-II", "TANTISAL", "THAKURANICHAK"],
+    "KHANAKUL II": ["CHINGRA", "DHANYAGORI", "JAGATPUR", "MAROKHANA", "NATIBPUR-I", "NATIBPUR-II", "PALASHPAI-I", "PALASHPAI-II", "RAJHATI-I", "RAJHATI-II", "SABALSINGHAPUR"],
+    "PURSURAH": ["BHANGAMORA", "CHILADANGI", "DIHIBADPUR", "KELEPARA", "PURSURAH-I", "PURSURAH-II", "SHYAMPUR", "SREERAMPUR"]
+}
 
-def safe_int(val): ...  # unchanged
+def safe_int(val):
+    if pd.isna(val) or val is None or val == '': return 0
+    try: return int(float(val))
+    except (ValueError, TypeError): return 0
 
 @st.cache_data(ttl=600)
-def fetch_master_data(): ...  # unchanged
+def fetch_master_data():
+    supabase = get_supabase()
+    try:
+        departments = supabase.table("departments").select("id,department_name").execute().data or []
+        wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
+        districts = supabase.table("districts").select("id,district_name").execute().data or []
+        blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
+        activities = supabase.table("activities").select("*").eq("active", True).execute().data or []
+        act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
+        fys = supabase.table("financial_years").select("*").eq("active", True).execute().data or []
+        users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
+        return departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data
+    except Exception:
+        # Return empty lists to avoid unpacking errors
+        return [], [], [], [], [], [], [], []
 
-def safe_parse_date(date_val): ...  # unchanged
+def safe_parse_date(date_val):
+    if pd.isna(date_val) or not date_val:
+        return None
+    try:
+        if isinstance(date_val, str):
+            return pd.to_datetime(date_val).date()
+        return date_val
+    except Exception:
+        return None
 
 def show():
     require_role('superadmin', 'district', 'block', 'department')
@@ -63,7 +107,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1 (UPDATED: added block selector) =================
+    # ================= TAB 1 =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -113,10 +157,8 @@ def show():
                         dist_sel = list(t_dist_dict.keys())[0] if t_dist_dict else None
                         dist_id = user.get('district_id')
                         st.markdown(f"<span style='color:#64748B; font-size:12px;'>DISTRICT</span><br>**{dist_sel}**<br><br>", unsafe_allow_html=True)
-                        # For department, block is not applicable; they set targets at district level.
                         active_block_id = None
                     else:
-                        # Superadmin or District: show department/wing and block selectors
                         dept_options = [{"label": f"{d['department_name']} (Main Department)", "dept_id": d['id'], "wing_id": None} for d in departments]
                         for w in wings:
                             p_name = dept_map.get(w['department_id'], "Unknown Department")
@@ -129,8 +171,7 @@ def show():
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                        # ---- NEW: Block selector (for block-wise targets) ----
-                        # Get blocks for the selected district
+                        # Block selector
                         if dist_id:
                             dist_blocks = [b for b in blocks if b['district_id'] == dist_id]
                         else:
@@ -141,7 +182,6 @@ def show():
                             active_block_id = block_name_to_id.get(block_selected)
                         else:
                             active_block_id = None
-                        # ---------------------------------------------
 
                     project_head_options = [
                         "AWC (Anganwadi Center)", "Plantation", "Water Conservation & Harvesting",
@@ -169,7 +209,6 @@ def show():
                     st.markdown("##### Departmental Scheme / Fund Convergence")
                     
                     existing_record = None
-                    # Build query with block_id if set
                     if active_dept_id and dist_id and activity and activity != "No activities available":
                         q_check = supabase.table("department_targets").select("*").eq("department_id", active_dept_id).eq("district_id", dist_id).eq("financial_year_id", selected_fy_target_id).eq("activity", activity)
                         if active_wing_id:
@@ -244,7 +283,7 @@ def show():
                                 "department_id": active_dept_id,
                                 "wing_id": active_wing_id,
                                 "district_id": dist_id,
-                                "block_id": active_block_id,  # NEW
+                                "block_id": active_block_id,
                                 "financial_year_id": selected_fy_target_id,
                                 "financial_year": selected_fy_year,
                                 "project_head": project_head.strip(),
@@ -297,7 +336,6 @@ def show():
                     return f"{d_name} (Main)"
                 df_t['Department / Wing'] = df_t.apply(format_dept_display, axis=1)
                 if 'project_head' not in df_t.columns: df_t['project_head'] = "N/A"
-                # Add block name if block_id exists
                 if 'block_id' in df_t.columns:
                     df_t['Block'] = df_t['block_id'].map(block_map).fillna('All Blocks')
                 df_t.rename(columns={
@@ -325,7 +363,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (with clickable MIS link) =================
+    # ================= TAB 2 =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -339,7 +377,6 @@ def show():
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
-            # -------- Filters (unchanged) --------
             col_dept, col_wing, col_block, col_gp = st.columns(4)
             dept_options_all = [{"id": d['id'], "name": d['department_name']} for d in departments]
             dept_names = ["All"] + [d['name'] for d in dept_options_all]
@@ -445,7 +482,7 @@ def show():
                     with col_p_left:
                         st.markdown("##### 📝 Update Progress Status")
 
-                        # -------- Clickable MIS Link --------
+                        # Clickable MIS Link
                         st.markdown(
                             """
                             <div style="margin-bottom: 10px;">
@@ -456,10 +493,8 @@ def show():
                             """,
                             unsafe_allow_html=True
                         )
-                        # ---------------------------------
 
                         with st.form("update_progress_form"):
-                            # -------- Row 1: New Status & MIS Code --------
                             col_status, col_mis = st.columns(2)
                             status_options = [
                                 "Planned",
@@ -493,7 +528,6 @@ def show():
                                 placeholder="e.g. 3206002005/FP/VB/320201060600000"
                             )
 
-                            # -------- Row 2: PIA & Convergence Type --------
                             col_pia, col_conv = st.columns(2)
                             is_editable = role in ['superadmin', 'district']
                             curr_pia = selected_act.get("pia_type", "Select PIA")
@@ -514,14 +548,12 @@ def show():
                                 disabled=not is_editable
                             )
 
-                            # -------- Row 3: Physical Achievement slider --------
                             phys_ach = st.slider(
                                 "Physical Achievement (%)*",
                                 min_value=0, max_value=100,
                                 value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0))
                             )
 
-                            # -------- Row 4: Financials & MIS Registration --------
                             st.markdown("##### 💰 Financials & MIS Registration")
                             col_p3, col_p4 = st.columns(2)
                             fin_ach = col_p3.number_input(
@@ -530,7 +562,6 @@ def show():
                                 value=float(selected_act.get('financial_achievement', 0.0) or 0.0)
                             )
 
-                            # Sanction fields in columns
                             col_s1, col_s2, col_s3 = st.columns(3)
                             sanction_wages = col_s1.number_input(
                                 "Sanction Wages (₹)",
@@ -547,7 +578,6 @@ def show():
                             total_sanction = sanction_wages + sanction_material
                             col_s3.text_input("Total Sanction (₹)", value=f"{total_sanction:,}", disabled=True)
 
-                            # -------- Row 5: Mandays (Current FY) & Persondays (Cumulative) --------
                             col_mandays, col_persondays = st.columns(2)
                             current_fy_mandays = col_mandays.number_input(
                                 "Mandays Generated (Current FY)",
@@ -560,7 +590,6 @@ def show():
                                 value=int(selected_act.get('persondays_generated', 0) or 0)
                             )
 
-                            # -------- Row 6: Schedule & Blockages --------
                             st.markdown("##### 📅 Schedule & Blockages")
                             col_p5, col_p6, col_p7 = st.columns(3)
                             start_date = col_p5.date_input(
@@ -576,13 +605,11 @@ def show():
                                 value=safe_parse_date(selected_act.get('actual_completion_date'))
                             )
 
-                            # -------- Row 7: Remarks --------
                             remarks = st.text_area(
                                 "Remarks / Blockage Details",
                                 value=selected_act.get('remarks', '') or ''
                             )
 
-                            # -------- Submit button --------
                             if st.form_submit_button("Commit Progress Update", type="primary", use_container_width=True):
                                 mis_required = new_status not in ["Planned", "Delayed", "Dropped"]
                                 if mis_required and not mis_code_val.strip():
@@ -648,7 +675,7 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3 (unchanged) =================
+    # ================= TAB 3 =================
     with tab3:
         st.markdown("#### 🤝 Synchronized Departmental Meeting Commitments")
         st.caption("Live Feed: Real-time action points assigned from statutory committee meetings across District and Block jurisdictions.")
@@ -733,8 +760,7 @@ def show():
         else:
             st.info("No resolution records found in the global governance system.")
 
-  
-    # ================= TAB 4 (UPDATED: block-wise compliance) =================
+    # ================= TAB 4 =================
     with tab4:
         st.markdown("#### 🚨 Departmental Target Compliance Tracker")
 
@@ -748,7 +774,6 @@ def show():
             if user.get('district_id'): q_t = q_t.eq("district_id", user['district_id'])
             if user.get('block_id'): 
                 q_r = q_r.eq("block_id", user['block_id'])
-                # For block user, show only targets for their block
                 q_t = q_t.eq("block_id", user['block_id'])
         elif role == 'department':
             if user.get('department_id'):
@@ -777,11 +802,10 @@ def show():
 
         compliance_data = []
         if not df_tab4_tgts.empty:
-            # Group targets by block, department, wing, activity
             for _, row in df_tab4_tgts.iterrows():
                 d_id = row['department_id']
                 w_id = row.get('wing_id')
-                b_id = row.get('block_id')  # may be None
+                b_id = row.get('block_id')
                 target_val = safe_int(row.get('desired_target', 0))
                 t_act = row.get('activity', '')
 
@@ -791,13 +815,10 @@ def show():
                 dept_display = f"{dept_name} → {wing_name}" if target_w_id_safe else dept_name
                 block_name = block_map.get(b_id, 'All Blocks') if b_id else 'All Blocks'
 
-                # Get contacts
                 contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
 
-                # Count entries for this block, dept, wing, activity
                 entered_count = 0
                 if not df_tab4_reg.empty:
-                    # Filter register rows matching block, dept, wing
                     mask = (df_tab4_reg['department_id'] == d_id)
                     if b_id:
                         mask &= (df_tab4_reg['block_id'] == b_id)
@@ -809,7 +830,6 @@ def show():
                     if 'activity_description' in dept_reg.columns:
                         def is_match(work_desc):
                             work_lower = str(work_desc).lower()
-                            # Use the same robust matching: at least 3 common words
                             target_words = set(re.findall(r'\w+', str(t_act).lower()))
                             work_words = set(re.findall(r'\w+', work_lower))
                             common = target_words.intersection(work_words)
@@ -835,9 +855,7 @@ def show():
             return ['background-color: #e8f5e9; color: #1b5e20; font-weight: bold;'] * len(row)
 
         if compliance_data:
-            # Group by block for better display? But we'll show all rows.
             df_comp = pd.DataFrame(compliance_data)
-            # Optional: add filters for block and department
             col_f1, col_f2 = st.columns(2)
             blocks = sorted(df_comp['Block'].unique())
             sel_block = col_f1.selectbox("Filter by Block", options=["All"] + blocks)
