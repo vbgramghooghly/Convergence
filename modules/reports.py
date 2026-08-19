@@ -63,16 +63,19 @@ def show():
     if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
 
     # ==========================================
-    # 5. REPORT SELECTION (Same row columns)
+    # 5. REPORT SELECTION (SAME ROW with Filters)
     # ==========================================
-    col_c1, col_c2 = st.columns(2)
-    report_category = col_c1.selectbox("1. Select Report Category", [
-        "Official Statutory Reports",
-        "Executive & Performance Analytics",
-        "Financial & Technical Analytics",
-        "Risk, Delay & Master Statements",
-        "Meeting & Resolution Register"
-    ])
+    # Updated to use a 3-column layout: Dropdown 1, Dropdown 2, Filters Button
+    col_c1, col_c2, col_c3 = st.columns([3, 3, 1])
+    
+    with col_c1:
+        report_category = st.selectbox("1. Select Report Category", [
+            "Official Statutory Reports",
+            "Executive & Performance Analytics",
+            "Financial & Technical Analytics",
+            "Risk, Delay & Master Statements",
+            "Meeting & Resolution Register"
+        ])
 
     # Cascading report type based on category
     if report_category == "Official Statutory Reports":
@@ -107,11 +110,11 @@ def show():
             "Department-wise Resolution Statement",
         ]
 
-    report_type = col_c2.selectbox("2. Select Specific Report Format", report_opts)
-    st.markdown("---")
+    with col_c2:
+        report_type = st.selectbox("2. Select Specific Report Format", report_opts)
 
     # ==========================================
-    # 6. ADVANCED FILTERS (Popover hidden by default)
+    # 6. ADVANCED FILTERS (Now inside the 3rd column, same row!)
     # ==========================================
     filtered_df = df.copy()
     filter_values = {}
@@ -140,8 +143,9 @@ def show():
     if "theme_name" not in available_cols:
         show_filters = [f for f in show_filters if f != "theme"]
 
-    if show_filters:
-        with st.popover("🔍 Click to apply Advanced Filters"):
+    # Place the popover inside the 3rd column
+    with col_c3:
+        with st.popover("🔍 Filters"):
             cols = st.columns(min(3, len(show_filters)))
             for i, f in enumerate(show_filters):
                 col = cols[i % 3]
@@ -185,24 +189,24 @@ def show():
             if st.button("Reset Filters"):
                 st.rerun()
 
-        # Apply filters
-        for key, vals in filter_values.items():
-            if vals:
-                if key == "district":
-                    filtered_df = filtered_df[filtered_df["district_name"].isin(vals)]
-                elif key == "block":
-                    filtered_df = filtered_df[filtered_df["block_name"].isin(vals)]
-                elif key == "department":
-                    filtered_df = filtered_df[filtered_df["department_name"].isin(vals)]
-                elif key == "theme":
-                    filtered_df = filtered_df[filtered_df["theme_name"].isin(vals)]
-                elif key == "status":
-                    filtered_df = filtered_df[filtered_df["current_status"].isin(vals)]
-                elif key == "financial_year":
-                    if "financial_year" in filtered_df.columns:
-                        filtered_df = filtered_df[filtered_df["financial_year"].isin(vals)]
-        
-        st.markdown("---")
+    # Apply filters to the dataframe
+    for key, vals in filter_values.items():
+        if vals:
+            if key == "district":
+                filtered_df = filtered_df[filtered_df["district_name"].isin(vals)]
+            elif key == "block":
+                filtered_df = filtered_df[filtered_df["block_name"].isin(vals)]
+            elif key == "department":
+                filtered_df = filtered_df[filtered_df["department_name"].isin(vals)]
+            elif key == "theme":
+                filtered_df = filtered_df[filtered_df["theme_name"].isin(vals)]
+            elif key == "status":
+                filtered_df = filtered_df[filtered_df["current_status"].isin(vals)]
+            elif key == "financial_year":
+                if "financial_year" in filtered_df.columns:
+                    filtered_df = filtered_df[filtered_df["financial_year"].isin(vals)]
+    
+    st.markdown("---")
 
     # ==========================================
     # 7. PRINT CSS (Robust)
@@ -237,7 +241,6 @@ def show():
     # ==========================================
     st.markdown(f"### 📄 {report_type}")
 
-    # Shared Column Config for modern tables
     TABLE_CONFIG = {
         "desired_target": st.column_config.NumberColumn("Target", format="%d"),
         "department_fund": st.column_config.NumberColumn("Dept. Fund (₹ L)", format="₹ %.2f"),
@@ -277,8 +280,6 @@ def show():
 
     elif report_type == "Activity-Wise Convergence Report":
         st.subheader("Activity-Wise Convergence & Department Mapping (Across All 318 Activities)")
-        
-        # Group by activity_description
         act_summary = filtered_df.groupby("activity_description").agg(
             Total_Target=("desired_target", "sum"),
             Total_Fund=("total_converged_fund", "sum"),
