@@ -25,8 +25,7 @@ from openpyxl.chart.label import DataLabelList
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.properties import WorksheetProperties
 from openpyxl.worksheet.header_footer import HeaderFooter
-# ❌ REMOVED: from openpyxl.worksheet.print_settings import PrintOptions
-# ❌ REMOVED: from openpyxl.packaging.core import CoreProperties
+
 
 # -----------------------------------------------------------------
 # CORE EXPORT FUNCTION – everything else builds on this
