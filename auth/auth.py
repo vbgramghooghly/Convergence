@@ -52,7 +52,7 @@ def check_active_session():
             
             # If the DB token doesn't match the local browser token, log them out
             if local_token != active_db_token:
-                logout("Your session was terminated. A new login was detected on this account.")
+                logout("Your session expired because your account was logged into from another device or browser.")
                 return False
                 
         return True
@@ -157,20 +157,8 @@ def check_password():
                             if not user_profile.get("active", True):
                                 st.error("🚫 Account deactivated.")
                             else:
-                                # --- STRICT SESSION CHECK ---
-                                db_response = supabase.table("users").select("current_session_token").eq("id", user_id).execute()
-                                
-                                if db_response.data:
-                                    active_db_token = db_response.data[0].get('current_session_token')
-                                    
-                                    if active_db_token is not None and active_db_token.strip() != "":
-                                        st.error("⛔ Multiple login detected. Please logout from your earlier device/session to log in here.")
-                                        if st.button("Force Logout Earlier Session"):
-                                            supabase.table("users").update({"current_session_token": None}).eq("id", user_id).execute()
-                                            st.success("Previous session killed! You can now log in.")
-                                        return False
-
-                                # Generate and save new token
+                                # --- AUTOMATIC SESSION OVERWRITE (Last Login Wins) ---
+                                # Automatically override any ghost sessions left from closed browsers
                                 new_session_token = str(uuid.uuid4())
                                 supabase.table("users").update({
                                     "current_session_token": new_session_token
