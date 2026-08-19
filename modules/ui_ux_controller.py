@@ -29,8 +29,7 @@ def show():
     init_ui_state()
     state = st.session_state.theme_state
 
-    st.markdown("<h1 style='margin-bottom: 0px;'>🎨 Portal Design Studio</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #6B7280; font-size: 16px;'>Configure the global aesthetics of the application. Changes preview instantly.</p>", unsafe_allow_html=True)
+    # ---- No header title ----
     st.markdown("---")
 
     col_controls, col_preview = st.columns([1, 2.5], gap="large")
@@ -48,8 +47,9 @@ def show():
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 1. Quick Presets (including orange)
-        with st.expander("🎨 1. Quick Presets", expanded=True):
+        # 1. Quick Presets
+        with st.expander("🎨 Quick Presets", expanded=True):
+            # Arrange presets in 3 columns for compactness
             preset_cols = st.columns(3)
             presets = list(PRESETS.keys())
             for i, p in enumerate(presets):
@@ -58,38 +58,44 @@ def show():
                     st.rerun()
 
         # 2. Custom Colors
-        with st.expander("🖌️ 2. Custom Colors", expanded=False):
-            state['primary_color'] = st.color_picker("Primary Color (e.g. Orange)", value=state['primary_color'])
+        with st.expander("🖌️ Custom Colors", expanded=False):
+            state['primary_color'] = st.color_picker("Primary Color", value=state['primary_color'])
             state['bg_color'] = st.color_picker("Background Color", value=state['bg_color'])
             state['card_color'] = st.color_picker("Card Background", value=state['card_color'])
             state['text_color'] = st.color_picker("Text Color", value=state['text_color'])
             state['border_color'] = st.color_picker("Border Color", value=state['border_color'])
 
         # 3. Layout & Density
-        with st.expander("📏 3. Layout & Spacing", expanded=False):
+        with st.expander("📏 Layout & Spacing", expanded=False):
             state['content_width'] = st.slider("Content Width (%)", min_value=50, max_value=100, value=state['content_width'], step=5)
             state['border_radius'] = st.slider("Border Radius (px)", min_value=0, max_value=24, step=2, value=state['border_radius'])
-            state['shadow_intensity'] = st.select_slider("Shadow Intensity", options=[0,1,2,3], value=state['shadow_intensity'])
+            state['shadow_intensity'] = st.select_slider("Shadow Intensity", options=[0, 1, 2, 3], value=state['shadow_intensity'])
             state['layout_density'] = st.select_slider("Layout Density", options=["compact", "comfortable", "spacious"], value=state['layout_density'])
-            state['component_spacing'] = st.slider("Component Spacing", min_value=0.5, max_value=2.0, value=state['component_spacing'], step=0.1)
+            # Fix: ensure float type for component_spacing slider
+            if isinstance(state['component_spacing'], int):
+                state['component_spacing'] = float(state['component_spacing'])
+            state['component_spacing'] = st.slider(
+                "Component Spacing",
+                min_value=0.5, max_value=2.0, value=state['component_spacing'], step=0.1
+            )
 
         # 4. Typography
-        with st.expander("🔤 4. Typography", expanded=False):
+        with st.expander("🔤 Typography", expanded=False):
             font_opts = ["'Inter', system-ui, sans-serif", "'Segoe UI', sans-serif", "Arial, sans-serif", "Georgia, serif", "monospace"]
             cur_font = state['font_family'] if state['font_family'] in font_opts else font_opts[0]
             state['font_family'] = st.selectbox("Font Family", font_opts, index=font_opts.index(cur_font))
             state['base_font_size'] = st.slider("Base Font Size (px)", min_value=12, max_value=20, value=state['base_font_size'], step=1)
 
         # 5. Dark Mode
-        with st.expander("🌓 5. Dark / Light Mode", expanded=False):
+        with st.expander("🌓 Dark / Light Mode", expanded=False):
             dark = state.get('dark_mode', False)
             state['dark_mode'] = st.toggle("Enable Dark Mode", value=dark)
 
     # ------------------------------------------------------------
-    # LIVE PREVIEW (updated with orange-friendly design)
+    # LIVE PREVIEW
     # ------------------------------------------------------------
     with col_preview:
-        st.subheader("👁️ Live Portal Preview")
+        st.subheader("👁️ Live Preview")
         # Generate preview using current theme
         primary = state['primary_color']
         bg = state['bg_color']
@@ -100,7 +106,6 @@ def show():
         font = state['font_family']
         base_font = state['base_font_size']
         width = state['content_width']
-        shadow = state['shadow_intensity']
         dark = state.get('dark_mode', False)
 
         # Build a realistic portal preview
@@ -155,6 +160,6 @@ def show():
         """
         st.markdown(preview_html, unsafe_allow_html=True)
 
-        # Show current CSS for debugging (optional)
-        with st.expander("🧪 Generated CSS (preview)"):
+        # Optionally show generated CSS
+        with st.expander("🧪 Generated CSS (debug)"):
             st.code(get_css(state), language="css")
