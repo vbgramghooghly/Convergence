@@ -7,27 +7,21 @@ from utils.excel import dataframe_to_excel
 from utils.theme import apply_global_theme
 
 def show():
-    # 1. ENFORCE SECURITY & ACCESS RULES (Unchanged)
+    # 1. ENFORCE SECURITY & ACCESS RULES
     require_role("superadmin", "district", "block", "department")
     user = get_current_user()
     role = user["role"]
     supabase = get_supabase()
 
-    # 2. GLOBAL THEME (only for consistency, but header removed)
+    # 2. GLOBAL THEME
     theme = apply_global_theme()
     primary_color = theme.get("primary_color", "#0F4C81")
 
-    # Removed breadcrumb, main heading, and caption.
-    # st.markdown("<div ...>Home / Analytics / Master Reports</div>", unsafe_allow_html=True)   # DELETED
-    # st.markdown(f"<h2 ...>📊 Reports & Analytics Centre</h2>", unsafe_allow_html=True)         # DELETED
-    # st.caption("Official reporting, ...")                                                      # DELETED
-
-    # We keep a minimal separator if needed, but the user didn't ask for it.
-    # We'll put a small line to separate from the rest.
+    # Clean separation line
     st.markdown("---")
 
     # ==========================================
-    # 3. BASE QUERY & ROLE SCOPE (Unchanged)
+    # 3. BASE QUERY & ROLE SCOPE
     # ==========================================
     query = supabase.table("convergence_register").select("*")
     if role == "district":
@@ -46,7 +40,7 @@ def show():
     df = pd.DataFrame(data)
 
     # ==========================================
-    # 4. MASTER DATA & MAPPINGS (Unchanged)
+    # 4. MASTER DATA & MAPPINGS
     # ==========================================
     districts = supabase.table("districts").select("id,district_name").execute().data or []
     blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
@@ -70,7 +64,7 @@ def show():
     if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
 
     # ==========================================
-    # 5. REPORT SELECTION (No header above)
+    # 5. REPORT SELECTION & MODERN FILTERS
     # ==========================================
     col_c1, col_c2 = st.columns(2)
     report_category = col_c1.selectbox("1. Select Report Category", [
@@ -81,7 +75,6 @@ def show():
         "Meeting & Resolution Register"
     ])
 
-    # Cascading report type based on category
     if report_category == "Official Statutory Reports":
         report_opts = [
             "Official VB-G RAM G Summary Report (Template)",
@@ -114,12 +107,9 @@ def show():
         ]
 
     report_type = col_c2.selectbox("2. Select Specific Report Format", report_opts)
-
     st.markdown("---")
 
-    # ==========================================
-    # 6. CONTEXT-SENSITIVE FILTERS (based on report_type)
-    # ==========================================
+    # Modern Interactive Filters (Hidden inside a popover)
     filtered_df = df.copy()
     filter_values = {}
 
@@ -147,53 +137,49 @@ def show():
         show_filters = [f for f in show_filters if f != "theme"]
 
     if show_filters:
-        st.subheader("🔍 Apply Filters")
-        cols = st.columns(min(3, len(show_filters)))
-        for i, f in enumerate(show_filters):
-            col = cols[i % 3]
-            if f == "district":
-                districts_list = sorted(df["district_name"].unique())
-                if "Unknown" in districts_list:
-                    districts_list.remove("Unknown")
-                selected = col.multiselect("District", districts_list, default=[])
-                filter_values["district"] = selected
-            elif f == "block":
-                district_vals = filter_values.get("district", [])
-                if district_vals:
-                    block_options = sorted(df[df["district_name"].isin(district_vals)]["block_name"].unique())
-                else:
-                    block_options = sorted(df["block_name"].unique())
-                if "Unknown" in block_options:
-                    block_options.remove("Unknown")
-                selected = col.multiselect("Block", block_options, default=[])
-                filter_values["block"] = selected
-            elif f == "department":
-                dept_options = sorted(df["department_name"].unique())
-                if "Unknown" in dept_options:
-                    dept_options.remove("Unknown")
-                selected = col.multiselect("Department", dept_options, default=[])
-                filter_values["department"] = selected
-            elif f == "theme":
-                theme_options = sorted(df["theme_name"].unique())
-                if "Unassigned" in theme_options:
-                    theme_options.remove("Unassigned")
-                selected = col.multiselect("Theme", theme_options, default=[])
-                filter_values["theme"] = selected
-            elif f == "status":
-                status_options = sorted(df["current_status"].unique())
-                selected = col.multiselect("Status", status_options, default=[])
-                filter_values["status"] = selected
-            elif f == "financial_year":
-                if "financial_year" in df.columns:
-                    fy_options = sorted(df["financial_year"].unique())
-                    selected = col.multiselect("Financial Year", fy_options, default=[])
-                    filter_values["financial_year"] = selected
-                else:
-                    selected = col.selectbox("Financial Year", ["2026-27"], index=0)
-                    filter_values["financial_year"] = [selected]
+        with st.popover("🔍 Click to apply Advanced Filters"):
+            cols = st.columns(min(3, len(show_filters)))
+            for i, f in enumerate(show_filters):
+                col = cols[i % 3]
+                if f == "district":
+                    districts_list = sorted(df["district_name"].unique())
+                    if "Unknown" in districts_list: districts_list.remove("Unknown")
+                    selected = col.multiselect("District", districts_list, default=[])
+                    filter_values["district"] = selected
+                elif f == "block":
+                    district_vals = filter_values.get("district", [])
+                    if district_vals:
+                        block_options = sorted(df[df["district_name"].isin(district_vals)]["block_name"].unique())
+                    else:
+                        block_options = sorted(df["block_name"].unique())
+                    if "Unknown" in block_options: block_options.remove("Unknown")
+                    selected = col.multiselect("Block", block_options, default=[])
+                    filter_values["block"] = selected
+                elif f == "department":
+                    dept_options = sorted(df["department_name"].unique())
+                    if "Unknown" in dept_options: dept_options.remove("Unknown")
+                    selected = col.multiselect("Department", dept_options, default=[])
+                    filter_values["department"] = selected
+                elif f == "theme":
+                    theme_options = sorted(df["theme_name"].unique())
+                    if "Unassigned" in theme_options: theme_options.remove("Unassigned")
+                    selected = col.multiselect("Theme", theme_options, default=[])
+                    filter_values["theme"] = selected
+                elif f == "status":
+                    status_options = sorted(df["current_status"].unique())
+                    selected = col.multiselect("Status", status_options, default=[])
+                    filter_values["status"] = selected
+                elif f == "financial_year":
+                    if "financial_year" in df.columns:
+                        fy_options = sorted(df["financial_year"].unique())
+                        selected = col.multiselect("Financial Year", fy_options, default=[])
+                        filter_values["financial_year"] = selected
+                    else:
+                        selected = col.selectbox("Financial Year", ["2026-27"], index=0)
+                        filter_values["financial_year"] = [selected]
 
-        if st.button("Reset Filters"):
-            st.rerun()
+            if st.button("Reset Filters"):
+                st.rerun()
 
         # Apply filters
         for key, vals in filter_values.items():
@@ -211,185 +197,186 @@ def show():
                 elif key == "financial_year":
                     if "financial_year" in filtered_df.columns:
                         filtered_df = filtered_df[filtered_df["financial_year"].isin(vals)]
-
+        
         st.markdown("---")
     else:
         filtered_df = df.copy()
 
     # ==========================================
-    # 7. PRINT CSS (unchanged)
+    # 6. EXECUTIVE SUMMARY KPI METRICS
+    # ==========================================
+    if not filtered_df.empty:
+        total_activities = len(filtered_df)
+        total_funds = filtered_df['total_converged_fund'].sum()
+        avg_physical = filtered_df['physical_achievement'].mean()
+        active_depts = filtered_df['department_name'].nunique()
+        
+        st.markdown("### 📊 Executive Performance Snapshot")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Total Activities", total_activities)
+        k2.metric("Converged Funds (₹ Lakhs)", f"{total_funds:,.2f}")
+        k3.metric("Avg. Physical Achievement", f"{avg_physical:.1f}%")
+        k4.metric("Active Departments", active_depts)
+        st.markdown("---")
+
+    # ==========================================
+    # 7. MODERN REPORT VIEW SWITCHER
+    # ==========================================
+    view_mode = st.segmented_control(
+        "View Analysis By:",
+        options=["📋 District Convergence Plan", "🏛️ Department-Wise Analysis", "🔧 Activity-Wise Analysis"],
+        selection_mode="single",
+        default="📋 District Convergence Plan"
+    )
+    st.markdown("---")
+
+    # ==========================================
+    # 8. PRINT CSS (Robust, version-proof)
     # ==========================================
     print_css = """
     <style>
     @media print {
-        .stApp > header, .stApp > .stSidebar, .stApp > .stToolbar, .stApp > .stStatusWidget,
-        .stApp > .stException, .stApp > .stAlert, .stApp > .stButton, .stApp > .stSelectbox,
-        .stApp > .stMultiselect, .stApp > .stColumns, .stApp > .stContainer,
-        .stApp > .stMarkdown:not(.print-content), .stApp > .stSubheader, .stApp > .stCaption,
-        .stApp > .stDownloadButton, .stApp > .stPlotlyChart, .stApp > .stDataFrame,
-        .stApp > .stImage, .stApp > .stExpander, .stApp > .stTabs,
-        .stApp > .stFileUploader, .stApp > .stDateInput, .stApp > .stTimeInput,
-        .stApp > .stTextInput, .stApp > .stNumberInput, .stApp > .stTextArea,
-        .stApp > .stSlider, .stApp > .stCheckbox, .stApp > .stRadio, .stApp > .stColorPicker,
-        .stApp > .stProgress, .stApp > .stSpinner, .stApp > .stBalloon,
-        .stApp > .stWarning, .stApp > .stInfo, .stApp > .stSuccess, .stApp > .stError,
-        .stApp > .stPlaceholder, .stApp > .stBanner, .stApp > .stNotification, .stApp > .stToast,
-        .stApp > .stSidebarContent, .stApp > .stMainBlock,
-        .stApp > .stPage, .stApp > .stAppViewContainer, .stApp > .stMain,
-        .stApp > .st-emotion-cache-1v3ma8w, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1c7y2kd, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1v0mbdj, .stApp > div[data-testid="stToolbar"],
-        .stApp > div[data-testid="stSidebarCollapsedControl"],
-        .stApp > div[data-testid="stDecoration"],
-        .stApp > div[data-testid="stHeader"],
-        .stApp > div[data-testid="stStatusWidget"],
-        .stApp > div[data-testid="stCaptionContainer"],
-        .stApp > div[data-testid="stImageCaption"],
-        .stApp > div[data-testid="stBottom"],
-        .stApp > footer, .stApp > .stFooter,
-        .stApp > .stAppViewBlock, .stApp > .stBlock,
-        .stApp > .st-emotion-cache-1jicfl2, .stApp > .st-emotion-cache-1r6slb0,
-        .stApp > .st-emotion-cache-1wrcr25, .stApp > .st-emotion-cache-1dte6k3,
-        .stApp > .st-emotion-cache-1hq8t5v, .stApp > .st-emotion-cache-16txtl3,
-        .stApp > .st-emotion-cache-1v3ma8w, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1c7y2kd, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1v0mbdj, .stApp > .st-emotion-cache-1v3ma8w,
-        .stApp > .st-emotion-cache-1r6slb0, .stApp > .st-emotion-cache-1wrcr25,
-        .stApp > .st-emotion-cache-1dte6k3, .stApp > .st-emotion-cache-1hq8t5v,
-        .stApp > .st-emotion-cache-16txtl3, .stApp > .st-emotion-cache-1v3ma8w,
-        .stApp > .st-emotion-cache-1v0mbdj, .stApp > .st-emotion-cache-1c7y2kd,
-        .stApp > .st-emotion-cache-1v0mbdj, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1v3ma8w, .stApp > .st-emotion-cache-1r6slb0,
-        .stApp > .st-emotion-cache-1wrcr25, .stApp > .st-emotion-cache-1dte6k3,
-        .stApp > .st-emotion-cache-1hq8t5v, .stApp > .st-emotion-cache-16txtl3,
-        .stApp > .st-emotion-cache-1v3ma8w, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1c7y2kd, .stApp > .st-emotion-cache-1v0mbdj,
-        .stApp > .st-emotion-cache-1v0mbdj {
+        /* Hide all native Streamlit UI components */
+        header, footer, .stApp .stSidebar, .stApp [data-testid="stToolbar"], 
+        .stApp [data-testid="stHeader"], .stApp [data-testid="stStatusWidget"],
+        .stApp .st-emotion-cache-1v0mbdj, .stApp .st-emotion-cache-1wrcr25,
+        .stApp [data-testid="stMetric"] {
             display: none !important;
         }
-        .print-content {
-            display: block !important;
-            visibility: visible !important;
+        /* Force full width for print content */
+        .stApp .main .block-container, .print-content {
+            max-width: 100% !important;
             width: 100% !important;
             margin: 0 !important;
-            padding: 20px !important;
+            padding: 0 !important;
+            display: block !important;
+            visibility: visible !important;
         }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 12px;
-        }
-        th, td {
-            border: 1px solid #000;
-            padding: 6px;
-            text-align: left;
-            word-wrap: break-word;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        .landscape {
-            page: landscape;
-        }
-        /* Signature area removed, so we don't need this */
-        .no-print {
-            display: none !important;
-        }
+        /* Chart and table fitting */
+        table { width: 100% !important; font-size: 10px !important; }
+        .stDataFrame { width: 100% !important; }
     }
     </style>
     """
     st.markdown(print_css, unsafe_allow_html=True)
-
-    # Wrap report output in a print-content div
+    
     st.markdown('<div class="print-content">', unsafe_allow_html=True)
 
     # ==========================================
-    # 8. RENDER THE SELECTED REPORT (with filtered_df)
+    # 9. RENDER CUSTOM VIEWS (District, Dept, Activity)
     # ==========================================
-    if report_type == "Official VB-G RAM G Summary Report (Template)":
-        st.subheader("Summary Report on Vikshit Bharat - G RAM G Convergence Plan with Line Departments for F.Y 2026-27")
-        st.caption("Official statutory statement format matching state government export guidelines.")
+    interactive_df = filtered_df.copy()
+    
+    # Shared Column Config for all modern tables
+    TABLE_CONFIG = {
+        "desired_target": st.column_config.NumberColumn("Target", format="%d"),
+        "department_fund": st.column_config.NumberColumn("Dept. Fund (₹ L)", format="₹ %.2f"),
+        "vbgramg_fund": st.column_config.NumberColumn("VBG Fund (₹ L)", format="₹ %.2f"),
+        "total_converged_fund": st.column_config.NumberColumn("Total Fund (₹ L)", format="₹ %.2f"),
+        "physical_achievement": st.column_config.ProgressColumn("Achievement", min_value=0, max_value=100, format="%.0f%%"),
+        "current_status": st.column_config.SelectboxColumn("Status", options=["Planned", "Approved", "Completed", "Delayed", "Mismatch"]),
+        "expected_persondays": st.column_config.NumberColumn("Expected Persondays", format="%d")
+    }
 
+    if view_mode == "📋 District Convergence Plan":
+        st.subheader("District Convergence Fund & Target Plan")
+        district_plan = interactive_df.groupby("district_name").agg({
+            "id": "count", "desired_target": "sum", "department_fund": "sum", 
+            "vbgramg_fund": "sum", "total_converged_fund": "sum", "physical_achievement": "mean"
+        }).reset_index().rename(columns={"id": "Total Activities"})
+        
+        st.dataframe(district_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+        
+        # Clickable chart for district funding
+        fig = px.bar(district_plan, x="district_name", y="total_converged_fund", 
+                     title="📊 District-wise Total Converged Funds", color="district_name")
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+        
+        if event and event.selection and len(event.selection.points) > 0:
+            selected_district = event.selection.points[0].get("district_name")
+            if selected_district:
+                st.info(f"🔍 Showing details for: **{selected_district}**")
+                detail_df = interactive_df[interactive_df["district_name"] == selected_district]
+                st.dataframe(detail_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+                
+    elif view_mode == "🏛️ Department-Wise Analysis":
+        st.subheader("Department Wise Convergence & Work Allocation")
+        dept_plan = interactive_df.groupby("department_name").agg({
+            "id": "count", "desired_target": "sum", "department_fund": "sum", 
+            "total_converged_fund": "sum", "physical_achievement": "mean"
+        }).reset_index().rename(columns={"id": "Total Activities"})
+        
+        st.dataframe(dept_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+        
+        fig = px.pie(dept_plan, names="department_name", values="total_converged_fund", 
+                     title="💰 Department-wise Fund Distribution")
+        event = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+        
+        if event and event.selection and len(event.selection.points) > 0:
+            selected_dept = event.selection.points[0].get("department_name")
+            if selected_dept:
+                st.info(f"🔍 Showing activities for department: **{selected_dept}**")
+                detail_df = interactive_df[interactive_df["department_name"] == selected_dept]
+                st.dataframe(detail_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+
+    elif view_mode == "🔧 Activity-Wise Analysis":
+        st.subheader("Activity / Work Wise Analysis by Department")
+        activity_plan = interactive_df[["activity_description", "department_name", "desired_target", 
+                                       "total_converged_fund", "physical_achievement", "current_status"]]
+        st.dataframe(activity_plan, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+        
+        # Top 10 Activities by Fund
+        top_activities = interactive_df.groupby("activity_description").agg({
+            "total_converged_fund": "sum", "id": "count"
+        }).reset_index().sort_values(by="total_converged_fund", ascending=False).head(10)
+        
+        fig = px.bar(top_activities, x="activity_description", y="total_converged_fund", 
+                     title="🛠️ Top 10 Activities by Fund Allocation")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ==========================================
+    # 10. RENDER THE SELECTED STATUTORY REPORTS
+    # ==========================================
+    st.markdown("---")
+    st.markdown(f"### 📄 {report_type}")
+
+    if report_type == "Official VB-G RAM G Summary Report (Template)":
         official_df = pd.DataFrame()
         official_df["District"] = filtered_df["district_name"]
         official_df["Converging Department"] = filtered_df["department_name"]
-        official_df["Activity / Work / Infrastructure permissible under VB-G RAM G"] = filtered_df["activity_description"]
-        official_df["Number / Status (e.g no of AWC in the district)"] = "1"
+        official_df["Activity / Work / Infrastructure"] = filtered_df["activity_description"]
         official_df["Scheme of the Deptt."] = filtered_df.get("scheme_name", "VB-G RAM G Convergence")
-        official_df["Scope under Annual Plan"] = filtered_df.get("work_dimensions", "Standard Scheme Scope")
-        official_df["Desired Target for FY 2026-27"] = filtered_df["desired_target"]
-        official_df["Type of Convergence Financial/Technical"] = filtered_df["convergence_type"]
-        official_df["Fund to be provided by Dept. (Lakhs)"] = filtered_df["department_fund"]
-        official_df["Fund to be provided by VB-G RAM G (Lakhs)"] = filtered_df["vbgramg_fund"]
-        official_df["PIA for implementation"] = "Line Department / Block PIA"
-        official_df["Expected Person-days to be generated"] = filtered_df["expected_persondays"]
-        official_df["Duration of implementation"] = "12 Months"
-        official_df["Remarks / Status"] = filtered_df["current_status"]
-
-        st.dataframe(official_df, use_container_width=True, hide_index=True)
+        official_df["Desired Target FY 2026-27"] = filtered_df["desired_target"]
+        official_df["Dept. Fund (₹ Lakhs)"] = filtered_df["department_fund"]
+        official_df["VB-G RAM G Fund (₹ Lakhs)"] = filtered_df["vbgramg_fund"]
+        official_df["Expected Person-days"] = filtered_df["expected_persondays"]
+        official_df["Status"] = filtered_df["current_status"]
+        
+        st.dataframe(official_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
         excel = dataframe_to_excel(official_df, "Official_Summary_Report")
         st.download_button("📥 Download Official Format (Excel)", data=excel, file_name="VB_GRAM_G_Summary_Report_FY26_27.xlsx", type="primary")
 
-    elif report_type == "District-wise Summary Report":
-        st.subheader("District-wise Convergence Summary Report")
-        district_summary = filtered_df.groupby("district_name").agg(
+    elif report_type in ["District-wise Summary Report", "Department-wise Summary Report", "Block-wise Summary Report"]:
+        group_col = "district_name" if "District" in report_type else "department_name" if "Department" in report_type else "block_name"
+        summary_df = filtered_df.groupby(group_col).agg(
             Activities=("id", "count"), Target=("desired_target", "sum"),
             Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"),
-            Total_Fund=("total_converged_fund", "sum"), Expected_PD=("expected_persondays", "sum"),
-            Actual_PD=("persondays_generated", "sum"), Completion_Avg=("physical_achievement", "mean"),
+            Total_Fund=("total_converged_fund", "sum"), Completion_Avg=("physical_achievement", "mean"),
         ).reset_index()
-        st.dataframe(district_summary, use_container_width=True, hide_index=True)
-        excel = dataframe_to_excel(district_summary, "District_Summary")
-        st.download_button("📥 Download District Summary (Excel)", excel, "district_summary_report.xlsx")
+        st.dataframe(summary_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
+        excel = dataframe_to_excel(summary_df, "Summary_Report")
+        st.download_button("📥 Download Summary (Excel)", excel, f"{group_col}_summary_report.xlsx")
 
-    elif report_type == "Department-wise Summary Report":
-        st.subheader("Department-wise Convergence Summary Report")
-        dept_summary = filtered_df.groupby("department_name").agg(
-            Activities=("id", "count"), Target=("desired_target", "sum"),
-            Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"),
-            Total_Fund=("total_converged_fund", "sum"), Expected_PD=("expected_persondays", "sum"),
-            Actual_PD=("persondays_generated", "sum"), Completion_Avg=("physical_achievement", "mean"),
-        ).reset_index()
-        st.dataframe(dept_summary, use_container_width=True, hide_index=True)
-        excel = dataframe_to_excel(dept_summary, "Department_Summary")
-        st.download_button("📥 Download Department Summary (Excel)", excel, "department_summary_report.xlsx")
-
-    elif report_type == "Block-wise Summary Report":
-        st.subheader("Block-wise Convergence Summary Report")
-        block_summary = filtered_df.groupby(["district_name", "block_name"]).agg(
-            Activities=("id", "count"), Target=("desired_target", "sum"),
-            Funds=("total_converged_fund", "sum"), Persondays=("expected_persondays", "sum"),
-        ).reset_index()
-        st.dataframe(block_summary, use_container_width=True, hide_index=True)
-        excel = dataframe_to_excel(block_summary, "Block_Summary")
-        st.download_button("📥 Download Block Summary (Excel)", excel, "block_summary_report.xlsx")
-
-    elif report_type == "District Performance Dashboard":
-        st.subheader("District Performance Analytics")
+    elif report_type in ["District Performance Dashboard", "Department Performance Dashboard", "Block Performance Dashboard"]:
         if not filtered_df.empty:
-            fig = px.bar(filtered_df, x="district_name", y="total_converged_fund", color="department_name", title="Total Converged Funds by District & Department")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No data for selected filters.")
-
-    elif report_type == "Department Performance Dashboard":
-        st.subheader("Department Performance Analytics")
-        if not filtered_df.empty:
-            fig = px.pie(filtered_df, names="department_name", values="desired_target", title="Department Target Distribution")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No data for selected filters.")
-
-    elif report_type == "Block Performance Dashboard":
-        st.subheader("Block Performance Analytics")
-        if not filtered_df.empty:
-            fig = px.bar(filtered_df, x="block_name", y="physical_achievement", color="department_name", barmode="group", title="Block-wise Physical Achievement %")
+            group_col = "district_name" if "District" in report_type else "department_name" if "Department" in report_type else "block_name"
+            fig = px.bar(filtered_df, x=group_col, y="total_converged_fund", color="department_name", 
+                         title=f"{group_col.replace('_', ' ').title()} Performance")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No data for selected filters.")
 
     elif report_type == "Scheme Performance Report":
-        st.subheader("Scheme-wise Performance Report")
         scheme_perf = filtered_df.groupby(["activity_description", "department_name"]).agg(
             Target=("desired_target", "sum"), Physical_Ach=("physical_achievement", "mean"),
             Financial_Ach=("financial_achievement", "mean"), Persondays_Expected=("expected_persondays", "sum"),
@@ -400,7 +387,6 @@ def show():
         st.download_button("📥 Download Scheme Performance (Excel)", excel, "scheme_performance.xlsx")
 
     elif report_type == "Personday Generation Report":
-        st.subheader("Personday Generation Analysis")
         pd_df = filtered_df.groupby("district_name").agg(Expected=("expected_persondays", "sum"), Actual=("persondays_generated", "sum")).reset_index()
         pd_df["Achievement%"] = (pd_df["Actual"] / pd_df["Expected"].replace(0, 1)) * 100
         st.dataframe(pd_df, use_container_width=True, hide_index=True)
@@ -410,18 +396,16 @@ def show():
         st.download_button("📥 Download Personday Report (Excel)", excel, "personday_report.xlsx")
 
     elif report_type == "Financial Convergence Report (Fund Gap Analysis)":
-        st.subheader("Financial Convergence & Funding Gap Analysis")
         fin_df = filtered_df.groupby("district_name").agg(
             Dept_Fund=("department_fund", "sum"), VBG_Fund=("vbgramg_fund", "sum"), Total_Converged=("total_converged_fund", "sum"),
         ).reset_index()
-        st.dataframe(fin_df, use_container_width=True, hide_index=True)
+        st.dataframe(fin_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
         fig = px.bar(fin_df, x="district_name", y=["Dept_Fund", "VBG_Fund"], title="Financial Convergence Breakdown by District", barmode="stack")
         st.plotly_chart(fig, use_container_width=True)
         excel = dataframe_to_excel(fin_df, "Financial_Convergence")
         st.download_button("📥 Download Financial Report (Excel)", excel, "financial_convergence_report.xlsx")
 
     elif report_type == "Technical Convergence Report (NOC Status)":
-        st.subheader("Technical Convergence & Zero-Fund NOC Report")
         tech_df = filtered_df[filtered_df["convergence_type"].str.contains("Technical", na=False, case=False)]
         if not tech_df.empty:
             tech_summary = tech_df.groupby("department_name").agg(Technical_Activities_Count=("id", "count")).reset_index()
@@ -432,7 +416,6 @@ def show():
             st.info("No technical convergence activities recorded.")
 
     elif report_type == "Pending / Delayed Activities Report":
-        st.subheader("Risk & Delay Monitoring: Pending / Delayed Activities")
         delayed = filtered_df[filtered_df["current_status"].isin(["Planned", "Approved", "Delayed"]) | (filtered_df.get("delay_days", 0) > 0)]
         if not delayed.empty:
             cols = ["id", "activity_description", "district_name", "department_name", "current_status"]
@@ -444,20 +427,17 @@ def show():
             st.success("🎉 No pending or delayed activities found!")
 
     elif report_type == "FY 2026–27 Master Convergence Statement":
-        st.subheader("Master Convergence Statement FY 2026-27")
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True, column_config=TABLE_CONFIG)
         excel = dataframe_to_excel(filtered_df, "Master_Statement")
         st.download_button("📥 Download Master Statement (Excel)", excel, "master_convergence_statement_fy26_27.xlsx", type="primary")
 
     elif report_type == "District Convergence Meeting Register":
-        st.subheader("District Convergence Meeting Register")
         meetings = supabase.table("meetings").select("*").eq("meeting_type", "District").execute().data or []
         if meetings:
             df_m = pd.DataFrame(meetings)
             if filter_values.get("district"):
                 district_ids = [d["id"] for d in districts if d["district_name"] in filter_values["district"]]
-                if district_ids:
-                    df_m = df_m[df_m["district_id"].isin(district_ids)]
+                if district_ids: df_m = df_m[df_m["district_id"].isin(district_ids)]
             st.dataframe(df_m, use_container_width=True, hide_index=True)
             excel = dataframe_to_excel(df_m, "District_Meetings")
             st.download_button("📥 Download Meeting Register (Excel)", excel, "district_convergence_meetings.xlsx")
@@ -465,29 +445,24 @@ def show():
             st.info("No district meetings recorded.")
 
     elif report_type == "Department-wise Resolution Statement":
-        st.subheader("Department-wise Resolution & ATR Register")
         resolutions = supabase.table("meeting_action_points").select("*").execute().data or []
         if resolutions:
             df_res = pd.DataFrame(resolutions)
             df_res["Department"] = df_res["department_id"].map(dept_map).fillna("Unknown")
-            if filter_values.get("department"):
-                df_res = df_res[df_res["Department"].isin(filter_values["department"])]
+            if filter_values.get("department"): df_res = df_res[df_res["Department"].isin(filter_values["department"])]
             st.dataframe(df_res[["Department", "action_point", "target", "deadline", "status", "remarks"]], use_container_width=True, hide_index=True)
             excel = dataframe_to_excel(df_res, "Resolution_Statement")
             st.download_button("📥 Download Resolution Statement (Excel)", excel, "department_resolutions_statement.xlsx")
         else:
             st.info("No resolutions recorded in the system.")
 
-    # Close print-content div
     st.markdown('</div>', unsafe_allow_html=True)
 
     # ==========================================
-    # 9. PRINT BUTTON (hidden in print)
+    # 11. MODERN PRINT BUTTON
     # ==========================================
-    # Signature area removed entirely
-
     st.markdown('<div class="no-print">', unsafe_allow_html=True)
-    if st.button("🖨️ Print Report", type="primary"):
+    if st.button("🖨️ Print / Export Report", type="primary", use_container_width=True):
         st.components.v1.html(
             """
             <script>
