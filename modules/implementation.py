@@ -76,6 +76,10 @@ def show():
     dist_map = {d['id']: d['district_name'] for d in districts}
     block_map = {b['id']: b['block_name'] for b in blocks}
     block_name_to_id = {b['block_name']: b['id'] for b in blocks}
+    # Build department -> wings mapping for dynamic wing dropdown
+    dept_to_wings = {}
+    for w in wings:
+        dept_to_wings.setdefault(w['department_id'], []).append(w)
     
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
@@ -329,7 +333,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (MODIFIED) =================
+    # ================= TAB 2 (MODIFIED with single‑row filters) =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -343,23 +347,70 @@ def show():
         if not activities_reg:
             st.info("No convergence activities found in the register to monitor.")
         else:
-            # -------- Block & GP filters --------
-            col_filter1, col_filter2 = st.columns(2)
-            # Extract distinct block IDs from activities
+            # -------- Single row: Department, Wing, Block, GP --------
+            col_dept, col_wing, col_block, col_gp = st.columns(4)
+
+            # Department options
+            dept_options_all = [{"id": d['id'], "name": d['department_name']} for d in departments]
+            dept_names = ["All"] + [d['name'] for d in dept_options_all]
+            dept_id_map = {d['name']: d['id'] for d in dept_options_all}
+
+            # Determine frozen state for Department and Wing
+            dept_frozen = (role == 'department')
+            if dept_frozen:
+                default_dept_name = dept_map.get(user.get('department_id'), '')
+                sel_dept_name = col_dept.selectbox("Department", [default_dept_name] if default_dept_name else ["All"], disabled=True)
+                sel_dept_id = user.get('department_id')
+            else:
+                sel_dept_name = col_dept.selectbox("Department", dept_names)
+                sel_dept_id = dept_id_map.get(sel_dept_name) if sel_dept_name != "All" else None
+
+            # Wing options based on department selection
+            if sel_dept_id:
+                dept_wings = dept_to_wings.get(sel_dept_id, [])
+                wing_names = ["All"] + [w['wing_name'] for w in dept_wings]
+            else:
+                wing_names = ["All"]
+
+            # If department is frozen, we also freeze wing to the user's wing (or show only that wing)
+            if dept_frozen:
+                default_wing_name = wing_map.get(user.get('wing_id'), {}).get('wing_name', '') if user.get('wing_id') else ''
+                if default_wing_name and default_wing_name in wing_names:
+                    wing_options = [default_wing_name]
+                else:
+                    wing_options = ["All"]  # fallback
+                sel_wing_name = col_wing.selectbox("Wing", wing_options, disabled=True)
+                sel_wing_id = user.get('wing_id') if default_wing_name in wing_names else None
+            else:
+                sel_wing_name = col_wing.selectbox("Wing", wing_names)
+                if sel_wing_name != "All" and sel_dept_id:
+                    wing_obj = next((w for w in dept_wings if w['wing_name'] == sel_wing_name), None)
+                    sel_wing_id = wing_obj['id'] if wing_obj else None
+                else:
+                    sel_wing_id = None
+
+            # Block filter: frozen if role == 'block'
             all_block_ids = sorted(set(a.get('block_id') for a in activities_reg if a.get('block_id')))
             block_names = [block_map.get(bid, 'Unknown') for bid in all_block_ids if bid]
             block_names = sorted(set(block_names))
-            selected_block_name = col_filter1.selectbox("Filter by Block", options=["All"] + block_names)
-            selected_block_id = block_name_to_id.get(selected_block_name) if selected_block_name != "All" else None
+            if role == 'block':
+                user_block_name = block_map.get(user.get('block_id'), '')
+                if user_block_name in block_names:
+                    block_options = [user_block_name]
+                else:
+                    block_options = ["All"]
+                selected_block_name = col_block.selectbox("Block", block_options, disabled=True)
+                selected_block_id = user.get('block_id')
+            else:
+                selected_block_name = col_block.selectbox("Block", ["All"] + block_names)
+                selected_block_id = block_name_to_id.get(selected_block_name) if selected_block_name != "All" else None
 
-            # Get GP options based on selected block
+            # GP options based on selected block
             gp_options = ["All"]
             if selected_block_id:
-                # Use HOOGHLY_GPS mapping
                 block_key = selected_block_name.upper()
                 gp_options.extend(HOOGHLY_GPS.get(block_key, []))
             else:
-                # If no block selected, collect all GPs from activities
                 all_gps = set()
                 for a in activities_reg:
                     loc = a.get('geo_location', '')
@@ -368,10 +419,14 @@ def show():
                         if gp_part:
                             all_gps.add(gp_part)
                 gp_options.extend(sorted(all_gps))
-            selected_gp = col_filter2.selectbox("Filter by Primary GP", options=gp_options)
+            selected_gp = col_gp.selectbox("Primary GP", gp_options)
 
-            # Filter activities
+            # -------- Filter activities based on all selections --------
             filtered_activities = activities_reg
+            if sel_dept_id:
+                filtered_activities = [a for a in filtered_activities if a.get('department_id') == sel_dept_id]
+            if sel_wing_id:
+                filtered_activities = [a for a in filtered_activities if a.get('wing_id') == sel_wing_id]
             if selected_block_id:
                 filtered_activities = [a for a in filtered_activities if a.get('block_id') == selected_block_id]
             if selected_gp != "All":
@@ -380,13 +435,11 @@ def show():
             if not filtered_activities:
                 st.warning("No activities match the selected filters.")
             else:
-                # -------- Activity selector --------
                 activity_map = {a['id']: f"[{a.get('current_status', 'Planned').upper()}] {a.get('activity_description', 'Unnamed Activity')}" for a in filtered_activities}
                 selected_act_id = st.selectbox("🔍 Search & Select Specific Work to Update", options=list(activity_map.keys()), format_func=lambda x: activity_map[x])
                 selected_act = next((a for a in filtered_activities if a['id'] == selected_act_id), None)
 
                 if selected_act:
-                    # -------- Enhanced info box with Department & Wing --------
                     dept_name = dept_map.get(selected_act.get('department_id'), 'N/A')
                     wing_id = selected_act.get('wing_id')
                     wing_name = wing_map.get(wing_id, {}).get('wing_name', 'Direct Parent Dept.') if wing_id else 'Direct Parent Dept.'
@@ -408,7 +461,6 @@ def show():
                     with col_p_left:
                         st.markdown("##### 📝 Update Progress Status")
                         with st.form("update_progress_form"):
-                            # -------- New status dropdown (without "Needs MIS Code") --------
                             status_options = [
                                 "Planned",
                                 "Approved",
@@ -421,10 +473,9 @@ def show():
                                 "Dropped"
                             ]
                             current_status = selected_act.get('current_status', 'Planned')
-                            # Map old statuses to new ones for backward compatibility
                             status_mapping = {
                                 "Under Implementation": "Ongoing",
-                                "Approved": "Approved",  # already
+                                "Approved": "Approved",
                                 "Completed": "Completed",
                                 "Delayed": "Delayed",
                                 "Dropped": "Dropped"
@@ -432,11 +483,11 @@ def show():
                             if current_status in status_mapping:
                                 current_status = status_mapping[current_status]
                             if current_status not in status_options:
-                                current_status = "Planned"  # fallback
+                                current_status = "Planned"
                             default_index = status_options.index(current_status) if current_status in status_options else 0
                             new_status = st.selectbox("New Status*", status_options, index=default_index)
 
-                            # -------- PIA & Convergence Type: frozen for Block and Department --------
+                            # PIA & Convergence Type: frozen for Block and Department
                             is_editable = role in ['superadmin', 'district']
                             curr_pia = selected_act.get("pia_type", "Select PIA")
                             pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
@@ -458,13 +509,11 @@ def show():
 
                             phys_ach = st.slider("Physical Achievement (%)*", min_value=0, max_value=100, value=int(float(selected_act.get('physical_achievement', 0.0) or 0.0)))
 
-                            # -------- Financials & MIS Registration --------
                             st.markdown("##### 💰 Financials & MIS Registration")
                             col_p3, col_p4 = st.columns(2)
                             mis_code_val = col_p3.text_input("MIS Code (Mandatory if Active/Done)", value=selected_act.get('mis_code', '') or '')
                             fin_ach = col_p4.number_input("Financial Achievement (₹ Lakhs)", min_value=0.0, value=float(selected_act.get('financial_achievement', 0.0) or 0.0))
 
-                            # New sanction fields
                             col_s1, col_s2, col_s3 = st.columns(3)
                             sanction_wages = col_s1.number_input("Sanction Wages (₹)", min_value=0, value=int(selected_act.get('sanction_wages', 0) or 0), step=1000)
                             sanction_material = col_s2.number_input("Sanction Material (₹)", min_value=0, value=int(selected_act.get('sanction_material', 0) or 0), step=1000)
@@ -472,8 +521,6 @@ def show():
                             col_s3.text_input("Total Sanction (₹)", value=f"{total_sanction:,}", disabled=True)
 
                             current_fy_mandays = st.number_input("Mandays Generated (Current FY)", min_value=0, value=int(selected_act.get('current_fy_mandays', 0) or 0))
-
-                            # Existing cumulative mandays
                             persondays_gen = st.number_input("Persondays Generated (Cumulative)", min_value=0, value=int(selected_act.get('persondays_generated', 0) or 0))
 
                             st.markdown("##### 📅 Schedule & Blockages")
@@ -483,9 +530,7 @@ def show():
                             act_date = col_p7.date_input("Actual End", value=safe_parse_date(selected_act.get('actual_completion_date')))
                             remarks = st.text_area("Remarks / Blockage Details", value=selected_act.get('remarks', '') or '')
 
-                            # -------- Submit button --------
                             if st.form_submit_button("Commit Progress Update", type="primary", use_container_width=True):
-                                # Validation: if status is not Planned, Delayed, Dropped, MIS Code is required
                                 mis_required = new_status not in ["Planned", "Delayed", "Dropped"]
                                 if mis_required and not mis_code_val.strip():
                                     st.error("⚠️ **Validation Error:** MIS Code is mandatory for the selected status.")
@@ -570,7 +615,6 @@ def show():
                     return f"{d_name} (Main)"
                 df_ap['Department / Wing'] = df_ap.apply(format_dept_display, axis=1)
                 
-                # Fetch meeting context
                 meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type, district_id, block_id").execute().data or []
                 m_map = {m['id']: m for m in meetings_data}
                 
