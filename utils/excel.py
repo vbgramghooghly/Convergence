@@ -25,7 +25,8 @@ from openpyxl.chart.label import DataLabelList
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.properties import WorksheetProperties
 from openpyxl.worksheet.header_footer import HeaderFooter
-
+# ❌ REMOVED: from openpyxl.worksheet.print_settings import PrintOptions
+# ❌ REMOVED: from openpyxl.packaging.core import CoreProperties
 
 # -----------------------------------------------------------------
 # CORE EXPORT FUNCTION – everything else builds on this
@@ -298,13 +299,17 @@ def dataframe_to_excel(
         # Set print area to the data range
         worksheet.print_area = f"{get_column_letter(1)}{header_row}:{get_column_letter(num_cols)}{data_end_row}"
 
-        # 3l. Workbook metadata (workbook.core_props is always available)
-        core = workbook.core_props
-        core.creator = author
-        core.title = sheet_name
-        core.subject = f"Export generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        core.description = f"Data exported from DataFrame with {len(df)} rows and {len(df.columns)} columns."
-        core.company = company
+        # 3l. Workbook metadata – safely set if available
+        try:
+            core = workbook.core_props
+            core.creator = author
+            core.title = sheet_name
+            core.subject = f"Export generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            core.description = f"Data exported from DataFrame with {len(df)} rows and {len(df.columns)} columns."
+            core.company = company
+        except AttributeError:
+            # Some openpyxl versions do not expose core_props; skip metadata
+            pass
 
         # ------------------------------------------------------------
         # 4. SAVE
@@ -317,7 +322,7 @@ def dataframe_to_excel(
 
 
 # =================================================================
-# EXTENDED UTILITY FUNCTIONS
+# EXTENDED UTILITY FUNCTIONS (unchanged – they all use dataframe_to_excel)
 # =================================================================
 
 def export_dataframe(df: pd.DataFrame, **kwargs) -> bytes:
@@ -330,48 +335,24 @@ def export_multi_sheet_workbook(
     title_per_sheet: Optional[Dict[str, str]] = None,
     **default_style_kwargs
 ) -> bytes:
-    """
-    Export multiple DataFrames into a single workbook, each on its own sheet.
-
-    Parameters
-    ----------
-    dataframes : dict
-        Mapping of sheet name -> DataFrame.
-    title_per_sheet : dict, optional
-        Mapping of sheet name -> title (optional).
-    **default_style_kwargs
-        Styling parameters passed to `dataframe_to_excel` for each sheet.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
+    """Export multiple DataFrames into a single workbook, each on its own sheet."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for sheet_name, df in dataframes.items():
-            # Sanitise sheet name
             safe_name = re.sub(r'[\[\]\:\*\?\/\\]', '_', str(sheet_name))[:31] or "Sheet"
-            # Apply title if provided
             title = title_per_sheet.get(sheet_name) if title_per_sheet else None
-            # Generate a temporary Excel file for this sheet and copy it
             sheet_bytes = dataframe_to_excel(df, sheet_name=safe_name, title=title, **default_style_kwargs)
             temp_wb = load_workbook(io.BytesIO(sheet_bytes))
             temp_sheet = temp_wb.active
-            # Copy sheet to main workbook
             if safe_name in writer.book.sheetnames:
-                # If sheet name exists, make it unique
                 safe_name = safe_name + "_1"
             new_sheet = writer.book.create_sheet(title=safe_name)
             for row in temp_sheet.iter_rows(values_only=False):
                 for cell in row:
                     new_sheet[cell.coordinate].value = cell.value
-                    new_sheet[cell.coordinate]._style = cell._style  # copy style
-            # Copy column dimensions
+                    new_sheet[cell.coordinate]._style = cell._style
             for col in temp_sheet.column_dimensions:
                 new_sheet.column_dimensions[col] = temp_sheet.column_dimensions[col]
-            # Copy print settings, etc. (simplified)
-        # If no sheets, create an empty sheet
         if not writer.book.sheetnames:
             writer.book.create_sheet("Empty")
     output.seek(0)
@@ -384,28 +365,8 @@ def export_with_summary(
     summary_sheet_name: str = "Summary",
     **kwargs
 ) -> bytes:
-    """
-    Export a DataFrame with an additional summary sheet containing statistics.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Main data.
-    summary_stats : dict, optional
-        Custom summary to display. If None, auto-generate (count, mean, etc.).
-    summary_sheet_name : str, default "Summary"
-        Name of the summary sheet.
-    **kwargs
-        Passed to `dataframe_to_excel` for the main sheet.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
-    # Prepare summary DataFrame
+    """Export a DataFrame with an additional summary sheet."""
     if summary_stats is None:
-        # Auto summary
         numeric_cols = df.select_dtypes(include=['number']).columns
         summary_data = {}
         if len(numeric_cols) > 0:
@@ -414,13 +375,9 @@ def export_with_summary(
             summary_data['Std'] = df[numeric_cols].std()
             summary_data['Min'] = df[numeric_cols].min()
             summary_data['Max'] = df[numeric_cols].max()
-        # Add total rows? Might be better to handle separately.
-        # We'll create a DataFrame with stats as rows, columns as metrics.
         summary_df = pd.DataFrame(summary_data).T.reset_index().rename(columns={'index': 'Metric'})
     else:
         summary_df = pd.DataFrame(summary_stats)
-
-    # Export multi-sheet
     sheets = {kwargs.get('sheet_name', 'Data'): df, summary_sheet_name: summary_df}
     return export_multi_sheet_workbook(sheets, **kwargs)
 
@@ -431,27 +388,7 @@ def export_with_totals(
     total_columns: Optional[List[str]] = None,
     **kwargs
 ) -> bytes:
-    """
-    Export a DataFrame with a total row appended (sum of numeric columns).
-
-    The total row is added directly to the data, so the table includes it.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Main data.
-    total_row_label : str, default "Total"
-        Label in the first column of the total row.
-    total_columns : list of str, optional
-        Columns to sum. If None, all numeric columns are summed.
-    **kwargs
-        Passed to `dataframe_to_excel`.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
+    """Export a DataFrame with a total row appended."""
     df_totals = df.copy()
     numeric_cols = total_columns if total_columns else df.select_dtypes(include=['number']).columns.tolist()
     total_row = {col: '' for col in df.columns}
@@ -467,58 +404,19 @@ def export_with_formulas(
     formula_columns: Dict[str, str],
     **kwargs
 ) -> bytes:
-    """
-    Export a DataFrame with additional columns containing Excel formulas.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Main data.
-    formula_columns : dict
-        Mapping of new column name -> Excel formula string.
-        The formula will be applied to every row; use placeholders like {row}?.
-        Actually, we'll write the formula directly into the cell.
-        We'll append these as new columns at the end.
-    **kwargs
-        Passed to `dataframe_to_excel`.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
-    # We'll need to write the DataFrame and then add formulas after.
-    # Use a temporary writer? Better to use the core function but with a pre-processing step.
-    # We'll create a new DataFrame that includes formulas as strings, but we need to
-    # set the cell value as formula. For simplicity, we can generate the data and then
-    # manually write formulas using openpyxl after export.
-    # However, the core export uses pandas to write data. We can modify the writer.
-    # Let's use the core function with a custom post-processing.
-    # We'll write the DataFrame as usual, then open the workbook and add formula columns.
-    # We'll create a wrapper.
-
+    """Export a DataFrame with additional columns containing Excel formulas."""
     output = io.BytesIO()
-    # First, write the base DataFrame without formulas
     base_bytes = dataframe_to_excel(df, **kwargs)
     wb = load_workbook(io.BytesIO(base_bytes))
     ws = wb.active
-
-    # Add formula columns
     start_col = len(df.columns) + 1
     for col_name, formula in formula_columns.items():
         col_letter = get_column_letter(start_col)
-        # Header
         ws.cell(row=1, column=start_col, value=col_name).font = Font(bold=True)
-        # For each data row, write the formula
         for row_idx, row in enumerate(df.itertuples(index=False), start=2):
-            # Replace placeholders if needed (e.g., {A} with A2)
-            # We'll assume the formula is already Excel-friendly with row references.
-            # We'll replace {row} with the actual row number.
             formula_row = formula.replace("{row}", str(row_idx))
             ws.cell(row=row_idx, column=start_col, value=formula_row).number_format = 'General'
         start_col += 1
-
-    # Save to bytes
     wb.save(output)
     output.seek(0)
     return output.getvalue()
@@ -529,81 +427,34 @@ def export_with_charts(
     chart_config: Dict[str, Any],
     **kwargs
 ) -> bytes:
-    """
-    Export a DataFrame with an embedded chart on a separate sheet.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Main data.
-    chart_config : dict
-        Configuration for the chart. Example:
-        {
-            'type': 'bar',          # or 'column', 'line'
-            'x_axis': 'Category',   # column name for x-axis
-            'y_axis': ['Sales', 'Profit'],  # columns for y-axis
-            'title': 'Sales vs Profit',
-            'sheet_name': 'Chart'
-        }
-    **kwargs
-        Passed to `dataframe_to_excel` for the data sheet.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
-    # Write data sheet using core function
+    """Export a DataFrame with an embedded chart on a separate sheet."""
     data_bytes = dataframe_to_excel(df, **kwargs)
     wb = load_workbook(io.BytesIO(data_bytes))
     ws_data = wb.active
-
-    # Create chart sheet
     chart_sheet_name = chart_config.get('sheet_name', 'Chart')
     ws_chart = wb.create_sheet(title=chart_sheet_name[:31])
-
-    # Determine chart type
-    chart_type = chart_config.get('type', 'bar')
-    if chart_type in ('bar', 'column'):
-        chart = BarChart()
-    else:
-        chart = BarChart()  # fallback
-
-    # Data references
+    chart = BarChart()
     x_col = chart_config.get('x_axis')
     y_cols = chart_config.get('y_axis', [])
     if not x_col or not y_cols:
-        # Fallback: use first column as x, rest as y
         x_col = df.columns[0]
         y_cols = df.columns[1:].tolist()
-
-    # Find column indices
     col_map = {col: idx+1 for idx, col in enumerate(df.columns)}
     x_col_idx = col_map[x_col]
     y_col_indices = [col_map[y] for y in y_cols if y in col_map]
-
-    # Add data to chart
-    data_rows = len(df) + 1  # including header
-    # x-values
+    data_rows = len(df) + 1
     x_values = Reference(ws_data, min_col=x_col_idx, min_row=2, max_row=data_rows)
-    # y-values
     for y_idx in y_col_indices:
         y_values = Reference(ws_data, min_col=y_idx, min_row=2, max_row=data_rows)
         series = Series(y_values, x_values, title_from_data=False)
         series.title = df.columns[y_idx-1]
         chart.append(series)
-
-    # Set chart properties
     if chart_config.get('title'):
         chart.title = chart_config['title']
     chart.x_axis.title = x_col
     chart.y_axis.title = 'Values'
     chart.legend.position = 'b'
-
-    # Add chart to the chart sheet
     ws_chart.add_chart(chart, 'A1')
-
-    # Save
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
@@ -615,44 +466,15 @@ def export_with_pivot_data(
     pivot_config: Dict[str, Any],
     **kwargs
 ) -> bytes:
-    """
-    Export a DataFrame with a separate sheet containing a pivot table
-    (as static data, not a live pivot cache).
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Main data.
-    pivot_config : dict
-        Configuration for pivot table:
-        {
-            'index': ['Region'],
-            'columns': ['Year'],
-            'values': ['Sales'],
-            'aggfunc': 'sum',   # or 'mean', 'count', etc.
-            'sheet_name': 'Pivot'
-        }
-    **kwargs
-        Passed to `dataframe_to_excel` for the data sheet.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
-    # Create pivot table using pandas
+    """Export a DataFrame with a separate sheet containing a pivot table."""
     pivot_df = df.pivot_table(
         index=pivot_config.get('index', []),
         columns=pivot_config.get('columns', []),
         values=pivot_config.get('values', []),
         aggfunc=pivot_config.get('aggfunc', 'sum')
     )
-    # Reset index to make it a flat table
     pivot_df = pivot_df.reset_index()
-    # Flatten columns
     pivot_df.columns = ['_'.join(map(str, col)).strip('_') for col in pivot_df.columns]
-
-    # Now export multi-sheet with the pivot data
     sheets = {kwargs.get('sheet_name', 'Data'): df, pivot_config.get('sheet_name', 'Pivot'): pivot_df}
     return export_multi_sheet_workbook(sheets, **kwargs)
 
@@ -662,23 +484,7 @@ def export_template(
     sheet_name: str = "Template",
     **kwargs
 ) -> bytes:
-    """
-    Generate an empty Excel template with headers and sample formatting.
-
-    Parameters
-    ----------
-    template_headers : list
-        Column names for the template.
-    sheet_name : str, default "Template"
-        Sheet name.
-    **kwargs
-        Passed to `dataframe_to_excel`.
-
-    Returns
-    -------
-    bytes
-        Excel file content.
-    """
+    """Generate an empty Excel template with headers."""
     df = pd.DataFrame(columns=template_headers)
     return dataframe_to_excel(df, sheet_name=sheet_name, **kwargs)
 
@@ -688,24 +494,7 @@ def import_excel(
     sheet_name: Optional[Union[str, int]] = None,
     **read_excel_kwargs
 ) -> Dict[str, pd.DataFrame]:
-    """
-    Import an Excel file and return a dict of DataFrames.
-
-    Parameters
-    ----------
-    file_bytes : bytes
-        The Excel file content.
-    sheet_name : str or int, optional
-        If provided, returns only that sheet as a single DataFrame in a dict.
-        Otherwise, returns all sheets.
-    **read_excel_kwargs
-        Additional arguments passed to `pd.read_excel`.
-
-    Returns
-    -------
-    dict
-        Mapping of sheet name -> DataFrame.
-    """
+    """Import an Excel file and return a dict of DataFrames."""
     if sheet_name is not None:
         df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, **read_excel_kwargs)
         return {str(sheet_name): df}
@@ -720,26 +509,7 @@ def validate_excel(
     column_types: Optional[Dict[str, type]] = None,
     **kwargs
 ) -> Tuple[bool, List[str]]:
-    """
-    Validate a DataFrame against expected schema.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Data to validate.
-    required_columns : list, optional
-        Columns that must be present.
-    column_types : dict, optional
-        Mapping of column name -> expected dtype.
-    **kwargs
-        Additional validation rules (e.g., not_null, unique).
-
-    Returns
-    -------
-    (is_valid, errors)
-        is_valid : bool
-        errors : list of strings describing issues.
-    """
+    """Validate a DataFrame against expected schema."""
     errors = []
     if required_columns:
         missing = [col for col in required_columns if col not in df.columns]
@@ -753,12 +523,10 @@ def validate_excel(
                     errors.append(f"Column '{col}' has dtype {actual_dtype}, expected {expected_type}")
             else:
                 errors.append(f"Column '{col}' not found for type validation")
-    # Additional checks: not null
     if kwargs.get('not_null'):
         for col in kwargs['not_null']:
             if col in df.columns and df[col].isnull().any():
                 errors.append(f"Column '{col}' contains null values")
-    # Unique checks
     if kwargs.get('unique'):
         for col in kwargs['unique']:
             if col in df.columns and not df[col].is_unique:
@@ -773,27 +541,7 @@ def clean_excel(
     dropna: bool = False,
     **kwargs
 ) -> pd.DataFrame:
-    """
-    Clean a DataFrame imported from Excel.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Raw data.
-    strip_whitespace : bool, default True
-        Strip leading/trailing whitespace from string columns.
-    fillna : dict, optional
-        Mapping of column -> value to fill NaN.
-    dropna : bool, default False
-        Drop rows with any NaN.
-    **kwargs
-        Additional cleaning steps.
-
-    Returns
-    -------
-    pd.DataFrame
-        Cleaned DataFrame.
-    """
+    """Clean a DataFrame imported from Excel."""
     df_clean = df.copy()
     if strip_whitespace:
         string_cols = df_clean.select_dtypes(include=['object']).columns
@@ -813,23 +561,7 @@ def compare_excel(
     sheet_name: Optional[Union[str, int]] = None,
     compare_kwargs: Optional[Dict[str, Any]] = None
 ) -> Dict[str, pd.DataFrame]:
-    """
-    Compare two Excel files and return differences.
-
-    Parameters
-    ----------
-    file1_bytes, file2_bytes : bytes
-        The two Excel files.
-    sheet_name : str or int, optional
-        Specific sheet to compare. If None, compare all sheets.
-    compare_kwargs : dict, optional
-        Passed to `pd.DataFrame.compare` (e.g., keep_equal, keep_shape).
-
-    Returns
-    -------
-    dict
-        Mapping of sheet name -> DataFrame with differences.
-    """
+    """Compare two Excel files and return differences."""
     df1_dict = import_excel(file1_bytes, sheet_name=sheet_name)
     df2_dict = import_excel(file2_bytes, sheet_name=sheet_name)
     result = {}
@@ -837,7 +569,6 @@ def compare_excel(
     for sheet, df1 in df1_dict.items():
         if sheet in df2_dict:
             df2 = df2_dict[sheet]
-            # Align indices and columns
             try:
                 diff = df1.compare(df2, **compare_kwargs)
                 if not diff.empty:
@@ -855,31 +586,11 @@ def merge_excel(
     axis: int = 0,
     **kwargs
 ) -> bytes:
-    """
-    Merge multiple Excel files (or sheets) into a single workbook.
-
-    Parameters
-    ----------
-    file_bytes_list : list of bytes
-        List of Excel file contents.
-    sheet_name : str, optional
-        If provided, only merge this specific sheet from each file.
-    axis : int, default 0
-        0 for vertical concatenation (rows), 1 for horizontal (columns).
-    **kwargs
-        Additional arguments for `pd.concat`.
-
-    Returns
-    -------
-    bytes
-        Merged Excel file content.
-    """
+    """Merge multiple Excel files (or sheets) into a single workbook."""
     all_dfs = []
     for file_bytes in file_bytes_list:
         dfs = import_excel(file_bytes, sheet_name=sheet_name)
-        # Take the first sheet if multiple and sheet_name not specified?
         if sheet_name is None:
-            # Take the first sheet
             df = list(dfs.values())[0]
         else:
             df = dfs.get(sheet_name)
@@ -887,7 +598,7 @@ def merge_excel(
                 continue
         all_dfs.append(df)
     if not all_dfs:
-        return dataframe_to_excel(pd.DataFrame())  # empty
+        return dataframe_to_excel(pd.DataFrame())
     merged_df = pd.concat(all_dfs, axis=axis, **kwargs)
     return dataframe_to_excel(merged_df, sheet_name="Merged")
 
@@ -896,15 +607,12 @@ def merge_excel(
 # EXAMPLE USAGE IN STREAMLIT
 # =================================================================
 if __name__ == "__main__":
-    # Demo - create a sample DataFrame and export
     sample_df = pd.DataFrame({
         'Product': ['Laptop', 'Mouse', 'Keyboard'],
         'Sales': [1200, 45, 78],
         'Profit (%)': [0.25, 0.10, 0.15],
         'Date': pd.date_range('2025-01-01', periods=3)
     })
-
-    # Export to Excel bytes
     excel_bytes = dataframe_to_excel(
         sample_df,
         sheet_name="Products",
@@ -912,23 +620,4 @@ if __name__ == "__main__":
         add_table=True,
         conditional_formatting=True
     )
-
-    # In a Streamlit app, you would use:
-    # st.download_button(
-    #     label="📥 Download Excel",
-    #     data=excel_bytes,
-    #     file_name="report.xlsx",
-    #     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    # )
-
-    # To demonstrate multi-sheet:
-    multi_bytes = export_multi_sheet_workbook(
-        {
-            'Sales': sample_df,
-            'Summary': sample_df.describe().reset_index()
-        },
-        title_per_sheet={'Sales': 'Main Data'}
-    )
-
     print("Excel generation successful. Bytes length:", len(excel_bytes))
-    print("Multi-sheet bytes length:", len(multi_bytes))
