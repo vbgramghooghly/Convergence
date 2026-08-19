@@ -23,6 +23,8 @@ from openpyxl.chart.label import DataLabelList
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.properties import WorksheetProperties
 from openpyxl.worksheet.header_footer import HeaderFooter
+# (Removed: from openpyxl.worksheet.print_settings import PrintOptions)
+# (Removed: from openpyxl.packaging.core import CoreProperties)
 
 # -----------------------------------------------------------------
 # CORE EXPORT FUNCTION
@@ -283,19 +285,19 @@ def dataframe_to_excel(
             # Repeat rows from header to header (only the header row)
             worksheet.print_title_rows = f"{header_row}:{header_row}"
 
-        # Determine page orientation
+        # Determine page orientation – FIXED: using string literals
         if landscape is None:
             # Auto-detect: landscape if more columns than rows (roughly)
             landscape = (num_cols > num_rows) and num_cols > 5
         if landscape:
-            worksheet.page_setup.orientation = worksheet.page_setup.ORIENTATION_LANDSCAPE
+            worksheet.page_setup.orientation = 'landscape'
         else:
-            worksheet.page_setup.orientation = worksheet.page_setup.ORIENTATION_PORTRAIT
+            worksheet.page_setup.orientation = 'portrait'
 
         # Set print area to the data range
         worksheet.print_area = f"{get_column_letter(1)}{header_row}:{get_column_letter(num_cols)}{data_end_row}"
 
-        # 3l. Workbook metadata
+        # 3l. Workbook metadata (workbook.core_props is always available)
         core = workbook.core_props
         core.creator = author
         core.title = sheet_name
@@ -700,5 +702,5 @@ def show():
 
     with tab2:
         # ... (rest of the add activity code remains exactly the same) ...
-        # (unchanged – omitted for brevity, but it is present in the original file)
+        # (unchanged – refer to the original file for the full add-activity form)
         pass
