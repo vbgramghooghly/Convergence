@@ -201,7 +201,7 @@ def check_password():
             st.markdown('<p class="login-header">🔐 Portal Sign In</p>', unsafe_allow_html=True)
             st.markdown('<p class="login-subheader">Enter your authorized credentials to continue.</p>', unsafe_allow_html=True)
             
-            username = st.text_input("Username", placeholder="e.g. admin ")
+            username = st.text_input("Username", placeholder="e.g. admin_hooghly ")
             password = st.text_input("Password", type="password", placeholder="••••••••")
 
             # ---------- CAPTCHA ----------
