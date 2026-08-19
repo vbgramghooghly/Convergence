@@ -111,8 +111,8 @@ def check_password():
         st.markdown("<br>", unsafe_allow_html=True)
         
         # 1. Render Specific Images from Direct Supabase URLs
-        img1_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
-        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/fa60c42a-2c6c-48be-a571-67aa4c5c7b34.png"
+        img1_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/fa60c42a-2c6c-48be-a571-67aa4c5c7b34.png"
+        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
         
         try:
             st.image(img1_url, use_container_width=True)
@@ -127,7 +127,7 @@ def check_password():
         pdf_bytes = fetch_pdf_bytes()
         if pdf_bytes:
             st.download_button(
-                label="📥 Download VB-G RAM G Guidelines & Framework (PDF)",
+                label="📥 Download VB-G RAM G Convergence Guidelines (PDF)",
                 data=pdf_bytes,
                 file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
                 mime="application/pdf",
