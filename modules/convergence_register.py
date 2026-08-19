@@ -208,7 +208,7 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
         "scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
     }
 
-# ---------- MODIFIED: Advanced Search & Filtering in dedicated section ----------
+# ---------- MODIFIED: Advanced Search & Filtering with Dynamic GP & Full Text Activity ----------
 def edit_delete_section(records, maps, supabase, user, master):
     if user["role"] not in ["superadmin", "district"]: return
     if not records:
@@ -223,21 +223,27 @@ def edit_delete_section(records, maps, supabase, user, master):
     
     dept_ids = list(set(r.get("department_id") for r in records if r.get("department_id")))
     dept_names = sorted(list(set(maps["dept_reverse"].get(d, "Unknown") for d in dept_ids)))
-    
-    gps = set()
-    for r in records:
-        loc = r.get("geo_location", "")
-        if "GP:" in loc:
-            try:
-                gp_part = loc.split("GP:")[1].split("|")[0].strip()
-                if gp_part: gps.add(gp_part)
-            except: pass
-    gp_names = sorted(list(gps))
 
     with st.container(border=True):
         col1, col2, col3, col4 = st.columns(4)
         sel_block = col1.selectbox("Filter by Block", ["All"] + block_names)
         sel_dept = col2.selectbox("Filter by Department", ["All"] + dept_names)
+        
+        # --- FIX 1: DYNAMIC GP LIST ---
+        if sel_block != "All":
+            block_key = str(sel_block).upper().strip()
+            gp_names = sorted(HOOGHLY_GPS.get(block_key, []))
+        else:
+            gps = set()
+            for r in records:
+                loc = r.get("geo_location", "")
+                if "GP:" in loc:
+                    try:
+                        gp_part = loc.split("GP:")[1].split("|")[0].strip()
+                        if gp_part: gps.add(gp_part)
+                    except: pass
+            gp_names = sorted(list(gps))
+
         sel_gp = col3.selectbox("Filter by GP", ["All"] + gp_names)
         search_text = col4.text_input("Search Activity / Work Name", placeholder="Type to search...")
     
@@ -260,8 +266,10 @@ def edit_delete_section(records, maps, supabase, user, master):
 
     st.markdown("---")
     st.markdown("#### 🛠️ Modify Selected Activity")
+    
+    # --- FIX 2: NO TRUNCATION FOR ACTIVITY NAME ---
     display_options = {
-        r["id"]: f"{r['activity_description'][:60]}... - {maps['dept_reverse'].get(r['department_id'], 'Unknown')} (₹{r.get('total_converged_fund', 0)} L)"
+        r["id"]: f"{r['activity_description']} - {maps['dept_reverse'].get(r['department_id'], 'Unknown')} (₹{r.get('total_converged_fund', 0)} L)"
         for r in filtered_records
     }
     
