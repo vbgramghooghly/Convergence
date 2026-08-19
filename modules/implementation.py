@@ -983,10 +983,10 @@ def show():
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
 
-    # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
+          # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
     with tab5:
-        st.markdown("#### 📋 Global Progress History")
-        st.caption("View every single progress update across all schemes.")
+        st.markdown("#### 📋 Global Progress Audit Trail & History")
+        st.caption("View every single progress update across all schemes. Only Superadmins can delete erroneous records.")
 
         # 1. Fetch all Progress Updates with necessary joins
         try:
@@ -1032,8 +1032,11 @@ def show():
                     dist_name = dist_map.get(dist_id, 'Unknown Dist')
                     block_name = block_map.get(block_id, 'N/A')
 
+                    # 🔥 FIX: Check for created_at, fallback to updated_at to prevent DB crash
+                    date_time_val = pd.to_datetime(rec.get('created_at') or rec.get('updated_at') or datetime.now()).strftime('%d %b %Y, %H:%M')
+                    
                     audit_rows.append({
-                        "Date & Time": pd.to_datetime(rec['created_at']).strftime('%d %b %Y, %H:%M'),
+                        "Date & Time": date_time_val,
                         "Updater (User)": updater_name,
                         "Updater Role": updater_role.capitalize(),
                         "Scheme / Work": act_desc,
