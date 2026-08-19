@@ -335,7 +335,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (MODIFIED LAYOUT) =================
+    # ================= TAB 2 (with clickable MIS link) =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -454,6 +454,20 @@ def show():
                     col_p_left, col_p_right = st.columns([1.5, 1], gap="large")
                     with col_p_left:
                         st.markdown("##### 📝 Update Progress Status")
+
+                        # -------- Clickable MIS Link --------
+                        st.markdown(
+                            """
+                            <div style="margin-bottom: 10px;">
+                                <a href="https://vbgramgrep.dord.gov.in/VBGRAMG/MISreport.aspx" target="_blank" style="color: #0F4C81; font-weight: 500; text-decoration: none; border-bottom: 1px dashed #0F4C81;">
+                                    🔗 VB GRAMG Soft
+                                </a>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        # ---------------------------------
+
                         with st.form("update_progress_form"):
                             # -------- Row 1: New Status & MIS Code --------
                             col_status, col_mis = st.columns(2)
