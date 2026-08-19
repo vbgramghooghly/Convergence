@@ -333,7 +333,7 @@ def show():
             else:
                 st.info("No targets mapped for your jurisdiction. Use the form to plan annual targets.")
 
-    # ================= TAB 2 (MODIFIED with single‑row filters) =================
+    # ================= TAB 2 (MODIFIED – improved Block filter) =================
     with tab2:
         st.markdown("#### 🏗️ Execution & Progress Controller")
         query_reg = supabase.table("convergence_register").select("*")
@@ -389,28 +389,37 @@ def show():
                 else:
                     sel_wing_id = None
 
-            # Block filter: frozen if role == 'block'
-            all_block_ids = sorted(set(a.get('block_id') for a in activities_reg if a.get('block_id')))
-            block_names = [block_map.get(bid, 'Unknown') for bid in all_block_ids if bid]
-            block_names = sorted(set(block_names))
+            # -------- FIX: Block filter now uses master blocks (all blocks from district) --------
+            # Determine which blocks to show: if user has district_id, filter by that district
+            if role in ['district', 'block', 'department'] and user.get('district_id'):
+                district_blocks = [b for b in blocks if b['district_id'] == user['district_id']]
+            else:
+                district_blocks = blocks  # superadmin sees all
+
+            # Build block options from master list
+            block_names_all = ["All"] + sorted([b['block_name'] for b in district_blocks])
+            block_id_from_name = {b['block_name']: b['id'] for b in district_blocks}
+
+            # If block user, freeze to their own block
             if role == 'block':
                 user_block_name = block_map.get(user.get('block_id'), '')
-                if user_block_name in block_names:
+                if user_block_name and user_block_name in block_names_all:
                     block_options = [user_block_name]
                 else:
                     block_options = ["All"]
                 selected_block_name = col_block.selectbox("Block", block_options, disabled=True)
                 selected_block_id = user.get('block_id')
             else:
-                selected_block_name = col_block.selectbox("Block", ["All"] + block_names)
-                selected_block_id = block_name_to_id.get(selected_block_name) if selected_block_name != "All" else None
+                selected_block_name = col_block.selectbox("Block", block_names_all)
+                selected_block_id = block_id_from_name.get(selected_block_name) if selected_block_name != "All" else None
 
-            # GP options based on selected block
+            # GP options based on selected block (from HOOGHLY_GPS) or from all activities if no block
             gp_options = ["All"]
             if selected_block_id:
                 block_key = selected_block_name.upper()
                 gp_options.extend(HOOGHLY_GPS.get(block_key, []))
             else:
+                # Fallback: gather all GPs from the register data
                 all_gps = set()
                 for a in activities_reg:
                     loc = a.get('geo_location', '')
