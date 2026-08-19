@@ -279,8 +279,7 @@ def show():
     # UI MODE 1: EDIT WORKSPACE
     # ==========================================
     if view_mode == "Edit Workspace":
-        st.title("🛠️ Estimate Builder")
-        st.markdown(f"**Engineer:** {user_name} | **Pricing Engine Locked To:** {active_district_name}")
+          st.markdown(f"**Pricing Engine Locked To:** {active_district_name}")
 
         with st.container():
             st.markdown("""<div style='background-color:#f8f9fa; padding:15px; border-radius:5px; border:1px solid #e9ecef; margin-bottom: 20px;'>""", unsafe_allow_html=True)
