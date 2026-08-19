@@ -110,6 +110,49 @@ st.markdown(f"""
         div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
             color: {primary_color} !important; border-bottom: 3px solid {primary_color} !important;
         }}
+
+        /* Additional styling for the info boxes */
+        .info-box {{
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            height: 100%;
+        }}
+        .info-box h5 {{
+            color: {primary_color};
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #E2E8F0;
+            padding-bottom: 4px;
+        }}
+        .info-box ul {{
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }}
+        .info-box ul li {{
+            font-size: 13px;
+            padding: 2px 0;
+            color: #1E293B;
+            display: flex;
+            align-items: center;
+        }}
+        .info-box ul li::before {{
+            content: "•";
+            color: {primary_color};
+            font-weight: bold;
+            margin-right: 6px;
+        }}
+        .whatsapp-link {{
+            color: #25D366;
+            font-weight: 600;
+            text-decoration: none;
+        }}
+        .whatsapp-link:hover {{
+            text-decoration: underline;
+        }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -244,16 +287,13 @@ def show_home():
 
     # ---- Determine which blocks to show ----
     if role == 'block' and block_id:
-        # Block user: only their block
         block_list = [b for b in blocks if b['id'] == block_id]
     elif role in ['district', 'department'] and district_id:
-        # District/Department user: blocks in their district
         block_list = [b for b in blocks if b['district_id'] == district_id]
     else:
-        # Superadmin: all blocks (or all in Hooghly)
         block_list = blocks
 
-    # ---- Fetch targets (now with block_id) ----
+    # ---- Fetch targets ----
     q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
     if role == 'department' and department_id:
         q_t = q_t.eq("department_id", department_id)
@@ -389,6 +429,67 @@ def show_home():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+    # ============================================================
+    # NEW SECTION: INFORMATIONAL BOX (DEPARTMENT, BLOCK, DISTRICT, SYSTEM ERROR)
+    # ============================================================
+    st.markdown("---")
+    st.markdown("#### 📌 Quick Reference Guide")
+
+    # Create 4 columns
+    col_dep, col_block, col_dist, col_error = st.columns(4)
+
+    with col_dep:
+        st.markdown("""
+        <div class="info-box">
+            <h5>🏛️ DEPARTMENT</h5>
+            <ul>
+                <li>Target Entry</li>
+                <li>Linked Work Entry &amp; Progress</li>
+                <li>Meeting Commitments</li>
+                <li>Contact Directory</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_block:
+        st.markdown("""
+        <div class="info-box">
+            <h5>📌 BLOCK</h5>
+            <ul>
+                <li>Convergence Plan</li>
+                <li>Block Meeting &amp; Attendance</li>
+                <li>General / Department-wise Targets</li>
+                <li>Support Department Progress</li>
+                <li>Contact Directory</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_dist:
+        st.markdown("""
+        <div class="info-box">
+            <h5>📍 DISTRICT</h5>
+            <ul>
+                <li>Convergence Plan</li>
+                <li>District Meeting &amp; Attendance</li>
+                <li>General / Department-wise Targets</li>
+                <li>Scheme Planning &amp; Execution</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_error:
+        st.markdown(f"""
+        <div class="info-box" style="border-left: 4px solid #EF4444;">
+            <h5 style="color: #DC2626;">⚠️ SYSTEM ERROR</h5>
+            <ul>
+                <li>📸 Take Screenshot</li>
+                <li>📱 <a href="https://wa.me/919804939270" target="_blank" class="whatsapp-link">WhatsApp: 9804939270</a></li>
+                <li>📝 Mention Brief Problem Description</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
 # ---------- IMPORT MODULES & ROUTING ----------
 try:
     from modules.estimate_master_data import show as show_estimate_master_data
@@ -428,7 +529,6 @@ try:
         from modules.ui_ux_controller import show as show_ui_ux
         show_ui_ux()
     else:
-        # Fallback (should not happen)
         st.info("Welcome to the VB-G RAM G Convergence Portal. Please select a module from the navigation bar.")
 except Exception as e:
     st.error(f"Error loading module: {e}")
