@@ -5,9 +5,55 @@ import streamlit.components.v1 as components
 from utils.db import get_supabase
 from auth.auth import logout, get_current_user
 
-# Import convergence helpers from the same directory
-from convergence_register import fetch_master_lookups, build_maps, get_filtered_records
+# ============================================================
+# HELPER FUNCTIONS (copied from convergence_register)
+# ============================================================
 
+@st.cache_data(ttl=600)
+def fetch_master_lookups():
+    """Fetch active master data for themes, activities, departments, etc."""
+    supabase = get_supabase()
+    return {
+        "fys": supabase.table("financial_years").select("*").eq("active", True).execute().data or [],
+        "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
+        "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
+        "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
+        "wings": supabase.table("department_wings").select("*").execute().data or [],
+        "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
+        "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
+        "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
+    }
+
+def build_maps(data):
+    """Build lookup dictionaries for ids ↔ names."""
+    return {
+        "fy_name_to_id": {f["year_name"].strip(): f["id"] for f in data["fys"]},
+        "dist_map": {d["district_name"].strip(): d["id"] for d in data["districts"]},
+        "block_map": {b["block_name"].strip(): b["id"] for b in data["blocks"]},
+        "dept_map": {d["department_name"].strip(): d["id"] for d in data["depts"]},
+        "wing_map": {w["id"]: w for w in data["wings"]},
+        "fy_reverse": {f["id"]: f["year_name"] for f in data["fys"]},
+        "dist_reverse": {d["id"]: d["district_name"] for d in data["districts"]},
+        "block_reverse": {b["id"]: b["block_name"] for b in data["blocks"]},
+        "dept_reverse": {d["id"]: d["department_name"] for d in data["depts"]},
+    }
+
+def get_filtered_records(supabase, role, user):
+    """Fetch convergence records filtered by user's role (district/block/department)."""
+    query = supabase.table("convergence_register").select("*")
+    if role == "district":
+        query = query.eq("district_id", user["district_id"])
+    elif role == "block":
+        query = query.eq("block_id", user["block_id"])
+    elif role == "department":
+        if not user.get("department_id"):
+            return []
+        query = query.eq("department_id", user["department_id"]).eq("district_id", user["district_id"])
+    return query.execute().data or []
+
+# ============================================================
+# MAIN APP
+# ============================================================
 
 def show():
     # -------------------- SECURITY --------------------
