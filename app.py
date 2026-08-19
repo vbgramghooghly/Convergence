@@ -132,7 +132,7 @@ if 'current_page' not in st.session_state:
     if role == "superadmin":
         st.session_state.current_page = "⚙️ Master Data"
     else:
-        st.session_state.current_page = "Home"  # <-- Changed to Home
+        st.session_state.current_page = "Home"
 
 # ---------- REUSABLE UI COMPONENTS ----------
 def render_profile_menu():
@@ -210,7 +210,11 @@ def show_home():
     st.markdown("#### 📊 District & Block Level Target Compliance Report")
 
     supabase = get_supabase()
-    user = st.session_state
+    user_session = st.session_state
+    role = user_session.get('role')
+    district_id = user_session.get('district_id')
+    block_id = user_session.get('block_id')
+    department_id = user_session.get('department_id')
 
     # Fetch master data
     @st.cache_data(ttl=600)
@@ -238,23 +242,40 @@ def show_home():
         st.warning("No active financial year found. Please set one in your profile.")
         return
 
-    # Fetch targets and register data
-    q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
-    q_r = supabase.table("convergence_register").select("*")
-    # Apply role-based filters (if user is block, only their block)
-    if user.get('role') == 'block' and user.get('block_id'):
-        q_r = q_r.eq("block_id", user['block_id'])
-    elif user.get('role') == 'district' and user.get('district_id'):
-        q_r = q_r.eq("district_id", user['district_id'])
-    elif user.get('role') == 'department' and user.get('department_id'):
-        q_r = q_r.eq("department_id", user['department_id'])
+    # ---- Determine which blocks to show ----
+    if role == 'block' and block_id:
+        # Block user: only their block
+        block_list = [b for b in blocks if b['id'] == block_id]
+    elif role in ['district', 'department'] and district_id:
+        # District/Department user: blocks in their district
+        block_list = [b for b in blocks if b['district_id'] == district_id]
+    else:
+        # Superadmin: all blocks (or all in Hooghly)
+        block_list = blocks  # You can filter by district if needed
 
+    # ---- Fetch targets ----
+    q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
+    if role == 'department' and department_id:
+        q_t = q_t.eq("department_id", department_id)
+    elif role == 'district' and district_id:
+        q_t = q_t.eq("district_id", district_id)
     targets = q_t.execute().data or []
-    register = q_r.execute().data or []
 
     if not targets:
         st.info("No targets found for the current financial year.")
         return
+
+    # ---- Fetch register entries ----
+    q_r = supabase.table("convergence_register").select("*")
+    # Filter by financial year
+    q_r = q_r.eq("financial_year_id", fy_id)
+    if role == 'block' and block_id:
+        q_r = q_r.eq("block_id", block_id)
+    elif role == 'district' and district_id:
+        q_r = q_r.eq("district_id", district_id)
+    elif role == 'department' and department_id:
+        q_r = q_r.eq("department_id", department_id)
+    register = q_r.execute().data or []
 
     df_targets = pd.DataFrame(targets)
     df_register = pd.DataFrame(register)
@@ -266,53 +287,57 @@ def show_home():
         common = target_words.intersection(work_words)
         return len(common) >= 3
 
-    # ---- Compute entries captured per (block, dept, activity) ----
+    # ---- Compute entries captured per (block, dept, wing, activity) ----
     entries_count = {}
     if not df_register.empty and 'activity_description' in df_register.columns:
         for _, row in df_register.iterrows():
-            block_id = row.get('block_id')
-            dept_id = row.get('department_id')
+            reg_block = row.get('block_id')
+            reg_dept = row.get('department_id')
+            reg_wing = row.get('wing_id')
             work_desc = row.get('activity_description', '')
             # For each target, check if it matches
             for _, trow in df_targets.iterrows():
-                t_block = trow.get('block_id')
                 t_dept = trow.get('department_id')
+                t_wing = trow.get('wing_id')
                 t_act = trow.get('activity', '')
-                if t_block == block_id and t_dept == dept_id and match_activity(work_desc, t_act):
-                    key = (block_id, dept_id, t_act)
-                    entries_count[key] = entries_count.get(key, 0) + 1
+                # Match department and wing (wing can be null)
+                if reg_dept == t_dept and (reg_wing == t_wing or (reg_wing is None and t_wing is None)):
+                    if match_activity(work_desc, t_act):
+                        key = (reg_block, t_dept, t_wing, t_act)
+                        entries_count[key] = entries_count.get(key, 0) + 1
 
     # ---- Build report table ----
     report_rows = []
     for _, trow in df_targets.iterrows():
-        block_id = trow.get('block_id')
-        dept_id = trow.get('department_id')
-        wing_id = trow.get('wing_id')
-        target_act = trow.get('activity', '')
-        target_set = trow.get('desired_target', 0)
+        t_dept = trow.get('department_id')
+        t_wing = trow.get('wing_id')
+        t_act = trow.get('activity', '')
+        t_target = trow.get('desired_target', 0)
 
-        key = (block_id, dept_id, target_act)
-        entries = entries_count.get(key, 0)
+        dept_name = dept_map.get(t_dept, 'Unknown')
+        wing_name = wing_map.get(t_wing, {}).get('wing_name', 'Main Dept.') if t_wing else 'Main Dept.'
+        dept_display = f"{dept_name} → {wing_name}" if t_wing else dept_name
 
-        gap = entries - target_set
-        status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
+        # For each block
+        for blk in block_list:
+            b_id = blk['id']
+            b_name = blk['block_name']
 
-        dept_name = dept_map.get(dept_id, 'Unknown')
-        wing_name = wing_map.get(wing_id, {}).get('wing_name', 'Main Dept.') if wing_id else 'Main Dept.'
-        dept_display = f"{dept_name} → {wing_name}" if wing_id else dept_name
+            key = (b_id, t_dept, t_wing, t_act)
+            entries = entries_count.get(key, 0)
+            gap = entries - t_target
+            status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
 
-        block_name = block_map.get(block_id, 'Unknown')
-
-        report_rows.append({
-            "District": "Hooghly",  # fixed for this portal
-            "Block": block_name,
-            "Department / Wing": dept_display,
-            "Target Activity": target_act,
-            "Target Set": target_set,
-            "Entries Captured": entries,
-            "Gap": gap,
-            "Status": status
-        })
+            report_rows.append({
+                "District": "Hooghly",  # fixed for this portal
+                "Block": b_name,
+                "Department / Wing": dept_display,
+                "Target Activity": t_act,
+                "Target Set": t_target,
+                "Entries Captured": entries,
+                "Gap": gap,
+                "Status": status
+            })
 
     df_report = pd.DataFrame(report_rows)
 
