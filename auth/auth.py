@@ -171,7 +171,7 @@ def check_password():
         st.markdown("<br>", unsafe_allow_html=True)
         
         img1_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/fa60c42a-2c6c-48be-a571-67aa4c5c7b34.png"
-        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2.png"
+        img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
         
         try:
             st.markdown(f'<div class="banner-card"><img src="{img1_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
