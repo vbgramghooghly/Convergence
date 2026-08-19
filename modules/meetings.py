@@ -312,7 +312,7 @@ def show():
         display_persisted_msg() # Show any success/error messages
         
         # 🔥 NEW: Yearly Meeting Calendar
-        st.markdown("#### 🗓️ Yearly Meeting Calendar (Scheduled & Completed)")
+        st.markdown("# 🗓️ Yearly Meeting Calendar (Scheduled & Completed)")
         if not df_meetings.empty:
             calendar_df = df_meetings.copy()
             calendar_df['Meeting Location'] = calendar_df.apply(format_meeting_label, axis=1)
