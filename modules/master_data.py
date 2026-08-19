@@ -293,7 +293,7 @@ def show():
                     else:
                         st.error(f"❌ Failed to add FY: {e}")
 
-    # ======================== TAB 8: DESIGNATIONS ========================
+    # ======================== TAB 8: DESIGNATIONS (UPDATED WITH FULL EDIT) ========================
     with tab8:
         st.subheader("🎓 Manage Designations & Statutory Committee Roles")
         st.caption("Designations flagged as statutory members will automatically be pre-selected when scheduling a District or Block meeting.")
@@ -304,22 +304,63 @@ def show():
         else:
             st.info("No designations found in the database yet.")
             
-        with st.form("desig_form"):
-            col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
-            desig_name = col_des1.text_input("Designation Title")
-            is_committee = col_des2.checkbox("Statutory Committee Member?")
-            comm_level = col_des3.selectbox("Committee Level", ["None", "District", "Block"])
-            
-            if st.form_submit_button("Save Designation", type="primary"):
-                try:
-                    payload = {"designation_name": desig_name, "is_committee_member": is_committee, "committee_level": comm_level if is_committee else None, "active": True}
-                    supabase.table("designations").insert(payload).execute()
-                    st.success("✅ Designation added successfully!")
-                    st.rerun()
-                except Exception as e:
-                    check = supabase.table("designations").select("id").eq("designation_name", desig_name).execute()
-                    if check.data and len(check.data) > 0:
+        # Modern Edit / Create Toggle
+        desig_action = st.radio("Choose Action", ["✏️ Edit Existing Designation", "➕ Create New Designation"], horizontal=True)
+        
+        if desig_action == "✏️ Edit Existing Designation":
+            desig_dict = {d['designation_name']: d['id'] for d in desig_data} if desig_data else {}
+            if desig_dict:
+                selected_desig_name = st.selectbox("Select Designation to Edit", list(desig_dict.keys()))
+                current_desig = next((d for d in desig_data if d['designation_name'] == selected_desig_name), None)
+                
+                if current_desig:
+                    with st.form("edit_desig_form"):
+                        col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
+                        
+                        # Pre-populate fields with current data
+                        desig_name = col_des1.text_input("Designation Title", value=current_desig['designation_name'])
+                        is_committee = col_des2.checkbox("Statutory Committee Member?", value=current_desig['is_committee_member'])
+                        
+                        comm_level_opts = ["None", "District", "Block"]
+                        default_comm_level = current_desig.get('committee_level', "None")
+                        comm_level_idx = comm_level_opts.index(default_comm_level) if default_comm_level in comm_level_opts else 0
+                        comm_level = col_des3.selectbox("Committee Level", comm_level_opts, index=comm_level_idx)
+                        
+                        active = st.checkbox("Active", value=current_desig.get('active', True))
+                        
+                        if st.form_submit_button("Update Designation", type="primary"):
+                            try:
+                                payload = {
+                                    "designation_name": desig_name,
+                                    "is_committee_member": is_committee,
+                                    "committee_level": comm_level if is_committee else None,
+                                    "active": active
+                                }
+                                supabase.table("designations").update(payload).eq("id", current_desig['id']).execute()
+                                st.success("✅ Designation updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Failed to update designation: {e}")
+            else:
+                st.info("No existing designations available to edit.")
+
+        else: # Create New Designation Branch
+            with st.form("create_desig_form"):
+                col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
+                desig_name = col_des1.text_input("Designation Title")
+                is_committee = col_des2.checkbox("Statutory Committee Member?")
+                comm_level = col_des3.selectbox("Committee Level", ["None", "District", "Block"])
+                
+                if st.form_submit_button("Save Designation", type="primary"):
+                    try:
+                        payload = {"designation_name": desig_name, "is_committee_member": is_committee, "committee_level": comm_level if is_committee else None, "active": True}
+                        supabase.table("designations").insert(payload).execute()
                         st.success("✅ Designation added successfully!")
                         st.rerun()
-                    else:
-                        st.error(f"❌ Failed to add designation: {e}")
+                    except Exception as e:
+                        check = supabase.table("designations").select("id").eq("designation_name", desig_name).execute()
+                        if check.data and len(check.data) > 0:
+                            st.success("✅ Designation added successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Failed to add designation: {e}")
