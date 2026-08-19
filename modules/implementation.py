@@ -56,6 +56,7 @@ def fetch_master_data():
         act_dept_mapping = supabase.table("activity_departments").select("*").execute().data or []
         fys = supabase.table("financial_years").select("*").eq("active", True).execute().data or []
         users_data = supabase.table("users").select("id, full_name, role, department_id, wing_id, district_id, block_id").execute().data or []
+        # themes are no longer needed for this form, but kept for other modules
         themes = supabase.table("themes").select("id,theme_name").eq("active", True).execute().data or []
         return departments, wings, districts, blocks, activities, act_dept_mapping, fys, users_data, themes
     except Exception:
@@ -110,7 +111,7 @@ def show():
         "🚨 Target Compliance"
     ])
 
-    # ================= TAB 1: BLOCK‑WISE TARGET FORM =================
+    # ================= TAB 1: BLOCK‑WISE TARGET FORM (UPDATED) =================
     with tab1:
         query_t = supabase.table("department_targets").select("*")
         if role == 'department':
@@ -176,7 +177,7 @@ def show():
                         dist_sel = st.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                    # ---- NEW: Static list of Project Heads (Themes) ----
+                    # ---- PROJECT HEAD (static list, NOT linked to activities) ----
                     PROJECT_HEAD_OPTIONS = [
                         "Canals, Check Dams & Dykes",
                         "Ponds & Water Harvesting",
@@ -206,17 +207,11 @@ def show():
                         "Embankments & Mitigation Works",
                         "Post-Disaster Restoration"
                     ]
-                    # Map project head to theme id (by name)
-                    theme_id_map = {t['theme_name']: t['id'] for t in themes}
                     selected_theme_name = st.selectbox("Convergence Project Head*", PROJECT_HEAD_OPTIONS)
-                    selected_theme_id = theme_id_map.get(selected_theme_name, None)
-                    if not selected_theme_id:
-                        st.warning("Selected Project Head not found in Themes master. Please add it or choose an existing one.")
-                    # --------------------------------------------
 
                     annual_plan_scope = st.text_area("Scope under Annual Plan")
 
-                    # Scheme Convergence section (common)
+                    # ---- Departmental Scheme / Fund Convergence (common) ----
                     st.markdown("##### Departmental Scheme / Fund Convergence")
                     conv_choice = st.radio(
                         "Convergence with Own Departmental Scheme / Fund?",
@@ -252,17 +247,17 @@ def show():
                     block_options = {b['block_name']: b['id'] for b in dist_blocks}
                     block_names = list(block_options.keys())
 
-                    # Get activities for the department and theme
+                    # ---- Approved Activity: filtered ONLY by Department and Wing ----
+                    # (No theme filtering – project head is separate)
                     valid_activity_ids = [m['activity_id'] for m in act_dept_mapping if m['department_id'] == active_dept_id]
                     valid_activities = [a for a in activities if a['id'] in valid_activity_ids]
-                    if selected_theme_id:
-                        valid_activities = [a for a in valid_activities if a.get('theme_id') == selected_theme_id]
                     activity_options = {a['activity_name']: a['id'] for a in valid_activities}
                     activity_names = list(activity_options.keys())
+                    # --------------------------------------------------------------
 
-                    # Fetch existing targets for this combination (department, wing, district, fy, theme)
+                    # Fetch existing targets for this combination (department, wing, district, fy)
                     existing_targets = []
-                    if active_dept_id and dist_id and selected_fy_target_id and selected_theme_id:
+                    if active_dept_id and dist_id and selected_fy_target_id:
                         q_existing = supabase.table("department_targets").select("*") \
                             .eq("department_id", active_dept_id) \
                             .eq("district_id", dist_id) \
@@ -271,10 +266,6 @@ def show():
                             q_existing = q_existing.eq("wing_id", active_wing_id)
                         else:
                             q_existing = q_existing.is_("wing_id", "null")
-                        # Filter by theme via activity name (since activity names are unique, we can get them from valid_activities)
-                        theme_act_names = [a['activity_name'] for a in valid_activities if a.get('theme_id') == selected_theme_id]
-                        if theme_act_names:
-                            q_existing = q_existing.in_("activity", theme_act_names)
                         existing_targets = q_existing.execute().data or []
 
                     # Build DataFrame for data editor
@@ -285,7 +276,7 @@ def show():
                             block_id = t.get('block_id')
                             block_name = block_map.get(block_id, '')
                             if not block_name:
-                                continue  # skip district‑wide targets
+                                continue  # skip district‑wide targets (block_id is NULL)
                             rows.append({
                                 "Block": block_name,
                                 "Approved Activity": act_name,
@@ -355,7 +346,7 @@ def show():
                         errors = []
                         if not active_dept_id or not dist_id:
                             errors.append("Invalid Department or District.")
-                        if not selected_theme_id:
+                        if not selected_theme_name:
                             errors.append("Please select a valid Convergence Project Head.")
                         if edited_df.empty or edited_df.isnull().all().all():
                             errors.append("At least one row with valid data is required.")
@@ -373,7 +364,8 @@ def show():
                             for err in errors:
                                 st.error(f"⚠️ {err}")
                         else:
-                            # Delete existing targets for this combination (district, dept, wing, fy, theme)
+                            # Delete existing targets for this combination (district, dept, wing, fy)
+                            # We delete all, then reinsert from the table.
                             q_del = supabase.table("department_targets").delete() \
                                 .eq("department_id", active_dept_id) \
                                 .eq("district_id", dist_id) \
@@ -382,18 +374,12 @@ def show():
                                 q_del = q_del.eq("wing_id", active_wing_id)
                             else:
                                 q_del = q_del.is_("wing_id", "null")
-                            # Filter by theme
-                            theme_act_names = [a['activity_name'] for a in valid_activities if a.get('theme_id') == selected_theme_id]
-                            if theme_act_names:
-                                q_del = q_del.in_("activity", theme_act_names)
-                            else:
-                                st.warning("No activities found for the selected theme. Nothing to delete.")
                             try:
                                 q_del.execute()
                             except Exception as e:
                                 st.warning(f"Could not delete old targets: {e}")
 
-                            # Insert new targets
+                            # Insert new targets from the table
                             inserted = 0
                             for idx, row in edited_df.iterrows():
                                 if pd.isna(row['Block']) or row['Block'] == '':
