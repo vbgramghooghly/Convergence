@@ -985,9 +985,7 @@ def show():
 
         # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
     with tab5:
-        st.markdown("#### 📋 Global Progress Audit Trail & History")
-        st.caption("View every single progress update across all schemes. Only Superadmins can delete erroneous records.")
-
+      
         # 1. Fetch all Progress Updates with necessary joins
         try:
             # 🔥 FIXED: Sorted by "updated_at" instead of "created_at" to match existing DB schema
