@@ -3,7 +3,6 @@ import pandas as pd
 import uuid
 import streamlit.components.v1 as components
 from utils.db import get_supabase
-from auth.auth import get_current_user
 
 # ============================================================
 # CONSTANTS
@@ -48,23 +47,15 @@ def show():
         if key not in st.session_state:
             st.session_state[key] = default
 
-    # -------------------- SUPABASE CLIENT --------------------
-    supabase = get_supabase()
-
-    # -------------------- SAFE USER RETRIEVAL --------------------
-    user = {}
-    if st.session_state.get('authenticated'):
-        raw_user = get_current_user()
-        if isinstance(raw_user, dict):
-            user = raw_user
-        # else keep empty dict
-
-    role = user.get('role', 'guest')
+    # -------------------- USER INFO FROM SESSION STATE (safe) --------------------
+    role = st.session_state.get('role', 'guest')
     user_district = st.session_state.get('district_id', 1)
     user_dept_id = st.session_state.get('department_id')
     user_block_id = st.session_state.get('block_id')
-
     active_district_name = DISTRICT_NAMES.get(user_district, f"District {user_district}")
+
+    # -------------------- SUPABASE CLIENT --------------------
+    supabase = get_supabase()
 
     # -------------------- LOAD MASTER DATA (specs, matrix, LMR, themes, activities) --------------------
     @st.cache_data(ttl=600)
@@ -111,7 +102,7 @@ def show():
     if not df_lmr.empty:
         df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
-    # -------------------- CONVERGENCE REGISTER QUERY (direct, no external helpers) --------------------
+    # -------------------- CONVERGENCE REGISTER QUERY (direct) --------------------
     def get_convergence_records():
         query = supabase.table("convergence_register").select("*")
         if role == "district" and user_district:
@@ -276,9 +267,6 @@ def show():
             st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
             conv_row = selected_opt.get('row')
             if conv_row is not None:
-                # Display district and block names if we can map them
-                # For simplicity, we'll just show the IDs or fetch names from database if needed
-                # Since we don't have a block lookup helper, we'll show district name from constant
                 dist_id = conv_row.get('district_id')
                 dist_name = DISTRICT_NAMES.get(dist_id, f"District {dist_id}") if dist_id else "N/A"
                 block_id = conv_row.get('block_id')
