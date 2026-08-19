@@ -95,7 +95,7 @@ def check_password():
 
     with col_left:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 class='portal-title'>🏛️ VB-G RAM G Convergence Portal, Hooghly</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='portal-title'>🏛️ VB G RAM G Convergence Portal, Hooghly</h1>", unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("### 🌟 Portal Highlights")
