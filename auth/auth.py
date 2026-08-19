@@ -112,10 +112,12 @@ def check_password():
                 text-align: center;
             }
             .banner-card img {
-                max-height: 180px !important;
-                width: auto !important;
+                max-width: 100% !important;
+                height: auto !important;
                 object-fit: contain;
                 margin: 0 auto;
+                display: block;
+                border-radius: 8px;
             }
             
             /* Clean Form Container */
@@ -166,7 +168,7 @@ def check_password():
 
     col_left, col_right = st.columns([1.3, 1], gap="large")
 
-    # ---------- LEFT COLUMN: RESIZED BANNER IMAGES & PDF ----------
+    # ---------- LEFT COLUMN: BANNER IMAGES & PDF ----------
     with col_left:
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -174,8 +176,8 @@ def check_password():
         img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
         
         try:
-            st.markdown(f'<div class="banner-card"><img src="{img1_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="banner-card"><img src="{img2_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="banner-card"><img src="{img1_url}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="banner-card"><img src="{img2_url}"></div>', unsafe_allow_html=True)
         except Exception:
             st.error("⚠️ Could not load graphics from Supabase.")
             
@@ -201,7 +203,7 @@ def check_password():
             st.markdown('<p class="login-header">🔐 Portal Sign In</p>', unsafe_allow_html=True)
             st.markdown('<p class="login-subheader">Enter your authorized credentials to continue.</p>', unsafe_allow_html=True)
             
-            username = st.text_input("Username", placeholder="e.g. admin_hooghly ")
+            username = st.text_input("Username", placeholder="e.g. admin_hooghly")
             password = st.text_input("Password", type="password", placeholder="••••••••")
 
             # ---------- CAPTCHA ----------
