@@ -256,7 +256,7 @@ render_top_navigation()
 # HOME PAGE – DISTRICT & BLOCK LEVEL TARGET COMPLIANCE REPORT
 # ============================================================
 def show_home():
-    st.markdown("#### 📊 District & Block Level Target Compliance Report")
+    st.markdown("#### 📊 At a Glance Report")
 
     supabase = get_supabase()
     user_session = st.session_state
