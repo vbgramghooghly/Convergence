@@ -499,7 +499,9 @@ try:
         from modules.ui_ux_controller import show as show_ui_ux
         show_ui_ux()
     else:
-        st.info("Welcome to the VB-G RAM G Convergence Portal. Please select a module from the navigation bar.")
+        st.info("Welcome to the VB-G RAM G Convergence Portal, a unified platform for planning, coordinating, monitoring, and managing convergence initiatives and departmental interventions under the Viksit Bharat – Guarantee for Rozgar & Ajeevika Mission (Gramin) framework.
+
+Please select the required module from the navigation bar to access scheme details, convergence proposals, departmental interventions, data entry, monitoring, progress tracking, reports, and other portal services.")
 except Exception as e:
     st.error(f"Error loading module: {e}")
     st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
