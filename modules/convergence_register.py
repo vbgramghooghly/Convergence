@@ -208,123 +208,171 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
         "scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
     }
 
-# ---------- MODIFIED: edit_delete_section now accepts 'master' ----------
+# ---------- MODIFIED: Advanced Search & Filtering in dedicated section ----------
 def edit_delete_section(records, maps, supabase, user, master):
-    if user["role"] not in ["superadmin", "district"] or not records: return
-    st.markdown("---")
-    st.markdown("#### 🛠️ Manage / Amend Existing Activity")
-    with st.expander("✏️ Edit or 🗑️ Delete an Activity", expanded=False):
-        display_options = {
-            r["id"]: f"{r['activity_description'][:60]}... - {maps['dept_reverse'].get(r['department_id'], 'Unknown')} (₹{r.get('total_converged_fund', 0)} L)"
-            for r in records
-        }
-        selected_edit_id = st.selectbox(
-            "Select Activity to Modify",
-            options=list(display_options.keys()),
-            format_func=lambda x: display_options[x]
-        )
-        if not selected_edit_id: return
-        rec = next(r for r in records if r["id"] == selected_edit_id)
+    if user["role"] not in ["superadmin", "district"]: return
+    if not records:
+        st.info("No records available to manage.")
+        return
 
-        if st.button("🗑️ Permanently Delete Activity", type="primary"):
+    st.markdown("#### 🔍 Advanced Search & Filter")
+    
+    # Extract unique values for filters
+    block_ids = list(set(r.get("block_id") for r in records if r.get("block_id")))
+    block_names = sorted(list(set(maps["block_reverse"].get(b, "Unknown") for b in block_ids)))
+    
+    dept_ids = list(set(r.get("department_id") for r in records if r.get("department_id")))
+    dept_names = sorted(list(set(maps["dept_reverse"].get(d, "Unknown") for d in dept_ids)))
+    
+    gps = set()
+    for r in records:
+        loc = r.get("geo_location", "")
+        if "GP:" in loc:
             try:
-                supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
-                try: log_action(user.get("id"), f"DELETE convergence_register {selected_edit_id}")
-                except: pass
-                st.success("Activity deleted successfully!")
-                st.rerun()
-            except Exception as e: st.error(f"Error deleting record: {e}")
+                gp_part = loc.split("GP:")[1].split("|")[0].strip()
+                if gp_part: gps.add(gp_part)
+            except: pass
+    gp_names = sorted(list(gps))
 
-        with st.form("edit_conv_form"):
-            col_e1, col_e2 = st.columns(2)
-            current_status = rec.get("current_status", "Planned")
-            new_status = col_e1.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(current_status) if current_status in STATUS_OPTIONS else 0)
-            current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
-            new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
+    with st.container(border=True):
+        col1, col2, col3, col4 = st.columns(4)
+        sel_block = col1.selectbox("Filter by Block", ["All"] + block_names)
+        sel_dept = col2.selectbox("Filter by Department", ["All"] + dept_names)
+        sel_gp = col3.selectbox("Filter by GP", ["All"] + gp_names)
+        search_text = col4.text_input("Search Activity / Work Name", placeholder="Type to search...")
+    
+    # Apply Filters
+    filtered_records = records
+    if sel_block != "All":
+        block_id = maps["block_map"].get(sel_block)
+        filtered_records = [r for r in filtered_records if r.get("block_id") == block_id]
+    if sel_dept != "All":
+        dept_id = maps["dept_map"].get(sel_dept)
+        filtered_records = [r for r in filtered_records if r.get("department_id") == dept_id]
+    if sel_gp != "All":
+        filtered_records = [r for r in filtered_records if sel_gp in r.get("geo_location", "")]
+    if search_text:
+        filtered_records = [r for r in filtered_records if search_text.lower() in r.get("activity_description", "").lower()]
+    
+    if not filtered_records:
+        st.warning("No activities match the selected filters.")
+        return
 
-            curr_pia = rec.get("pia_type", "Select PIA")
-            pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
-            new_pia = st.selectbox("Project Implementing Agency (PIA)*", PIA_OPTIONS, index=pia_index)
+    st.markdown("---")
+    st.markdown("#### 🛠️ Modify Selected Activity")
+    display_options = {
+        r["id"]: f"{r['activity_description'][:60]}... - {maps['dept_reverse'].get(r['department_id'], 'Unknown')} (₹{r.get('total_converged_fund', 0)} L)"
+        for r in filtered_records
+    }
+    
+    selected_edit_id = st.selectbox(
+        "Select Activity to Modify",
+        options=list(display_options.keys()),
+        format_func=lambda x: display_options[x]
+    )
+    
+    if not selected_edit_id: return
+    rec = next(r for r in filtered_records if r["id"] == selected_edit_id)
 
-            # ---- NEW: Wing selection for edit ----
-            dept_id = rec.get("department_id")
-            dept_wings = [w for w in master["wings"] if w["department_id"] == dept_id]
-            wing_choices = [("Direct Parent Department", None)] + [(w["wing_name"], w["id"]) for w in dept_wings]
-            wing_labels = [label for label, _ in wing_choices]
-            wing_ids = [wid for _, wid in wing_choices]
-            current_wing_id = rec.get("wing_id")
-            default_idx = wing_ids.index(current_wing_id) if current_wing_id in wing_ids else 0
-            selected_wing_label = st.selectbox(
-                "Entering Wing / Scheme Source",
-                options=wing_labels,
-                index=default_idx
-            )
-            new_wing_id = wing_ids[wing_labels.index(selected_wing_label)]
-            # -------------------------------------
+    if st.button("🗑️ Permanently Delete Activity", type="primary"):
+        try:
+            supabase.table("convergence_register").delete().eq("id", selected_edit_id).execute()
+            try: log_action(user.get("id"), f"DELETE convergence_register {selected_edit_id}")
+            except: pass
+            st.success("Activity deleted successfully!")
+            st.rerun()
+        except Exception as e: st.error(f"Error deleting record: {e}")
 
-            new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
-            new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
-            new_outcome = st.text_area("Possible Outcome / Work Dimensions", value=rec.get("work_dimensions", "") or "")
+    with st.form("edit_conv_form"):
+        col_e1, col_e2 = st.columns(2)
+        current_status = rec.get("current_status", "Planned")
+        new_status = col_e1.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(current_status) if current_status in STATUS_OPTIONS else 0)
+        current_conv = rec.get("convergence_type", CONVERGENCE_TYPES[0])
+        new_conv_type = col_e2.selectbox("Convergence Type", CONVERGENCE_TYPES, index=CONVERGENCE_TYPES.index(current_conv) if current_conv in CONVERGENCE_TYPES else 0)
 
-            col_det5, col_det6 = st.columns(2)
-            new_mis = col_det5.text_input("MIS Code", value=rec.get("mis_code", "") or "")
-            curr_origin = rec.get("origin_source", "District Plan")
-            new_origin = col_det6.selectbox("Source of Activity", ORIGIN_SOURCES, index=ORIGIN_SOURCES.index(curr_origin) if curr_origin in ORIGIN_SOURCES else 0)
+        curr_pia = rec.get("pia_type", "Select PIA")
+        pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
+        new_pia = st.selectbox("Project Implementing Agency (PIA)*", PIA_OPTIONS, index=pia_index)
 
-            col_t1, col_t2 = st.columns(2)
-            new_d_fund = col_t1.number_input("Department Fund (₹ Lakhs)", value=float(rec.get("department_fund", 0.0)))
-            new_v_fund = col_t2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get("vbgramg_fund", 0.0)))
-            new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
+        # ---- NEW: Wing selection for edit ----
+        dept_id = rec.get("department_id")
+        dept_wings = [w for w in master["wings"] if w["department_id"] == dept_id]
+        wing_choices = [("Direct Parent Department", None)] + [(w["wing_name"], w["id"]) for w in dept_wings]
+        wing_labels = [label for label, _ in wing_choices]
+        wing_ids = [wid for _, wid in wing_choices]
+        current_wing_id = rec.get("wing_id")
+        default_idx = wing_ids.index(current_wing_id) if current_wing_id in wing_ids else 0
+        selected_wing_label = st.selectbox(
+            "Entering Wing / Scheme Source",
+            options=wing_labels,
+            index=default_idx
+        )
+        new_wing_id = wing_ids[wing_labels.index(selected_wing_label)]
+        # -------------------------------------
 
-            st.markdown("---")
-            defaults = {
-                "convergence": rec.get("department_scheme_convergence", False),
-                "scheme_name": rec.get("department_scheme_name", "") or "",
-                "annual_plan_status": rec.get("department_annual_plan_status", "Not Confirmed"),
-                "scheme_remarks": rec.get("department_scheme_remarks", "") or "",
-            }
-            scheme_data = render_scheme_convergence_section(defaults, key_prefix="edit")
+        new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
+        new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
+        new_outcome = st.text_area("Possible Outcome / Work Dimensions", value=rec.get("work_dimensions", "") or "")
 
-            if st.form_submit_button("Commit Changes", type="primary"):
-                if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
-                    new_d_fund = new_v_fund = 0.0
-                if new_pia == "Select PIA":
-                    st.error("⚠️ Please select a valid Project Implementing Agency (PIA).")
-                elif scheme_data["convergence"] and not scheme_data["scheme_name"]:
-                    st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
-                elif not new_work_name.strip():
-                    st.error("⚠️ Work Name cannot be empty.")
-                elif new_conv_type != "Technical Convergence (Zero Fund/NOC)" and new_d_fund == 0.0 and new_v_fund == 0.0:
-                    st.error("⚠️ Financial Convergence requires a Fund amount > 0.")
-                elif new_pd <= 0:
-                    st.error("⚠️ Expected Persondays is mandatory and must be greater than zero.")
-                else:
-                    update_payload = {
-                        "current_status": new_status,
-                        "convergence_type": new_conv_type,
-                        "activity_description": new_work_name,
-                        "scheme_name": None,
-                        "geo_location": new_geo,
-                        "work_dimensions": new_outcome,
-                        "mis_code": new_mis.strip() if new_mis else None,
-                        "origin_source": new_origin,
-                        "expected_persondays": new_pd,
-                        "department_fund": new_d_fund,
-                        "vbgramg_fund": new_v_fund,
-                        "pia_type": new_pia,
-                        "wing_id": new_wing_id,   # <-- Added wing update
-                        "department_scheme_convergence": scheme_data["convergence"],
-                        "department_scheme_name": scheme_data["scheme_name"],
-                        "department_annual_plan_status": scheme_data["annual_plan_status"],
-                        "department_scheme_remarks": scheme_data["scheme_remarks"],
-                    }
-                    try:
-                        supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
-                        try: log_action(user.get("id"), f"UPDATE convergence_register {selected_edit_id}")
-                        except: pass
-                        st.success("Activity updated successfully!")
-                        st.rerun()
-                    except Exception as e: st.error(f"Error updating record: {e}")
+        col_det5, col_det6 = st.columns(2)
+        new_mis = col_det5.text_input("MIS Code", value=rec.get("mis_code", "") or "")
+        curr_origin = rec.get("origin_source", "District Plan")
+        new_origin = col_det6.selectbox("Source of Activity", ORIGIN_SOURCES, index=ORIGIN_SOURCES.index(curr_origin) if curr_origin in ORIGIN_SOURCES else 0)
+
+        col_t1, col_t2 = st.columns(2)
+        new_d_fund = col_t1.number_input("Department Fund (₹ Lakhs)", value=float(rec.get("department_fund", 0.0)))
+        new_v_fund = col_t2.number_input("VB-G RAM G Fund (₹ Lakhs)", value=float(rec.get("vbgramg_fund", 0.0)))
+        new_pd = st.number_input("Expected Persondays*", value=int(rec.get("expected_persondays", 0)))
+
+        st.markdown("---")
+        defaults = {
+            "convergence": rec.get("department_scheme_convergence", False),
+            "scheme_name": rec.get("department_scheme_name", "") or "",
+            "annual_plan_status": rec.get("department_annual_plan_status", "Not Confirmed"),
+            "scheme_remarks": rec.get("department_scheme_remarks", "") or "",
+        }
+        scheme_data = render_scheme_convergence_section(defaults, key_prefix="edit")
+
+        if st.form_submit_button("Commit Changes", type="primary"):
+            if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
+                new_d_fund = new_v_fund = 0.0
+            if new_pia == "Select PIA":
+                st.error("⚠️ Please select a valid Project Implementing Agency (PIA).")
+            elif scheme_data["convergence"] and not scheme_data["scheme_name"]:
+                st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
+            elif not new_work_name.strip():
+                st.error("⚠️ Work Name cannot be empty.")
+            elif new_conv_type != "Technical Convergence (Zero Fund/NOC)" and new_d_fund == 0.0 and new_v_fund == 0.0:
+                st.error("⚠️ Financial Convergence requires a Fund amount > 0.")
+            elif new_pd <= 0:
+                st.error("⚠️ Expected Persondays is mandatory and must be greater than zero.")
+            else:
+                update_payload = {
+                    "current_status": new_status,
+                    "convergence_type": new_conv_type,
+                    "activity_description": new_work_name,
+                    "scheme_name": None,
+                    "geo_location": new_geo,
+                    "work_dimensions": new_outcome,
+                    "mis_code": new_mis.strip() if new_mis else None,
+                    "origin_source": new_origin,
+                    "expected_persondays": new_pd,
+                    "department_fund": new_d_fund,
+                    "vbgramg_fund": new_v_fund,
+                    "pia_type": new_pia,
+                    "wing_id": new_wing_id,   # <-- Added wing update
+                    "department_scheme_convergence": scheme_data["convergence"],
+                    "department_scheme_name": scheme_data["scheme_name"],
+                    "department_annual_plan_status": scheme_data["annual_plan_status"],
+                    "department_scheme_remarks": scheme_data["scheme_remarks"],
+                }
+                try:
+                    supabase.table("convergence_register").update(update_payload).eq("id", selected_edit_id).execute()
+                    try: log_action(user.get("id"), f"UPDATE convergence_register {selected_edit_id}")
+                    except: pass
+                    st.success("Activity updated successfully!")
+                    st.rerun()
+                except Exception as e: st.error(f"Error updating record: {e}")
 
 # ---------- MAIN UI ----------
 def show():
@@ -346,17 +394,20 @@ def show():
 
     render_kpi_cards(df_records, exact_count)
 
-    tab1, tab2 = st.tabs([
+    # dynamically generate tabs based on user role
+    tab_list = [
         "📋 Master Work Register",
         "➕ Add New Activity"
-    ])
+    ]
+    if role in ["superadmin", "district"]:
+        tab_list.append("🛠️ Manage / Amend Activity")
 
-    with tab1:
+    tabs = st.tabs(tab_list)
+
+    with tabs[0]:
         display_register(df_records, maps)
-        # Pass 'master' to edit_delete_section
-        edit_delete_section(records, maps, supabase, user, master)
 
-    with tab2:
+    with tabs[1]:
         st.markdown("#### ➕ Register Individual Convergence Activity")
         with st.container(border=True):
             col1, col2 = st.columns(2)
@@ -536,6 +587,10 @@ def show():
                             else:
                                 st.error(f"Error saving record: {e}")
 
+    # Render tab 3 if role is appropriate
+    if len(tabs) > 2:
+        with tabs[2]:
+            edit_delete_section(records, maps, supabase, user, master)
 
     # ---- Display Requested Global Footer Text ----
     st.markdown(
@@ -546,4 +601,3 @@ def show():
         """, 
         unsafe_allow_html=True
     )
-
