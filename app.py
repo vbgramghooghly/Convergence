@@ -198,7 +198,7 @@ def render_top_navigation():
     with cols[0]:
         st.markdown(f"""
         <div style="line-height: 1.1;">
-            <span style="font-size: 2.00rem; font-weight: 1200; color: {primary_color}; white-space: nowrap;">🏛️ VB G RAM G</span><br>
+            <span style="font-size: 2.00rem; font-weight: 1200; color: {primary_color}; white-space: nowrap;">VB G RAM G</span><br>
             <span style="font-size: 1.00rem; font-weight: 800; color: #64748B; letter-spacing: 0.5px; text-transform: uppercase;">Convergence Portal</span>
         </div>
         """, unsafe_allow_html=True)
