@@ -103,11 +103,13 @@ def show():
             active_fy_id = f['id']
             break
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # UPDATE: Added tab5 with the new Audit Trail
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🎯 Department Targets (Planning)", 
         "🏗️ Implementation Progress (Execution)", 
         "🤝 Meeting Commitments (Sync)",
-        "🚨 Target Compliance"
+        "🚨 Target Compliance",
+        "📋 Progress Audit Trail & History"
     ])
 
     # ================= TAB 1: REDESIGNED (Removed optional remarks) =================
@@ -980,3 +982,126 @@ def show():
             st.dataframe(df_comp.style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
+
+    # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
+    with tab5:
+        st.markdown("#### 📋 Global Progress History")
+        st.caption("View every single progress update across all schemes.")
+
+        # 1. Fetch all Progress Updates with necessary joins
+        try:
+            # Assuming the database has these tables linked correctly
+            audit_query = supabase.table("progress_updates").select(
+                "*, convergence_register(id, activity_description, department_id, district_id, block_id), users(full_name, role, department_id, district_id, block_id)"
+            ).order("created_at", desc=True)
+            
+            # 2. Restrict access if not Superadmin (Show only updates related to their jurisdiction)
+            if role != 'superadmin':
+                # Filter by department or district/block based on the logged-in user
+                if role == 'department':
+                    audit_query = audit_query.eq("convergence_register.department_id", user.get('department_id'))
+                    if user.get('wing_id'):
+                        audit_query = audit_query.eq("convergence_register.wing_id", user.get('wing_id'))
+                elif role == 'district':
+                    audit_query = audit_query.eq("convergence_register.district_id", user.get('district_id'))
+                elif role == 'block':
+                    audit_query = audit_query.eq("convergence_register.block_id", user.get('block_id'))
+
+            audit_data = audit_query.execute().data or []
+
+            if not audit_data:
+                st.info("No progress history records found for your jurisdiction.")
+            else:
+                # 3. Transform Data for Display
+                audit_rows = []
+                for rec in audit_data:
+                    # Extract convergence details
+                    conv = rec.get('convergence_register') or {}
+                    act_desc = conv.get('activity_description', 'Unknown Scheme/Work')
+                    dept_id = conv.get('department_id')
+                    dist_id = conv.get('district_id')
+                    block_id = conv.get('block_id')
+                    
+                    # Extract user details
+                    updater = rec.get('users') or {}
+                    updater_name = updater.get('full_name', 'System')
+                    updater_role = updater.get('role', 'Unknown')
+
+                    # Map IDs to Names
+                    dept_name = dept_map.get(dept_id, 'Unknown Dept')
+                    dist_name = dist_map.get(dist_id, 'Unknown Dist')
+                    block_name = block_map.get(block_id, 'N/A')
+
+                    audit_rows.append({
+                        "Date & Time": pd.to_datetime(rec['created_at']).strftime('%d %b %Y, %H:%M'),
+                        "Updater (User)": updater_name,
+                        "Updater Role": updater_role.capitalize(),
+                        "Scheme / Work": act_desc,
+                        "Department": dept_name,
+                        "District": dist_name,
+                        "Block": block_name,
+                        "Changed Status": rec.get('status', 'N/A'),
+                        "Physical Achiev. %": rec.get('physical_achievement', 0),
+                        "Financial Achiev. (₹L)": rec.get('financial_achievement', 0.0),
+                        "Persondays": rec.get('persondays_generated', 0),
+                        "Remarks": rec.get('remarks', ''),
+                        "Update ID": rec['id']  # Hidden ID for superadmin actions
+                    })
+
+                df_audit = pd.DataFrame(audit_rows)
+
+                # 4. Search Functionality
+                search_audit = st.text_input("🔍 Search Audit History", placeholder="Search by Scheme, User, Department, Status...")
+                if search_audit:
+                    mask = df_audit.apply(lambda row: row.astype(str).str.contains(search_audit, case=False, na=False).any(), axis=1)
+                    df_audit = df_audit[mask]
+
+                # 5. Show Table
+                display_cols = ["Date & Time", "Updater (User)", "Updater Role", "Scheme / Work", "Department", "District", "Block", "Changed Status", "Physical Achiev. %", "Financial Achiev. (₹L)", "Persondays", "Remarks"]
+                
+                # If User is Superadmin, add an Action column for Deletion
+                if role == 'superadmin':
+                    display_cols.append("🗑️ Action")
+
+                st.dataframe(
+                    df_audit[display_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Physical Achiev. %": st.column_config.ProgressColumn("Physical Achiev. %", min_value=0, max_value=100, format="%.0f%%"),
+                        "Financial Achiev. (₹L)": st.column_config.NumberColumn("Financial (₹L)", format="₹%.2f"),
+                        "Updater Role": st.column_config.TextColumn("Role"),
+                        "Changed Status": st.column_config.TextColumn("Status"),
+                    }
+                )
+
+                # 6. Downloads
+                col_dl_a1, col_dl_a2 = st.columns(2)
+                audit_buffer = io.BytesIO()
+                with pd.ExcelWriter(audit_buffer, engine='openpyxl') as writer:
+                    df_audit.drop(columns=['Update ID', '🗑️ Action'], errors='ignore').to_excel(writer, index=False, sheet_name='Audit_Trail')
+                col_dl_a1.download_button("📥 Download Audit Trail (Excel)", data=audit_buffer.getvalue(), file_name="progress_audit_trail.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                
+                col_dl_a2.download_button("📥 Download Audit Trail (CSV)", data=df_audit.drop(columns=['Update ID', '🗑️ Action'], errors='ignore').to_csv(index=False).encode("utf-8"), file_name="progress_audit_trail.csv", mime="text/csv", use_container_width=True)
+
+                # 7. SUPERADMIN DELETE ACTION (Only editable by superadmin)
+                if role == 'superadmin':
+                    st.markdown("---")
+                    st.caption("🛠️ **Superadmin Tools:** Select a record below to permanently delete an erroneous progress update.")
+                    record_ids = df_audit['Update ID'].tolist()
+                    selected_delete_id = st.selectbox(
+                        "Select Update ID to Delete (Filter via Search above first):", 
+                        options=record_ids, 
+                        format_func=lambda x: f"Delete Record ID: {x} (Date: {df_audit[df_audit['Update ID'] == x]['Date & Time'].values[0]})"
+                    )
+                    
+                    if st.button("🗑️ Permanently Delete Selected Progress Log", type="secondary"):
+                        try:
+                            supabase.table("progress_updates").delete().eq("id", selected_delete_id).execute()
+                            st.success(f"✅ Progress Update (ID: {selected_delete_id}) permanently deleted!")
+                            st.rerun() # Reset the page, preventing duplicate deletion
+                        except Exception as del_err:
+                            st.error(f"❌ Failed to delete: {del_err}")
+
+        except Exception as e:
+            st.error(f"Could not load audit trail. Please ensure database tables and relationships are correctly configured. Error: {e}")
