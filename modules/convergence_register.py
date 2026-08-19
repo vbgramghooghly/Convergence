@@ -123,6 +123,13 @@ def display_register(df, maps):
     df_display["District"] = df_display["district_id"].map(maps["dist_reverse"])
     df_display["Block"] = df_display["block_id"].map(maps["block_reverse"])
     df_display["Department"] = df_display["department_id"].map(maps["dept_reverse"])
+    
+    # ---- NEW: Map wing_id to wing name ----
+    df_display["Wing"] = df_display["wing_id"].apply(
+        lambda x: maps["wing_map"].get(x, {}).get("wing_name", "Direct Parent Department") if pd.notna(x) and x else "Direct Parent Department"
+    )
+    # ----------------------------------------
+
     for col in ["convergence_type", "mis_code", "origin_source"]:
         if col not in df_display.columns: df_display[col] = "Not Specified" if col == "convergence_type" else ""
     
@@ -145,7 +152,8 @@ def display_register(df, maps):
         inplace=True
     )
     display_cols = [
-        "FY", "District", "Block", "Department", "Work Name",
+        "FY", "District", "Block", "Department", "Wing",   # <-- Added Wing
+        "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
     extra_cols = [c for c in ["PIA (Implementing Agency)", "Own Scheme Convergence", "Scheme / Fund Name", "Own Annual Plan Status", "Remarks"] if c in df_display.columns]
@@ -200,7 +208,8 @@ def render_scheme_convergence_section(defaults, key_prefix=""):
         "scheme_remarks": scheme_remarks.strip() if scheme_remarks else None,
     }
 
-def edit_delete_section(records, maps, supabase, user):
+# ---------- MODIFIED: edit_delete_section now accepts 'master' ----------
+def edit_delete_section(records, maps, supabase, user, master):
     if user["role"] not in ["superadmin", "district"] or not records: return
     st.markdown("---")
     st.markdown("#### 🛠️ Manage / Amend Existing Activity")
@@ -236,6 +245,22 @@ def edit_delete_section(records, maps, supabase, user):
             curr_pia = rec.get("pia_type", "Select PIA")
             pia_index = PIA_OPTIONS.index(curr_pia) if curr_pia in PIA_OPTIONS else 0
             new_pia = st.selectbox("Project Implementing Agency (PIA)*", PIA_OPTIONS, index=pia_index)
+
+            # ---- NEW: Wing selection for edit ----
+            dept_id = rec.get("department_id")
+            dept_wings = [w for w in master["wings"] if w["department_id"] == dept_id]
+            wing_choices = [("Direct Parent Department", None)] + [(w["wing_name"], w["id"]) for w in dept_wings]
+            wing_labels = [label for label, _ in wing_choices]
+            wing_ids = [wid for _, wid in wing_choices]
+            current_wing_id = rec.get("wing_id")
+            default_idx = wing_ids.index(current_wing_id) if current_wing_id in wing_ids else 0
+            selected_wing_label = st.selectbox(
+                "Entering Wing / Scheme Source",
+                options=wing_labels,
+                index=default_idx
+            )
+            new_wing_id = wing_ids[wing_labels.index(selected_wing_label)]
+            # -------------------------------------
 
             new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
             new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
@@ -287,6 +312,7 @@ def edit_delete_section(records, maps, supabase, user):
                         "department_fund": new_d_fund,
                         "vbgramg_fund": new_v_fund,
                         "pia_type": new_pia,
+                        "wing_id": new_wing_id,   # <-- Added wing update
                         "department_scheme_convergence": scheme_data["convergence"],
                         "department_scheme_name": scheme_data["scheme_name"],
                         "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -327,7 +353,8 @@ def show():
 
     with tab1:
         display_register(df_records, maps)
-        edit_delete_section(records, maps, supabase, user)
+        # Pass 'master' to edit_delete_section
+        edit_delete_section(records, maps, supabase, user, master)
 
     with tab2:
         st.markdown("#### ➕ Register Individual Convergence Activity")
@@ -483,7 +510,8 @@ def show():
                     else:
                         insert_data = {
                             "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
-                            "department_id": selected_dept_id, "wing_id": selected_wing_id, "pia_type": selected_pia,
+                            "department_id": selected_dept_id, "wing_id": selected_wing_id,  # <-- wing_id already stored
+                            "pia_type": selected_pia,
                             "activity_description": final_work_name, "thematic_category_id": theme_id,
                             "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
                             "work_dimensions": possible_outcome, "dimension_unit": "Outcome", "origin_source": inp_origin,
