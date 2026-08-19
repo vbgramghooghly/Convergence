@@ -77,7 +77,7 @@ def check_active_session():
 
 # ---------- AUTHENTICATION ----------
 def check_password():
-    """Returns True if the user is authenticated, otherwise renders an advanced login interface."""
+    """Returns True if the user is authenticated, otherwise renders a streamlined login interface."""
     
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -87,86 +87,86 @@ def check_password():
     if st.session_state.authenticated:
         return True
 
-    # ---------- ADVANCED CSS STYLING (Glassmorphism & Polish) ----------
+    # ---------- HIGH-POLISH CSS STYLING ----------
     st.markdown("""
         <style>
             [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] { display: none !important; width: 0px !important;}
             header[data-testid="stHeader"], [data-testid="stToolbar"] { display: none !important; visibility: hidden !important; height: 0px !important; }
             
-            /* Modern Gradient Background */
+            /* Professional Gradient Background */
             .stApp { 
-                background: linear-gradient(135deg, #0F4C81 0%, #1E3A5F 50%, #F4F6F9 100%); 
+                background: linear-gradient(135deg, #0F4C81 0%, #1E3A5F 55%, #E2E8F0 100%); 
                 background-attachment: fixed;
             }
-            .block-container { padding-top: 2.5rem !important; padding-bottom: 3rem !important; max-width: 96% !important; }
+            .block-container { padding-top: 2rem !important; padding-bottom: 2rem !important; max-width: 95% !important; }
             
-            /* Glassmorphism Cards for Images */
-            .glass-card {
-                background: rgba(255, 255, 255, 0.92);
-                backdrop-filter: blur(12px);
-                border: 1px solid rgba(255, 255, 255, 0.4);
-                border-radius: 16px;
-                padding: 16px;
-                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
-                margin-bottom: 20px;
+            /* Balanced Glass Cards for Graphics */
+            .banner-card {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.5);
+                border-radius: 12px;
+                padding: 12px;
+                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+                margin-bottom: 14px;
+                text-align: center;
+            }
+            .banner-card img {
+                max-height: 180px !important;
+                width: auto !important;
+                object-fit: contain;
+                margin: 0 auto;
             }
             
-            /* Sleek Form Container */
+            /* Clean Form Container */
             [data-testid="stForm"] {
                 background: #FFFFFF !important;
-                padding: 40px !important;
-                border-radius: 16px !important;
-                box-shadow: 0 15px 35px rgba(15, 76, 129, 0.2) !important;
-                border: 1px solid #E2E8F0 !important;
+                padding: 35px !important;
+                border-radius: 14px !important;
+                box-shadow: 0 12px 30px rgba(15, 76, 129, 0.2) !important;
+                border: 1px solid #CBD5E1 !important;
                 border-top: 6px solid #0F4C81 !important;
             }
             
-            /* Custom Form Headers */
             .login-header {
-                font-size: 1.6rem;
+                font-size: 1.5rem;
                 font-weight: 800;
                 color: #0F4C81;
-                margin-bottom: 4px;
-                letter-spacing: -0.5px;
+                margin-bottom: 2px;
             }
             .login-subheader {
-                font-size: 0.95rem;
+                font-size: 0.9rem;
                 color: #64748B;
-                margin-bottom: 24px;
+                margin-bottom: 20px;
             }
             
             /* Modern Inputs */
             .stTextInput input {
-                border-radius: 8px !important;
+                border-radius: 6px !important;
                 border: 1px solid #CBD5E1 !important;
-                padding: 10px 14px !important;
-                transition: all 0.2s ease-in-out;
+                padding: 8px 12px !important;
             }
             .stTextInput input:focus {
                 border-color: #0F4C81 !important;
-                box-shadow: 0 0 0 3px rgba(15, 76, 129, 0.15) !important;
+                box-shadow: 0 0 0 2px rgba(15, 76, 129, 0.15) !important;
             }
             
-            /* Primary Button Styling */
+            /* Button Styling */
             .stButton button[kind="primary"] {
-                border-radius: 8px !important;
+                border-radius: 6px !important;
                 font-weight: 700 !important;
-                letter-spacing: 0.5px !important;
-                padding: 10px 20px !important;
                 background-color: #0F4C81 !important;
-                transition: all 0.2s ease !important;
+                padding: 8px 16px !important;
             }
             .stButton button[kind="primary"]:hover {
                 background-color: #1A3A6A !important;
-                box-shadow: 0 4px 12px rgba(15, 76, 129, 0.3) !important;
-                transform: translateY(-1px);
             }
         </style>
     """, unsafe_allow_html=True)
 
-    col_left, col_right = st.columns([1.35, 1], gap="large")
+    col_left, col_right = st.columns([1.3, 1], gap="large")
 
-    # ---------- LEFT COLUMN: VISUAL ASSETS & DOWNLOAD ----------
+    # ---------- LEFT COLUMN: RESIZED BANNER IMAGES & PDF ----------
     with col_left:
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -174,23 +174,18 @@ def check_password():
         img2_url = "https://xosnfimmwrfnwjtosoqr.supabase.co/storage/v1/object/public/Images/b18c63f2-d38d-4ca5-8c4e-b8cb2bda3297.png"
         
         try:
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.image(img1_url, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.image(img2_url, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="banner-card"><img src="{img1_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="banner-card"><img src="{img2_url}" style="max-width:100%; height:auto;"></div>', unsafe_allow_html=True)
         except Exception:
-            st.error("⚠️ Could not load portal graphics from Supabase storage.")
+            st.error("⚠️ Could not load graphics from Supabase.")
             
         st.markdown("<br>", unsafe_allow_html=True)
             
-        # PDF Download Button inside a clean layout wrapper
+        # PDF Download Button
         pdf_bytes = fetch_pdf_bytes()
         if pdf_bytes:
             st.download_button(
-                label="📥 Download VB-G RAM G Guidelines (PDF)",
+                label="📥 Download VB-G RAM G Guidelines & Framework (PDF)",
                 data=pdf_bytes,
                 file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
                 mime="application/pdf",
@@ -198,15 +193,15 @@ def check_password():
                 use_container_width=True
             )
 
-    # ---------- RIGHT COLUMN: MODERN LOGIN FORM ----------
+    # ---------- RIGHT COLUMN: CLEAN LOGIN FORM ----------
     with col_right:
-        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         
         with st.form("login_form"):
             st.markdown('<p class="login-header">🔐 Portal Sign In</p>', unsafe_allow_html=True)
             st.markdown('<p class="login-subheader">Enter your authorized credentials to continue.</p>', unsafe_allow_html=True)
             
-            username = st.text_input("Username", placeholder="e.g. admin_hooghly")
+            username = st.text_input("Username / Email", placeholder="e.g. admin or email@hooghly.gov.in")
             password = st.text_input("Password", type="password", placeholder="••••••••")
 
             # ---------- CAPTCHA ----------
@@ -230,7 +225,6 @@ def check_password():
                     st.rerun()
                     return False
 
-                # CAPTCHA passed
                 clear_captcha()
 
                 if not username or not password:
@@ -275,14 +269,12 @@ def logout(message=None):
     supabase = get_supabase()
     user_id = st.session_state.get('user', {}).get('id')
     
-    # 1. Clear the session token in the database
     if user_id:
         try:
             supabase.table("users").update({"current_session_token": None}).eq("id", user_id).execute()
         except Exception:
             pass
 
-    # 2. Clear local session
     try: 
         supabase.auth.sign_out()
     except Exception: 
