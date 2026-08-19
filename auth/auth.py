@@ -1,3 +1,4 @@
+import uuid
 import streamlit as st
 from utils.db import get_supabase
 
@@ -26,7 +27,39 @@ def clear_captcha():
     if "captcha" in st.session_state:
         del st.session_state.captcha
 
-# ---------- AUTHENTICATION (original, plus CAPTCHA) ----------
+# ---------- SESSION VALIDATOR ----------
+def check_active_session():
+    """
+    Validates that the current browser still holds the valid session.
+    Run this at the top of every page.
+    """
+    if not st.session_state.get('authenticated'):
+        return False
+        
+    user_id = st.session_state.get('user', {}).get('id')
+    local_token = st.session_state.get('session_token')
+    
+    if not user_id or not local_token:
+        logout("Session details missing. Please log in again.")
+        return False
+        
+    try:
+        supabase = get_supabase()
+        db_response = supabase.table("users").select("current_session_token").eq("id", user_id).execute()
+        
+        if db_response.data:
+            active_db_token = db_response.data[0].get('current_session_token')
+            
+            # If the DB token doesn't match the local browser token, log them out
+            if local_token != active_db_token:
+                logout("Your session was terminated. A new login was detected on this account.")
+                return False
+                
+        return True
+    except Exception:
+        return False
+
+# ---------- AUTHENTICATION ----------
 def check_password():
     """Returns True if the user is authenticated, otherwise renders a login page with CAPTCHA."""
     
@@ -98,14 +131,13 @@ def check_password():
 
                 if user_answer != correct_answer:
                     st.error("❌ Incorrect security answer. Please try again.")
-                    clear_captcha()  # generate new challenge
+                    clear_captcha()  
                     st.rerun()
                     return False
 
-                # CAPTCHA passed – clear it
+                # CAPTCHA passed
                 clear_captcha()
 
-                # Validate credentials (original logic)
                 if not username or not password:
                     st.error("⚠️ Credentials required.")
                 else:
@@ -115,7 +147,6 @@ def check_password():
                         login_email = clean_input if "@" in clean_input else f"{clean_input}@hooghly.gov.in"
                         
                         auth_response = supabase.auth.sign_in_with_password({"email": login_email, "password": password})
-                        
                         user_id = auth_response.user.id
                         users_data = supabase.table("users").select("*").eq("id", user_id).execute().data
 
@@ -126,11 +157,31 @@ def check_password():
                             if not user_profile.get("active", True):
                                 st.error("🚫 Account deactivated.")
                             else:
+                                # --- STRICT SESSION CHECK ---
+                                db_response = supabase.table("users").select("current_session_token").eq("id", user_id).execute()
+                                
+                                if db_response.data:
+                                    active_db_token = db_response.data[0].get('current_session_token')
+                                    
+                                    if active_db_token is not None and active_db_token.strip() != "":
+                                        st.error("⛔ Multiple login detected. Please logout from your earlier device/session to log in here.")
+                                        if st.button("Force Logout Earlier Session"):
+                                            supabase.table("users").update({"current_session_token": None}).eq("id", user_id).execute()
+                                            st.success("Previous session killed! You can now log in.")
+                                        return False
+
+                                # Generate and save new token
+                                new_session_token = str(uuid.uuid4())
+                                supabase.table("users").update({
+                                    "current_session_token": new_session_token
+                                }).eq("id", user_id).execute()
+
                                 st.session_state.authenticated = True
                                 st.session_state.user = user_profile
-                                st.session_state.current_page = "📊 Dashboard"
+                                st.session_state.session_token = new_session_token
+                                st.session_state.current_page = "Home"
                                 st.rerun()
-                    except Exception as e:
+                    except Exception:
                         st.error("❌ Incorrect credentials.")
 
     return False
@@ -138,14 +189,34 @@ def check_password():
 def get_current_user():
     return st.session_state.get("user", None)
 
-def logout():
+def logout(message=None):
+    supabase = get_supabase()
+    user_id = st.session_state.get('user', {}).get('id')
+    
+    # 1. Clear the session token in the database
+    if user_id:
+        try:
+            supabase.table("users").update({"current_session_token": None}).eq("id", user_id).execute()
+        except Exception:
+            pass
+
+    # 2. Clear local session
     try: 
-        get_supabase().auth.sign_out()
+        supabase.auth.sign_out()
     except Exception: 
         pass 
+        
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+        
     st.session_state.authenticated = False
     st.session_state.user = None
     st.session_state.current_page = None
+    st.session_state.session_token = None
+    
+    if message:
+        st.error(f"⚠️ {message}")
+        
     st.rerun()
 
 def require_role(*allowed_roles):
