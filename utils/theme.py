@@ -1,239 +1,288 @@
 import streamlit as st
+import os
+import pandas as pd
+import io
+import re
 from utils.db import get_supabase
+from utils.theme import load_theme, get_css  # <-- New theme engine
 
-# ------------- DEFAULT THEME -------------
-DEFAULT_THEME = {
-    "primary_color": "#0F4C81",
-    "secondary_color": "#1E3A5F",
-    "accent_color": "#E11D48",
-    "bg_color": "#F4F6F9",
-    "card_color": "#FFFFFF",
-    "text_color": "#1F2937",
-    "border_color": "#E2E8F0",
-    "button_color": "#0F4C81",
-    "button_hover_color": "#1A3A6A",
-    "header_color": "#0F4C81",
-    "sidebar_color": "#F8FAFC",
-    "active_nav_color": "#0F4C81",
-    "input_color": "#FFFFFF",
-    "table_header_color": "#F1F5F9",
-    "success_color": "#10B981",
-    "warning_color": "#F59E0B",
-    "error_color": "#EF4444",
-    "font_family": "'Inter', system-ui, -apple-system, sans-serif",
-    "base_font_size": 14,
-    "border_radius": 6,
-    "shadow_intensity": 1,
-    "component_spacing": 1,
-    "layout_density": "comfortable",
-    "corner_radius": "soft",
-    "shadow": "subtle",
-    "nav_style": "standard",
-    "card_style": "elevated",
-    "dark_mode": False,
-    "content_width": 75
-}
+# ---------- PAGE CONFIG ----------
+st.set_page_config(
+    page_title="VB-G RAM G Convergence Hooghly",
+    page_icon="🏛️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# ---------- PRESET THEMES (including Orange variants) ----------
-PRESETS = {
-    "Government Navy": {"primary_color": "#0F4C81", "bg_color": "#F4F6F9", "border_radius": 6, "font_family": "'Inter', sans-serif"},
-    "Eco Green": {"primary_color": "#166534", "bg_color": "#F0FDF4", "border_radius": 8, "font_family": "'Segoe UI', sans-serif"},
-    "Corporate Slate": {"primary_color": "#334155", "bg_color": "#F8FAFC", "border_radius": 0, "font_family": "Arial, sans-serif"},
-    "Modern Purple": {"primary_color": "#6366F1", "bg_color": "#FAFAFA", "border_radius": 12, "font_family": "'Segoe UI', sans-serif"},
-    "Ocean Blue": {"primary_color": "#0EA5E9", "bg_color": "#F0F9FF", "border_radius": 10, "font_family": "'Inter', sans-serif"},
-    "Emerald": {"primary_color": "#059669", "bg_color": "#ECFDF5", "border_radius": 8, "font_family": "'Inter', sans-serif"},
-    "Teal": {"primary_color": "#0D9488", "bg_color": "#F0FDFA", "border_radius": 8, "font_family": "'Inter', sans-serif"},
-    "Warm Professional": {"primary_color": "#B45309", "bg_color": "#FFFBEB", "border_radius": 6, "font_family": "'Inter', sans-serif"},
-    "Slate": {"primary_color": "#475569", "bg_color": "#F8FAFC", "border_radius": 6, "font_family": "'Inter', sans-serif"},
-    "Sunset Orange": {"primary_color": "#EA580C", "bg_color": "#FFF7ED", "border_radius": 8, "font_family": "'Segoe UI', sans-serif"},
-    "Burnt Orange": {"primary_color": "#C2410C", "bg_color": "#FFF2EB", "border_radius": 6, "font_family": "'Inter', sans-serif"},
-    "Amber": {"primary_color": "#D97706", "bg_color": "#FFFBEB", "border_radius": 8, "font_family": "'Inter', sans-serif"},
-}
+# ---------- AUTHENTICATION ----------
+from auth.auth import check_password, logout, get_current_user
 
-def load_theme():
-    """Load the active theme from the database, or fall back to defaults."""
-    try:
-        supabase = get_supabase()
-        result = supabase.table("ui_settings").select("*").eq("is_active", True).execute()
-        if result.data and len(result.data) > 0:
-            theme = result.data[0]
-            # Merge with defaults so any missing keys fall back
-            merged = DEFAULT_THEME.copy()
-            for key in DEFAULT_THEME.keys():
-                if key in theme:
-                    merged[key] = theme[key]
-            return merged
-    except Exception:
-        pass
-    return DEFAULT_THEME.copy()
+if not check_password():
+    st.stop()
 
-def save_theme(theme_dict):
-    """Save the given theme as active in the database."""
-    supabase = get_supabase()
-    user = st.session_state.get('user', {})
-    payload = {
-        "profile_name": "Active Custom Theme",
-        **theme_dict,
-        "is_active": True,
-        "updated_by": user.get('id')
-    }
-    try:
-        # Deactivate all other themes
-        supabase.table("ui_settings").update({"is_active": False}).neq("id", "0").execute()
-        # Upsert the new active theme
-        supabase.table("ui_settings").upsert({"id": 1, **payload}).execute()
-        return True
-    except Exception as e:
-        st.error(f"Failed to save theme: {e}")
-        return False
+user = get_current_user()
+if not user or 'role' not in user:
+    st.error("Authentication session error. Please log in again.")
+    logout()
+    st.stop()
 
-def get_css(theme):
-    """Generate the full global CSS based on the theme dictionary."""
-    p = theme['primary_color']
-    s = theme['secondary_color']
-    a = theme['accent_color']
-    bg = theme['bg_color']
-    card = theme['card_color']
-    text = theme['text_color']
-    border = theme['border_color']
-    btn = theme['button_color']
-    btn_hover = theme['button_hover_color']
-    header = theme['header_color']
-    sidebar = theme['sidebar_color']
-    active_nav = theme['active_nav_color']
-    input_bg = theme['input_color']
-    table_header = theme['table_header_color']
-    success = theme['success_color']
-    warning = theme['warning_color']
-    error = theme['error_color']
-    font = theme['font_family']
-    base_font = theme['base_font_size']
-    radius = theme['border_radius']
-    shadow = theme['shadow_intensity']
-    spacing = theme['component_spacing']
-    dark = theme.get('dark_mode', False)
+# =========================================================================
+# SYNC LOGGED-IN USER DETAILS TO GLOBAL SESSION
+# =========================================================================
+if user:
+    st.session_state['full_name'] = user.get('full_name', 'User')
+    st.session_state['district_id'] = user.get('district_id')
+    st.session_state['role'] = user.get('role')
+    st.session_state['department_id'] = user.get('department_id')
+    st.session_state['block_id'] = user.get('block_id')
+# =========================================================================
 
-    # Dark mode overrides
-    if dark:
-        bg = "#0F172A"
-        card = "#1E293B"
-        text = "#F1F5F9"
-        border = "#334155"
-        sidebar = "#1E293B"
-        input_bg = "#1E293B"
-        table_header = "#334155"
+role = user['role']
 
-    # Shadow intensity map
-    shadow_map = {0: "none", 1: "0 1px 3px rgba(0,0,0,0.06)", 2: "0 4px 6px rgba(0,0,0,0.1)", 3: "0 10px 15px rgba(0,0,0,0.15)"}
-    shadow_val = shadow_map.get(shadow, "0 1px 3px rgba(0,0,0,0.06)")
+# ---------- APPLY GLOBAL THEME ----------
+theme = load_theme()
+st.markdown(f"<style>{get_css(theme)}</style>", unsafe_allow_html=True)
+primary_color = theme.get('primary_color', '#0F4C81')
 
-    # Build CSS
-    css = f"""
-    /* ---------- GLOBAL RESET ---------- */
-    body, .stApp, .main {{
-        font-family: {font} !important;
-        background-color: {bg} !important;
-        color: {text} !important;
-        font-size: {base_font}px !important;
-    }}
-    /* ---------- HIDE STREAMLIT DEFAULTS ---------- */
-    [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
-        display: none !important; visibility: hidden !important; width: 0px !important;
-    }}
-    [data-testid="stToolbar"], header[data-testid="stHeader"] {{
-        display: none !important; visibility: hidden !important; height: 0px !important;
-    }}
-    .block-container {{
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 98% !important;
-        background-color: {bg} !important;
-    }}
-    /* ---------- CARDS ---------- */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stContainer"] {{
-        background: {card} !important;
-        border: 1px solid {border} !important;
-        border-radius: {radius}px !important;
-        box-shadow: {shadow_val} !important;
-        padding: 1.25rem !important;
-        margin-bottom: 1rem !important;
-    }}
-    /* ---------- BUTTONS ---------- */
-    .stButton button {{
-        border-radius: {radius}px !important;
-        font-weight: 600 !important;
-        transition: all 0.2s ease !important;
-        border: none !important;
-        background-color: {btn} !important;
-        color: white !important;
-    }}
-    .stButton button:hover {{
-        background-color: {btn_hover} !important;
-        transform: translateY(-1px);
-        box-shadow: {shadow_val};
-    }}
-    .stButton button[kind="secondary"] {{
-        background-color: transparent !important;
-        color: {text} !important;
-        border: 1px solid {border} !important;
-    }}
-    .stButton button[kind="secondary"]:hover {{
-        background-color: {table_header} !important;
-    }}
-    /* ---------- INPUTS ---------- */
-    .stTextInput input, .stSelectbox select, .stTextArea textarea {{
-        background-color: {input_bg} !important;
-        color: {text} !important;
-        border: 1px solid {border} !important;
-        border-radius: {radius}px !important;
-        font-family: {font} !important;
-    }}
-    /* ---------- TABLES ---------- */
-    div[data-testid="stDataFrame"] thead tr th {{
-        background-color: {table_header} !important;
-        color: {text} !important;
-        font-weight: 600 !important;
-    }}
-    /* ---------- TABS ---------- */
-    div[data-testid="stTabs"] button[role="tab"] {{
-        color: {text} !important;
-        border-bottom: 3px solid transparent !important;
-        padding: 8px 12px !important;
-        font-weight: 600 !important;
-    }}
-    div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
-        color: {p} !important;
-        border-bottom: 3px solid {p} !important;
-    }}
-    /* ---------- METRICS ---------- */
-    div[data-testid="stMetric"] {{
-        background: {card} !important;
-        border: 1px solid {border} !important;
-        border-radius: {radius}px !important;
-        padding: 0.75rem !important;
-        box-shadow: {shadow_val};
-    }}
-    div[data-testid="stMetric"] label {{
-        color: {text} !important;
-        font-size: {base_font-1}px !important;
-    }}
-    /* ---------- HEADINGS ---------- */
-    h1, h2, h3, h4, h5, h6 {{
-        color: {header} !important;
-        font-family: {font} !important;
-    }}
-    /* ---------- STATUS BADGES ---------- */
-    .status-badge {{
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 20px;
-        font-size: {base_font-2}px;
-        font-weight: 600;
-        background: {table_header};
-        color: {text};
-    }}
-    .status-badge.success {{ background: {success}; color: white; }}
-    .status-badge.warning {{ background: {warning}; color: white; }}
-    .status-badge.error {{ background: {error}; color: white; }}
-    """
-    return css
+# ---------- GLOBAL CSS (NAVBAR & OVERRIDES) ----------
+st.markdown(f"""
+    <style>
+        [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
+            display: none !important; visibility: hidden !important; width: 0px !important;
+        }}
+        [data-testid="stToolbar"], header[data-testid="stHeader"] {{
+            display: none !important; visibility: hidden !important; height: 0px !important;
+        }}
+        .block-container {{
+            padding-top: 1rem !important;
+            padding-bottom: 2rem !important;
+            max-width: 98% !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] {{
+            background: #FFFFFF;
+            border-bottom: 1px solid #E2E8F0;
+            padding: 4px 16px;
+            align-items: center;
+            margin-bottom: 16px;
+            min-height: 56px;
+            flex-wrap: nowrap !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button {{
+            border-radius: 20px !important;
+            border: none !important;
+            background-color: transparent !important;
+            color: #4A5568 !important;
+            font-weight: 600 !important;
+            padding: 4px 12px !important;
+            min-height: 36px !important;
+            transition: all 0.2s ease !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button:hover {{
+            background-color: #F0F4F8 !important;
+            color: {primary_color} !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button[kind="primary"] {{
+            background-color: {primary_color} !important;
+            color: #FFFFFF !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button[kind="primary"] p {{
+            color: #FFFFFF !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] div[data-testid="stPopover"] button {{
+            background-color: transparent !important;
+            border: 1px solid transparent !important;
+            color: #1E293B !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] div[data-testid="stPopover"] button:hover {{
+            background-color: #F1F5F9 !important;
+        }}
+        div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
+            gap: 24px; border-bottom: 1px solid #E2E8F0; padding-bottom: 0px;
+        }}
+        div[data-testid="stTabs"] button[role="tab"] {{
+            padding: 8px 4px !important; font-weight: 600 !important; color: #64748B !important;
+            background-color: transparent !important; border: none !important;
+            border-bottom: 3px solid transparent !important; border-radius: 0px !important; font-size: 14px !important;
+        }}
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+            color: {primary_color} !important; border-bottom: 3px solid {primary_color} !important;
+        }}
+        .info-box {{
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            height: 100%;
+        }}
+        .info-box h5 {{
+            color: {primary_color};
+            font-weight: 700;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #E2E8F0;
+            padding-bottom: 4px;
+        }}
+        .info-box ul {{
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }}
+        .info-box ul li {{
+            font-size: 13px;
+            padding: 2px 0;
+            color: #1E293B;
+            display: flex;
+            align-items: center;
+        }}
+        .info-box ul li::before {{
+            content: "•";
+            color: {primary_color};
+            font-weight: bold;
+            margin-right: 6px;
+        }}
+        .whatsapp-link {{
+            color: #25D366;
+            font-weight: 600;
+            text-decoration: none;
+        }}
+        .whatsapp-link:hover {{
+            text-decoration: underline;
+        }}
+    </style>
+""", unsafe_allow_html=True)
+
+# ---------- ROUTING & STATE MANAGEMENT ----------
+core_pages = ["Home", "Officials", "Progress", "Meetings", "Work Entry", "Reports", "Estimate"]
+if role == "block":
+    core_pages.remove("Reports")
+
+admin_pages = [
+    "Master Data", 
+    "Estimate Master Data", 
+    "User Management", 
+    "Audit Logs", 
+    "UI Settings"
+]
+allowed_admin = admin_pages if role == "superadmin" else []
+
+if 'current_page' not in st.session_state:
+    if role == "superadmin":
+        st.session_state.current_page = "⚙️ Master Data"
+    else:
+        st.session_state.current_page = "Home"
+
+# ---------- REUSABLE COMPONENTS ----------
+def render_profile_menu():
+    first_name = user.get('full_name', 'User').split()[0]
+    with st.popover(f"👤 {first_name} ▾", use_container_width=True):
+        st.markdown(f"<span style='font-size: 1rem; font-weight: 700; color: {primary_color};'>👤 My Profile</span>", unsafe_allow_html=True)
+        st.caption(f"{user.get('full_name')} | {role.upper()}")
+        st.divider()
+        st.markdown("**📅 Active Financial Year**")
+        if "selected_fy" not in st.session_state: st.session_state.selected_fy = "2026-27"
+        fy_options = ["2026-27", "2027-28", "2028-29"]
+        current_fy_idx = fy_options.index(st.session_state.selected_fy) if st.session_state.selected_fy in fy_options else 0
+        st.session_state.selected_fy = st.selectbox("Select FY", fy_options, index=current_fy_idx, label_visibility="collapsed")
+        st.divider()
+        st.markdown("**🔐 Security**")
+        with st.form("pw_form"):
+            new_pw = st.text_input("New Password", type="password", placeholder="Min 6 chars")
+            conf_pw = st.text_input("Confirm Password", type="password", placeholder="Match new password")
+            if st.form_submit_button("Update Password", use_container_width=True):
+                if len(new_pw) < 6: st.error("Min 6 chars.")
+                elif new_pw != conf_pw: st.error("Mismatch.")
+                else:
+                    try:
+                        get_supabase().auth.update_user({"password": new_pw})
+                        st.success("Updated.")
+                    except Exception as e: st.error(f"Error: {e}")
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚪 Logout", use_container_width=True, type="primary"): logout()
+
+def render_top_navigation():
+    if allowed_admin:
+        cols = st.columns([2.2, 7, 1.2, 1.2], vertical_alignment="center")
+    else:
+        cols = st.columns([2.2, 8.3, 1.2], vertical_alignment="center")
+
+    with cols[0]:
+        st.markdown(f"""
+        <div style="line-height: 1.1;">
+            <span style="font-size: 1.25rem; font-weight: 800; color: {primary_color}; white-space: nowrap;">🏛️ VB-G RAM G</span><br>
+            <span style="font-size: 0.65rem; font-weight: 700; color: #64748B; letter-spacing: 0.5px; text-transform: uppercase;">Convergence Portal</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with cols[1]:
+        nav_cols = st.columns(len(core_pages))
+        for i, page in enumerate(core_pages):
+            with nav_cols[i]:
+                is_active = st.session_state.current_page == page
+                if st.button(page, type="primary" if is_active else "secondary", use_container_width=True):
+                    st.session_state.current_page = page
+                    st.rerun()
+
+    if allowed_admin:
+        with cols[2]:
+            with st.popover("⚙️ Admin ▾", use_container_width=True):
+                for page in allowed_admin:
+                    btn_type = "primary" if st.session_state.current_page == page else "secondary"
+                    if st.button(page, type=btn_type, use_container_width=True):
+                        st.session_state.current_page = page
+                        st.rerun()
+
+    with cols[-1]:
+        render_profile_menu()
+
+render_top_navigation()
+
+# ============================================================
+# HOME PAGE – (unchanged, same as before)
+# ============================================================
+def show_home():
+    # ... (keep the same as provided earlier)
+    pass
+
+# ---------- MODULE ROUTING ----------
+try:
+    from modules.estimate_master_data import show as show_estimate_master_data
+
+    if st.session_state.current_page == "Home":
+        show_home()
+    elif st.session_state.current_page == "Estimate":
+        from modules.estimate_builder import show as show_estimate_builder
+        show_estimate_builder()
+    elif st.session_state.current_page == "Work Entry":
+        from modules.convergence_register import show as show_convergence
+        show_convergence()
+    elif st.session_state.current_page == "Progress":
+        from modules.implementation import show as show_implementation
+        show_implementation()
+    elif st.session_state.current_page == "Meetings":
+        from modules.meetings import show as show_meetings
+        show_meetings()
+    elif st.session_state.current_page == "Officials":
+        from modules.contacts import show as show_contacts
+        show_contacts()
+    elif st.session_state.current_page == "Reports":
+        from modules.reports import show as show_reports
+        show_reports()
+    elif st.session_state.current_page == "Master Data":
+        from modules.master_data import show as show_masterdata
+        show_masterdata()
+    elif st.session_state.current_page == "Estimate Master Data":
+        show_estimate_master_data()
+    elif st.session_state.current_page == "User Management":
+        from modules.users import show as show_users
+        show_users()
+    elif st.session_state.current_page == "Audit Logs":
+        from modules.audit import show as show_audit
+        show_audit()
+    elif st.session_state.current_page == "UI Settings":
+        from modules.ui_ux_controller import show as show_ui_ux
+        show_ui_ux()
+    else:
+        st.info("Welcome to the VB-G RAM G Convergence Portal. Please select a module from the navigation bar.")
+except Exception as e:
+    st.error(f"Error loading module: {e}")
+    st.info("If this is a database permission error, please make sure to run the SQL fixes provided in the instructions.")
