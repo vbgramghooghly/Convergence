@@ -190,7 +190,7 @@ def check_password():
         pdf_bytes = fetch_pdf_bytes()
         if pdf_bytes:
             st.download_button(
-                label="📥 Download VB-G RAM G Guidelines & Framework (PDF)",
+                label="📥 Download VB-G RAM G Guidelines (PDF)",
                 data=pdf_bytes,
                 file_name="VB_G_RAM_G_Convergence_Guidelines.pdf",
                 mime="application/pdf",
@@ -206,7 +206,7 @@ def check_password():
             st.markdown('<p class="login-header">🔐 Portal Sign In</p>', unsafe_allow_html=True)
             st.markdown('<p class="login-subheader">Enter your authorized credentials to continue.</p>', unsafe_allow_html=True)
             
-            username = st.text_input("Username / Email", placeholder="e.g. admin or email@hooghly.gov.in")
+            username = st.text_input("Username", placeholder="e.g. admin_hooghly")
             password = st.text_input("Password", type="password", placeholder="••••••••")
 
             # ---------- CAPTCHA ----------
