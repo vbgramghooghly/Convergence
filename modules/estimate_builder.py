@@ -6,50 +6,67 @@ from utils.db import get_supabase
 from auth.auth import logout, get_current_user
 
 # ============================================================
-# HELPER FUNCTIONS (copied from convergence_register)
+# HELPER FUNCTIONS (self-contained, with safe checks)
 # ============================================================
 
 @st.cache_data(ttl=600)
 def fetch_master_lookups():
     """Fetch active master data for themes, activities, departments, etc."""
     supabase = get_supabase()
-    return {
-        "fys": supabase.table("financial_years").select("*").eq("active", True).execute().data or [],
-        "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
-        "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
-        "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
-        "wings": supabase.table("department_wings").select("*").execute().data or [],
-        "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
-        "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
-        "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
-    }
+    try:
+        return {
+            "fys": supabase.table("financial_years").select("*").eq("active", True).execute().data or [],
+            "districts": supabase.table("districts").select("*").eq("active", True).execute().data or [],
+            "blocks": supabase.table("blocks").select("*").eq("active", True).execute().data or [],
+            "depts": supabase.table("departments").select("*").eq("active", True).execute().data or [],
+            "wings": supabase.table("department_wings").select("*").execute().data or [],
+            "themes": supabase.table("themes").select("*").eq("active", True).execute().data or [],
+            "activities": supabase.table("activities").select("*").eq("active", True).execute().data or [],
+            "act_dept_mapping": supabase.table("activity_departments").select("*").execute().data or [],
+        }
+    except Exception:
+        return {}
 
 def build_maps(data):
     """Build lookup dictionaries for ids ↔ names."""
+    if not data:
+        return {}
     return {
-        "fy_name_to_id": {f["year_name"].strip(): f["id"] for f in data["fys"]},
-        "dist_map": {d["district_name"].strip(): d["id"] for d in data["districts"]},
-        "block_map": {b["block_name"].strip(): b["id"] for b in data["blocks"]},
-        "dept_map": {d["department_name"].strip(): d["id"] for d in data["depts"]},
-        "wing_map": {w["id"]: w for w in data["wings"]},
-        "fy_reverse": {f["id"]: f["year_name"] for f in data["fys"]},
-        "dist_reverse": {d["id"]: d["district_name"] for d in data["districts"]},
-        "block_reverse": {b["id"]: b["block_name"] for b in data["blocks"]},
-        "dept_reverse": {d["id"]: d["department_name"] for d in data["depts"]},
+        "fy_name_to_id": {str(f["year_name"]).strip(): f["id"] for f in data.get("fys", [])},
+        "dist_map": {str(d["district_name"]).strip(): d["id"] for d in data.get("districts", [])},
+        "block_map": {str(b["block_name"]).strip(): b["id"] for b in data.get("blocks", [])},
+        "dept_map": {str(d["department_name"]).strip(): d["id"] for d in data.get("depts", [])},
+        "wing_map": {w["id"]: w for w in data.get("wings", [])},
+        "fy_reverse": {f["id"]: f["year_name"] for f in data.get("fys", [])},
+        "dist_reverse": {d["id"]: d["district_name"] for d in data.get("districts", [])},
+        "block_reverse": {b["id"]: b["block_name"] for b in data.get("blocks", [])},
+        "dept_reverse": {d["id"]: d["department_name"] for d in data.get("depts", [])},
     }
 
 def get_filtered_records(supabase, role, user):
     """Fetch convergence records filtered by user's role (district/block/department)."""
+    # Ensure user is a dictionary; if not, return empty list
+    if not isinstance(user, dict):
+        return []
+
     query = supabase.table("convergence_register").select("*")
     if role == "district":
+        if not user.get("district_id"):
+            return []
         query = query.eq("district_id", user["district_id"])
     elif role == "block":
+        if not user.get("block_id"):
+            return []
         query = query.eq("block_id", user["block_id"])
     elif role == "department":
-        if not user.get("department_id"):
+        if not user.get("department_id") or not user.get("district_id"):
             return []
         query = query.eq("department_id", user["department_id"]).eq("district_id", user["district_id"])
-    return query.execute().data or []
+    # For superadmin, no filter
+    try:
+        return query.execute().data or []
+    except Exception:
+        return []
 
 # ============================================================
 # MAIN APP
@@ -149,7 +166,10 @@ def show():
         df_lmr['rate'] = pd.to_numeric(df_lmr['rate'], errors='coerce').fillna(0)
 
     # -------------------- CONVERGENCE REGISTER INTEGRATION --------------------
+    # Safely get user dict
     user = get_current_user() if st.session_state.get('authenticated') else {}
+    if not isinstance(user, dict):
+        user = {}
     role = user.get('role', 'guest')
 
     master_lookups = fetch_master_lookups()
@@ -306,8 +326,9 @@ def show():
             st.info(f"**Base Activity:** {st.session_state.get('work_type', 'Not specified')}")
             conv_row = selected_opt.get('row')
             if conv_row is not None:
-                dist_name = maps['dist_reverse'].get(conv_row.get('district_id'), 'N/A')
-                block_name = maps['block_reverse'].get(conv_row.get('block_id'), 'N/A')
+                # Safely get district and block names from maps
+                dist_name = maps.get('dist_reverse', {}).get(conv_row.get('district_id'), 'N/A')
+                block_name = maps.get('block_reverse', {}).get(conv_row.get('block_id'), 'N/A')
                 st.caption(f"📍 **District:** {dist_name} | **Block:** {block_name}")
             st.caption("📌 These details are from the Convergence Register. Switch to 'Manual Entry' to edit.")
         else:
