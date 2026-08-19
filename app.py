@@ -4,7 +4,7 @@ import pandas as pd
 import io
 import re
 from utils.db import get_supabase
-from utils.theme import load_theme, get_css  # <-- New theme engine
+from utils.theme import load_theme, get_css 
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -14,10 +14,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ---------- AUTHENTICATION ----------
-from auth.auth import check_password, logout, get_current_user
+# ---------- AUTHENTICATION & SESSION LOCK ----------
+from auth.auth import check_password, logout, get_current_user, check_active_session
 
 if not check_password():
+    st.stop()
+
+# ENFORCE GLOBAL SINGLE SESSION
+if not check_active_session():
     st.stop()
 
 user = get_current_user()
@@ -40,15 +44,11 @@ if user:
 role = user['role']
 
 # ---------- APPLY GLOBAL THEME ----------
-# Load the active theme and inject its CSS into the page
 theme = load_theme()
 st.markdown(f"<style>{get_css(theme)}</style>", unsafe_allow_html=True)
-
-# Extract primary colour for use in navbar and other dynamic elements
 primary_color = theme.get('primary_color', '#0F4C81')
 
 # ---------- GLOBAL CSS (ENTERPRISE NAVBAR & LANDING PAGE STYLES) ----------
-# Note: The theme CSS covers most styling; we keep only navbar-specific styles here.
 st.markdown(f"""
     <style>
         [data-testid="collapsedControl"], [data-testid="stSidebar"], section[data-testid="stSidebar"] {{
@@ -57,14 +57,12 @@ st.markdown(f"""
         [data-testid="stToolbar"], header[data-testid="stHeader"] {{
             display: none !important; visibility: hidden !important; height: 0px !important;
         }}
-
         .block-container {{
             padding-top: 1rem !important;
             padding-bottom: 2rem !important;
             max-width: 98% !important;
         }}
-
-        /* TOP NAVIGATION BAR – uses theme primary colour */
+        /* TOP NAVIGATION BAR */
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] {{
             background: #FFFFFF;
             border-bottom: 1px solid #E2E8F0;
@@ -103,7 +101,6 @@ st.markdown(f"""
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] div[data-testid="stPopover"] button:hover {{
             background-color: #F1F5F9 !important;
         }}
-
         /* Tab styling */
         div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
             gap: 24px; border-bottom: 1px solid #E2E8F0; padding-bottom: 0px;
@@ -116,7 +113,6 @@ st.markdown(f"""
         div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
             color: {primary_color} !important; border-bottom: 3px solid {primary_color} !important;
         }}
-
         /* Info boxes for home page */
         .info-box {{
             background: #F8FAFC;
@@ -133,32 +129,11 @@ st.markdown(f"""
             border-bottom: 1px solid #E2E8F0;
             padding-bottom: 4px;
         }}
-        .info-box ul {{
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }}
-        .info-box ul li {{
-            font-size: 13px;
-            padding: 2px 0;
-            color: #1E293B;
-            display: flex;
-            align-items: center;
-        }}
-        .info-box ul li::before {{
-            content: "•";
-            color: {primary_color};
-            font-weight: bold;
-            margin-right: 6px;
-        }}
-        .whatsapp-link {{
-            color: #25D366;
-            font-weight: 600;
-            text-decoration: none;
-        }}
-        .whatsapp-link:hover {{
-            text-decoration: underline;
-        }}
+        .info-box ul {{ list-style: none; padding: 0; margin: 0; }}
+        .info-box ul li {{ font-size: 13px; padding: 2px 0; color: #1E293B; display: flex; align-items: center; }}
+        .info-box ul li::before {{ content: "•"; color: {primary_color}; font-weight: bold; margin-right: 6px; }}
+        .whatsapp-link {{ color: #25D366; font-weight: 600; text-decoration: none; }}
+        .whatsapp-link:hover {{ text-decoration: underline; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -176,7 +151,6 @@ admin_pages = [
 ]
 allowed_admin = admin_pages if role == "superadmin" else []
 
-# Set default landing page
 if 'current_page' not in st.session_state:
     if role == "superadmin":
         st.session_state.current_page = "⚙️ Master Data"
@@ -286,11 +260,9 @@ def show_home():
             fy_id = f['id']
             break
             
-    # Use if/else structure instead of early returns so the footer always renders
     if not fy_id:
         st.warning("No active financial year found. Please set one in your profile.")
     else:
-        # ---- Determine which blocks to show ----
         if role == 'block' and block_id:
             block_list = [b for b in blocks if b['id'] == block_id]
         elif role in ['district', 'department'] and district_id:
@@ -298,7 +270,6 @@ def show_home():
         else:
             block_list = blocks
 
-        # ---- Fetch targets ----
         q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
         if role == 'department' and department_id:
             q_t = q_t.eq("department_id", department_id)
@@ -311,7 +282,6 @@ def show_home():
         if not targets:
             st.info("No targets found for the current financial year.")
         else:
-            # ---- Fetch register entries ----
             q_r = supabase.table("convergence_register").select("*").eq("financial_year_id", fy_id)
             if role == 'block' and block_id:
                 q_r = q_r.eq("block_id", block_id)
@@ -330,7 +300,6 @@ def show_home():
                 common = target_words.intersection(work_words)
                 return len(common) >= 3
 
-            # ---- Compute entries captured per (block, dept, wing, activity) ----
             entries_count = {}
             if not df_register.empty and 'activity_description' in df_register.columns:
                 for _, row in df_register.iterrows():
@@ -347,7 +316,6 @@ def show_home():
                                 key = (reg_block, t_dept, t_wing, t_act)
                                 entries_count[key] = entries_count.get(key, 0) + 1
 
-            # ---- Build report table ----
             report_rows = []
             for _, trow in df_targets.iterrows():
                 t_block = trow.get('block_id')
@@ -382,7 +350,6 @@ def show_home():
             if df_report.empty:
                 st.info("No compliance data to display.")
             else:
-                # ---- Filters ----
                 col_f1, col_f2 = st.columns(2)
                 blocks_all = sorted(df_report['Block'].unique())
                 selected_block = col_f1.selectbox("Filter by Block", options=["All"] + blocks_all)
@@ -394,7 +361,6 @@ def show_home():
                 if selected_dept != "All":
                     df_report = df_report[df_report['Department / Wing'] == selected_dept]
 
-                # ---- KPIs ----
                 total_targets = df_report['Target Set'].sum()
                 total_entries = df_report['Entries Captured'].sum()
                 total_gap = total_entries - total_targets
@@ -408,7 +374,6 @@ def show_home():
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                # ---- Display table with styling ----
                 def style_rows(row):
                     if row['Status'] != "Target Matched":
                         return ['background-color: #ffebee; color: #b71c1c; font-weight: bold;'] * len(row)
@@ -420,7 +385,6 @@ def show_home():
                     hide_index=True
                 )
 
-                # ---- Export to Excel ----
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     df_report.to_excel(writer, index=False, sheet_name='Compliance Report')
@@ -431,7 +395,6 @@ def show_home():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
-    # ---- Quick Reference Guide (Now executed regardless of the above data) ----
     st.markdown("---")
     st.markdown("#### 📌 Quick Reference")
     col_dep, col_block, col_dist, col_error = st.columns(4)
@@ -488,7 +451,6 @@ def show_home():
         </div>
         """, unsafe_allow_html=True)
 
-    # ---- Display Requested Global Footer Text ----
     st.markdown(
         """
         <div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>
@@ -497,7 +459,6 @@ def show_home():
         """, 
         unsafe_allow_html=True
     )
-
 
 # ---------- IMPORT MODULES & ROUTING ----------
 try:
