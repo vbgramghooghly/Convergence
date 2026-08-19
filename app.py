@@ -8,7 +8,7 @@ from utils.theme import load_theme, get_css
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="VB-G RAM G Convergence Hooghly",
+    page_title="VB G RAM G Convergence Hooghly",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="collapsed"
