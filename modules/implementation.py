@@ -786,16 +786,25 @@ def show():
 
         # Prepare register rows for matching
         if not df_reg.empty:
+            # <--- NEW CORRECTED MATCHING LOGIC STARTS HERE --->
             def get_match_name(row):
+                # 1. HIGHEST PRIORITY: Use the direct activity_id link
+                act_id = row.get('activity_id')
+                if act_id and act_id in act_id_to_name:
+                    return act_id_to_name[act_id].strip().lower()
+                
+                # 2. FALLBACK: Use the thematic_category_id (Legacy/incorrect mapping)
                 theme_id = row.get('thematic_category_id')
                 if theme_id and theme_id in act_id_to_name:
                     return act_id_to_name[theme_id].strip().lower()
-                # fallback: clean description
+                    
+                # 3. FINAL FALLBACK: Clean description for non-linked records
                 desc = row.get('activity_description', '')
                 if pd.isna(desc):
                     return ''
                 return re.sub(r'\s+', ' ', str(desc).strip().lower())
             df_reg['match_name'] = df_reg.apply(get_match_name, axis=1)
+            # <--- NEW CORRECTED MATCHING LOGIC ENDS HERE --->
         else:
             df_reg['match_name'] = []
 
@@ -829,8 +838,12 @@ def show():
                 if not candidate_reg.empty:
                     for _, r_row in candidate_reg.iterrows():
                         match_name = r_row['match_name']
-                        if r_row.get('thematic_category_id') is not None:
-                            # exact match
+                        if r_row.get('activity_id') is not None:
+                            # exact match based on ID mapping
+                            if match_name == target_clean:
+                                entered_count += 1
+                        elif r_row.get('thematic_category_id') is not None:
+                            # exact match based on theme mapping
                             if match_name == target_clean:
                                 entered_count += 1
                         else:
