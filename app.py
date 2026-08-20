@@ -78,8 +78,9 @@ st.markdown(f"""
             background-color: transparent !important;
             color: #4A5568 !important;
             font-weight: 600 !important;
-            padding: 4px 12px !important;
-            min-height: 36px !important;
+            font-size: 16px !important; 
+            padding: 8px 16px !important; 
+            min-height: 44px !important; 
             transition: all 0.2s ease !important;
         }}
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button:hover {{
@@ -89,6 +90,9 @@ st.markdown(f"""
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button[kind="primary"] {{
             background-color: {primary_color} !important;
             color: #FFFFFF !important;
+        }}
+        .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button p {{
+            font-size: 16px !important;
         }}
         .main .block-container > div[data-testid="stVerticalBlock"] > div:first-child > div[data-testid="stHorizontalBlock"] button[kind="primary"] p {{
             color: #FFFFFF !important;
@@ -138,10 +142,8 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-# UPDATED ORDER TO MATCH USER REQUEST
 core_pages = ["Home", "Work Entry", "Progress", "Reports", "Meetings", "Estimate", "Officials"]
 if role == "block":
-    # Ensure the removal happens safely for block users if Reports is restricted
     if "Reports" in core_pages:
         core_pages.remove("Reports")
 
@@ -254,15 +256,17 @@ def show_home():
                 delta_color = "#64748B"
             delta_html = f'<div style="font-size: 0.9rem; color: {delta_color}; font-weight: 500;">{delta_arrow} {abs(delta):+,}</div>'
         
-        st.markdown(f"""
-        <div style="background-color: white; padding: 1.2rem; border-radius: 0.5rem; border: 1px solid #E2E8F0; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;">
-            <div style="color: #64748B; font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;">{label}</div>
-            <div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
-                <div style="font-size: 1.8rem; font-weight: 600; color: #0F172A;">{value}</div>
-                {delta_html}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # Formatted without line breaks/indents to prevent Streamlit Markdown code-block rendering
+        html_string = (
+            f'<div style="background-color: white; padding: 1.2rem; border-radius: 0.5rem; border: 1px solid #E2E8F0; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;">'
+            f'<div style="color: #64748B; font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;">{label}</div>'
+            f'<div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">'
+            f'<div style="font-size: 1.8rem; font-weight: 600; color: #0F172A;">{value}</div>'
+            f'{delta_html}'
+            f'</div></div>'
+        )
+        
+        st.markdown(html_string, unsafe_allow_html=True)
 
     supabase = get_supabase()
     user_session = st.session_state
