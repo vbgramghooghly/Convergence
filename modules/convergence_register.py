@@ -57,7 +57,6 @@ def get_filtered_records(supabase, role, user):
     return query.execute().data or []
 
 def get_record_count(supabase, role, user):
-    """Fetch the exact record count directly from the database."""
     query = supabase.table("convergence_register").select("*", count="exact", head=True)
     if role == "district":
         query = query.eq("district_id", user["district_id"])
@@ -375,6 +374,7 @@ def edit_delete_section(records, maps, supabase, user, master):
                     "vbgramg_fund": new_v_fund,
                     "pia_type": new_pia,
                     "wing_id": new_wing_id,
+                    "activity_id": selected_act_edit_rec["id"] if selected_act_edit_rec else None, # <-- Preserved activity_id
                     "department_scheme_convergence": scheme_data["convergence"],
                     "department_scheme_name": scheme_data["scheme_name"],
                     "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -499,11 +499,9 @@ def show():
             if not valid_act_names:
                 st.warning(f"No approved activities found for {sel_dept_label}.")
                 sel_act_name = col_act1.selectbox("Base Activity*", ["No activities available"], disabled=True)
-                theme_id = None
             else:
                 sel_act_name = col_act1.selectbox("Base Activity*", valid_act_names)
                 selected_act_record = next((a for a in valid_activities if a["activity_name"] == sel_act_name), None)
-                theme_id = selected_act_record["theme_id"] if selected_act_record else None
 
             inp_loc_details = col_loc1.text_input("Location Details*", placeholder="Village / Beneficiary Name / Chainage")
             auto_desc = f"{sel_act_name} at {inp_loc_details}" if sel_act_name and sel_act_name != "No activities available" and inp_loc_details else ""
@@ -588,8 +586,8 @@ def show():
                             "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
                             "department_id": selected_dept_id, "wing_id": selected_wing_id,
                             "pia_type": selected_pia,
-                            "activity_description": final_work_name, "thematic_category_id": theme_id,
-                            "activity_id": selected_act_record["id"] if selected_act_record else None,
+                            "activity_description": final_work_name, 
+                            "activity_id": selected_act_record["id"] if selected_act_record else None, # <-- preserved activity_id, removed thematic_category_id
                             "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
                             "work_dimensions": possible_outcome, "dimension_unit": "Outcome", "origin_source": inp_origin,
                             "desired_target": 1, "expected_persondays": persondays, "department_fund": dept_fund,
@@ -617,11 +615,5 @@ def show():
         with tabs[2]:
             edit_delete_section(records, maps, supabase, user, master)
 
-    st.markdown(
-        """
-        <div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>
-            Hooghly District Administration || District VB GRAM G Cell || Mail : nodal.hooghly@gmail.com
-        </div>
-        """, 
-        unsafe_allow_html=True
-    )
+    # Fixed footer into a single line to prevent syntax errors
+    st.markdown("<div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>Hooghly District Administration || District VB GRAM G Cell || Mail : nodal.hooghly@gmail.com</div>", unsafe_allow_html=True)
