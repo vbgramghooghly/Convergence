@@ -138,9 +138,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------- ROUTING & STATE MANAGEMENT ----------
-core_pages = ["Home", "Officials", "Progress", "Meetings", "Work Entry", "Reports", "Estimate"]
+# UPDATED ORDER TO MATCH USER REQUEST
+core_pages = ["Home", "Work Entry", "Progress", "Reports", "Meetings", "Estimate", "Officials"]
 if role == "block":
-    core_pages.remove("Reports")
+    # Ensure the removal happens safely for block users if Reports is restricted
+    if "Reports" in core_pages:
+        core_pages.remove("Reports")
 
 admin_pages = [
     "Master Data", 
@@ -239,6 +242,27 @@ render_top_navigation()
 # ============================================================
 def show_home():
     st.markdown("#### 📊 At a Glance Report")
+
+    # CUSTOM METRIC HELPER TO ENSURE SAME SIZE AND INLINE DELTA
+    def render_metric_card(label, value, delta=None):
+        delta_html = ""
+        if delta is not None:
+            delta_arrow = "▲" if delta > 0 else "▼" if delta < 0 else ""
+            delta_color = "#10B981" if delta >= 0 else "#EF4444" # Green for positive/zero, red for negative
+            # Adjust color to grey if delta is 0
+            if delta == 0:
+                delta_color = "#64748B"
+            delta_html = f'<div style="font-size: 0.9rem; color: {delta_color}; font-weight: 500;">{delta_arrow} {abs(delta):+,}</div>'
+        
+        st.markdown(f"""
+        <div style="background-color: white; padding: 1.2rem; border-radius: 0.5rem; border: 1px solid #E2E8F0; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;">
+            <div style="color: #64748B; font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;">{label}</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
+                <div style="font-size: 1.8rem; font-weight: 600; color: #0F172A;">{value}</div>
+                {delta_html}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     supabase = get_supabase()
     user_session = st.session_state
@@ -385,11 +409,16 @@ def show_home():
                 total_gap = total_entries - total_targets
                 compliance_pct = (total_entries / total_targets * 100) if total_targets > 0 else 0
 
+                # --- CHANGE 4: Replaced st.metric with render_metric_card for equal sizing and inline deltas ---
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Total Targets", f"{int(total_targets):,}")
-                col2.metric("Total Entries Captured", f"{int(total_entries):,}")
-                col3.metric("Total Gap", f"{int(total_gap):,}", delta=total_gap)
-                col4.metric("Compliance", f"{compliance_pct:.1f}%")
+                with col1:
+                    render_metric_card("Total Targets", f"{int(total_targets):,}")
+                with col2:
+                    render_metric_card("Total Entries Captured", f"{int(total_entries):,}")
+                with col3:
+                    render_metric_card("Total Gap", f"{int(total_gap):,}", delta=total_gap)
+                with col4:
+                    render_metric_card("Compliance", f"{compliance_pct:.1f}%")
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
