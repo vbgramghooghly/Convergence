@@ -1,6 +1,3 @@
-# =====================================================================
-# FILE 1: modules/implementation.py (or your progress tab file)
-# =====================================================================
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
@@ -132,7 +129,7 @@ def show():
         if not df_t.empty:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total Activities Targeted", len(df_t))
-            k2.metric("Total Project Planned", int(pd.to_numeric(df_t['asset_count'], errors='coerce').sum()))
+            k2.metric("Total Project Planned", int(pd.to_numeric(df_t['desired_target'], errors='coerce').sum()))
             k3.metric("Converged Dept Fund (₹L)", f"₹{pd.to_numeric(df_t['department_fund'], errors='coerce').sum():,.2f}")
             k4.metric("Total Persondays Planned", f"{int(pd.to_numeric(df_t['expected_persondays'], errors='coerce').sum()):,}")
             st.markdown("<br>", unsafe_allow_html=True)
@@ -898,7 +895,8 @@ def show():
                     if 'activity_description' in dept_reg.columns:
                         def is_match(work_desc):
                             if pd.isna(work_desc) or not str(work_desc).strip(): return False
-                            return str(t_act).strip().lower() == str(work_desc).strip().lower()
+                            # CHANGED: Use 'in' for exact substring matching to handle appended locations
+                            return str(t_act).strip().lower() in str(work_desc).strip().lower()
                         entered_count = dept_reg['activity_description'].apply(is_match).sum()
 
                 gap = entered_count - target_val
