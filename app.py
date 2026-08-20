@@ -253,12 +253,16 @@ def show_home():
         wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
         blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
         fys = supabase.table("financial_years").select("*").eq("active", True).execute().data or []
-        return departments, wings, blocks, fys
+        # --- CHANGE 1: Fetch activities so we can map activity_id to its name ---
+        activities = supabase.table("activities").select("*").eq("active", True).execute().data or []
+        return departments, wings, blocks, fys, activities
 
-    departments, wings, blocks, fys = fetch_master()
+    departments, wings, blocks, fys, activities = fetch_master()
     dept_map = {d['id']: d['department_name'] for d in departments}
     wing_map = {w['id']: w for w in wings}
     block_map = {b['id']: b['block_name'] for b in blocks}
+    # --- CHANGE 2: Map activity IDs to activity Names ---
+    act_id_to_name = {a['id']: a['activity_name'] for a in activities}
 
     active_fy = st.session_state.get("selected_fy", "2026-27")
     fy_id = None
@@ -294,7 +298,22 @@ def show_home():
             df_targets = pd.DataFrame(targets)
             df_register = pd.DataFrame(register)
 
-            # --- BULLETPROOF COMPLIANCE COUNTER ---
+            # --- CHANGE 3: Pre-process match_name with activity_id priority ---
+            if not df_register.empty:
+                def get_match_name(row):
+                    # 1. Highest priority: Use direct activity_id
+                    act_id = row.get('activity_id')
+                    if act_id and act_id in act_id_to_name:
+                        return act_id_to_name[act_id].strip().lower()
+                    # 2. Final fallback: clean description string
+                    desc = row.get('activity_description', '')
+                    if pd.isna(desc):
+                        return ''
+                    return re.sub(r'\s+', ' ', str(desc).strip().lower())
+                df_register['match_name'] = df_register.apply(get_match_name, axis=1)
+            else:
+                df_register['match_name'] = []
+
             report_rows = []
             for _, trow in df_targets.iterrows():
                 t_block = trow.get('block_id')
@@ -319,15 +338,17 @@ def show_home():
                         mask &= (df_register['wing_id'].isna())
                     
                     dept_reg = df_register[mask]
-                    if 'activity_description' in dept_reg.columns:
+                    if not dept_reg.empty:
                         t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
-                        
-                        def is_match(work_desc, tgt=t_act_clean):
-                            if pd.isna(work_desc): return False
-                            wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
-                            return tgt in wd_clean
-                            
-                        entered_count = dept_reg['activity_description'].apply(is_match).sum()
+                        # Count matches using activity_id priority first
+                        for _, r_row in dept_reg.iterrows():
+                            match_name = r_row['match_name']
+                            if r_row.get('activity_id') is not None:
+                                if match_name == t_act_clean:
+                                    entered_count += 1
+                            else:
+                                if t_act_clean in match_name:
+                                    entered_count += 1
 
                 gap = entered_count - t_target
                 status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
