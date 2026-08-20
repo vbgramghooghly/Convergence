@@ -114,6 +114,7 @@ def render_kpi_cards(df, exact_count):
     c5.metric("Target Persondays", f"{int(total_pdays):,}")
     st.markdown("<br>", unsafe_allow_html=True)
 
+# ---------- MODIFIED: display_register with Base Activity ----------
 def display_register(df, maps):
     if df.empty:
         st.info("No convergence activities found for your jurisdiction.")
@@ -124,11 +125,20 @@ def display_register(df, maps):
     df_display["Block"] = df_display["block_id"].map(maps["block_reverse"])
     df_display["Department"] = df_display["department_id"].map(maps["dept_reverse"])
     
-    # ---- NEW: Map wing_id to wing name ----
+    # ---- Map wing_id to wing name ----
     df_display["Wing"] = df_display["wing_id"].apply(
         lambda x: maps["wing_map"].get(x, {}).get("wing_name", "Direct Parent Department") if pd.notna(x) and x else "Direct Parent Department"
     )
-    # ----------------------------------------
+
+    # ---- NEW: Extract Base Activity from activity_description ----
+    def extract_base_activity(desc):
+        if not desc:
+            return ""
+        if " at " in desc:
+            return desc.split(" at ", 1)[0].strip()
+        return desc.strip()
+    df_display["Base Activity"] = df_display["activity_description"].apply(extract_base_activity)
+    # -------------------------------------------------------------
 
     for col in ["convergence_type", "mis_code", "origin_source"]:
         if col not in df_display.columns: df_display[col] = "Not Specified" if col == "convergence_type" else ""
@@ -151,8 +161,11 @@ def display_register(df, maps):
         },
         inplace=True
     )
+
+    # ---- Insert "Base Activity" before "Work Name" ----
     display_cols = [
-        "FY", "District", "Block", "Department", "Wing",   # <-- Added Wing
+        "FY", "District", "Block", "Department", "Wing",
+        "Base Activity",
         "Work Name",
         "Location Details", "Source", "Convergence Type", "Status", "Total Fund (₹ Lakhs)"
     ]
@@ -368,7 +381,7 @@ def edit_delete_section(records, maps, supabase, user, master):
                     "department_fund": new_d_fund,
                     "vbgramg_fund": new_v_fund,
                     "pia_type": new_pia,
-                    "wing_id": new_wing_id,   # <-- Added wing update
+                    "wing_id": new_wing_id,
                     "department_scheme_convergence": scheme_data["convergence"],
                     "department_scheme_name": scheme_data["scheme_name"],
                     "department_annual_plan_status": scheme_data["annual_plan_status"],
@@ -569,7 +582,7 @@ def show():
                     else:
                         insert_data = {
                             "financial_year_id": selected_fy_id, "district_id": selected_dist_id, "block_id": block_id,
-                            "department_id": selected_dept_id, "wing_id": selected_wing_id,  # <-- wing_id already stored
+                            "department_id": selected_dept_id, "wing_id": selected_wing_id,
                             "pia_type": selected_pia,
                             "activity_description": final_work_name, "thematic_category_id": theme_id,
                             "convergence_type": sel_conv_type, "scheme_name": None, "geo_location": geo_string,
