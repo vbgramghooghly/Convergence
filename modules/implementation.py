@@ -88,6 +88,9 @@ def show():
     for w in wings:
         dept_to_wings.setdefault(w['department_id'], []).append(w)
     
+    # Build activity id -> name map for compliance matching
+    activity_id_to_name = {a['id']: a['activity_name'] for a in activities}
+    
     t_dists = districts if role in ['superadmin', 'district'] else [d for d in districts if d['id'] == user.get('district_id')]
     t_dist_dict = {d['district_name']: d['id'] for d in t_dists}
     
@@ -103,10 +106,11 @@ def show():
             active_fy_id = f['id']
             break
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # ----- REMOVED "Meeting Commitments (Sync)" tab -----
+    # Now we have 4 tabs: Targets, Progress, Compliance, Audit
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🎯 Department Targets (Planning)", 
         "🏗️ Implementation Progress (Execution)", 
-        "🤝 Meeting Commitments (Sync)",
         "🚨 Target Compliance",
         "📋 Progress Audit Trail & History"
     ])
@@ -126,12 +130,17 @@ def show():
         data_t = query_t.execute().data
         df_t = pd.DataFrame(data_t) if data_t else pd.DataFrame()
 
+        # --- KPI: Add total targeted schemes (sum of desired_target) ---
+        total_schemes = int(df_t['desired_target'].sum()) if not df_t.empty and 'desired_target' in df_t.columns else 0
+
         if not df_t.empty:
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Unique Convergence Projects", df_t['project_head'].nunique() if 'project_head' in df_t else 0)
-            k2.metric("Unique Activities Targeted", df_t['activity'].nunique() if 'activity' in df_t else 0)
-            k3.metric("Converged Dept Fund (₹L)", f"₹{pd.to_numeric(df_t['department_fund'], errors='coerce').sum():,.2f}")
-            k4.metric("Total Persondays Planned", f"{int(pd.to_numeric(df_t['expected_persondays'], errors='coerce').sum()):,}")
+            # Use 5 columns for KPIs
+            k1, k2, k3, k4, k5 = st.columns(5)
+            k1.metric("Total Schemes Targeted", total_schemes)
+            k2.metric("Unique Convergence Projects", df_t['project_head'].nunique() if 'project_head' in df_t else 0)
+            k3.metric("Unique Activities Targeted", df_t['activity'].nunique() if 'activity' in df_t else 0)
+            k4.metric("Converged Dept Fund (₹L)", f"₹{pd.to_numeric(df_t['department_fund'], errors='coerce').sum():,.2f}")
+            k5.metric("Total Persondays Planned", f"{int(pd.to_numeric(df_t['expected_persondays'], errors='coerce').sum()):,}")
             st.markdown("<br>", unsafe_allow_html=True)
 
         col_t1, col_t2 = st.columns([1.6, 1], gap="large")
@@ -750,91 +759,8 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3 =================
+    # ================= TAB 3 (was TAB 4) =================
     with tab3:
-        ap_query = supabase.table("meeting_action_points").select("id, meeting_id, department_id, wing_id, priority, linkage_type, action_point, target, deadline, status, remarks").execute().data
-        if ap_query:
-            df_ap = pd.DataFrame(ap_query)
-            if role == 'department':
-                if user.get('wing_id'):
-                    df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'] == user['wing_id'])]
-                else:
-                    df_ap = df_ap[(df_ap['department_id'] == user['department_id']) & (df_ap['wing_id'].isna())]
-            if not df_ap.empty:
-                def format_dept_display(row):
-                    d_name = dept_map.get(row.get("department_id"), "Unknown")
-                    w_id = row.get("wing_id")
-                    if w_id and not pd.isna(w_id) and w_id in wing_map: return f"{d_name} ➔ {wing_map[w_id]['wing_name']}"
-                    return f"{d_name} (Main)"
-                df_ap['Department / Wing'] = df_ap.apply(format_dept_display, axis=1)
-                
-                meetings_data = supabase.table("meetings").select("id, meeting_date, meeting_type, district_id, block_id").execute().data or []
-                m_map = {m['id']: m for m in meetings_data}
-                
-                def get_meeting_context(meeting_id):
-                    if meeting_id not in m_map: return "Unknown Meeting"
-                    m = m_map[meeting_id]
-                    m_type = m.get('meeting_type', 'Other')
-                    d_id = m.get('district_id')
-                    b_id = m.get('block_id')
-                    if m_type == 'District':
-                        d_name = dist_map.get(d_id, 'Unknown District')
-                        return f"District Meeting: {d_name}"
-                    elif m_type == 'Block':
-                        b_name = block_map.get(b_id, 'Unknown Block')
-                        d_name = dist_map.get(d_id, 'Unknown District')
-                        return f"Block Meeting: {b_name} ({d_name} District)"
-                    return f"{m_type} Meeting"
-                
-                df_ap['Meeting Context'] = df_ap['meeting_id'].apply(get_meeting_context)
-
-                pending_ap = df_ap[~df_ap['status'].isin(['Completed', 'Dropped', 'completed', 'dropped'])].copy()
-                if not pending_ap.empty:
-                    pending_ap['deadline'] = pd.to_datetime(pending_ap['deadline'], errors='coerce')
-                    today_dt = pd.to_datetime(date.today())
-                    pending_ap['Days Left'] = (pending_ap['deadline'] - today_dt).dt.days
-                    def get_sla_badge(days):
-                        if pd.isna(days): return "⚪ Unscheduled"
-                        if days < 0: return "🔴 Overdue"
-                        if days == 0: return "🟡 Due Today"
-                        if days <= 3: return "🟠 Due Soon"
-                        return "🔵 On Track"
-                    pending_ap['SLA Status'] = pending_ap['Days Left'].apply(get_sla_badge)
-                    sk1, sk2, sk3, sk4 = st.columns(4)
-                    sk1.metric("Open Assigned", len(pending_ap))
-                    sk2.metric("Overdue / Breach", len(pending_ap[pending_ap['Days Left'] < 0]))
-                    sk3.metric("Due Today", len(pending_ap[pending_ap['Days Left'] == 0]))
-                    sk4.metric("Requires Review", len(pending_ap[pending_ap['status'].str.contains('Feasible|Review', case=False, na=False)]))
-                    st.markdown("<br>##### 📑 Live Action Registry", unsafe_allow_html=True)
-                    disp_cols = ['SLA Status', 'Meeting Context', 'Department / Wing', 'action_point', 'Days Left', 'status']
-                    st.dataframe(pending_ap[disp_cols].sort_values('Days Left'), use_container_width=True, hide_index=True)
-                    st.markdown("##### ✏️ Update ATR Status & Progress")
-                    with st.form("sync_atr_form"):
-                        col_s1, col_s2 = st.columns(2)
-                        sync_id = col_s1.selectbox("Select Resolution", pending_ap['id'].tolist(), format_func=lambda x: f"[{pending_ap[pending_ap['id']==x]['Meeting Context'].values[0]}] {pending_ap[pending_ap['id']==x]['action_point'].values[0][:50]}...")
-                        sync_status = col_s2.selectbox("New Status*", ['Under Process', 'Approved', 'Under Execution', 'Completed', 'Not Feasible (Requires Review)', 'Dropped'])
-                        sync_remarks = st.text_area("Implementation Outcome / Remarks (Mandatory if 'Not Feasible')")
-                        submitted_sync = st.form_submit_button("Sync Progress to Master Record", type="primary")
-                        if submitted_sync:
-                            if sync_status == 'Not Feasible (Requires Review)' and not sync_remarks.strip():
-                                st.error("⚠️ **Validation Error:** You must provide a clear reason in 'Remarks' when flagging an activity as Not Feasible so the Chairperson can review it.")
-                            else:
-                                payload = {"status": sync_status, "remarks": sync_remarks}
-                                resp = supabase.table("meeting_action_points").update(payload).eq("id", sync_id).execute()
-                                if resp.count and resp.count > 0:
-                                    try: log_action(user.get('id'), f"UPDATE meeting_action_points {sync_id}")
-                                    except: pass
-                                    st.success("✅ Master meeting record updated instantly across all dashboards!")
-                                    st.rerun()
-                                else:
-                                    st.error("🔴 Update blocked by database security (RLS).")
-            else:
-                st.info("No meeting commitments found for your department jurisdiction.")
-        else:
-            st.info("No resolution records found in the global governance system.")
-
-    # ================= TAB 4 (COMPLIANCE FIX) =================
-    with tab4:
         q_t = supabase.table("department_targets").select("*")
         q_r = supabase.table("convergence_register").select("*")
 
@@ -871,6 +797,30 @@ def show():
             elif 'financial_year' in df_tab4_reg.columns:
                 df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year'] == active_fy]
 
+        # --- IMPROVED COMPLIANCE LOGIC ---
+        # Build a map from register entry to activity name (via thematic_category_id)
+        # For entries without thematic_category_id, fallback to activity_description.
+        def get_activity_name_for_register(row):
+            theme_id = row.get('thematic_category_id')
+            if theme_id and theme_id in activity_id_to_name:
+                return activity_id_to_name[theme_id]
+            # fallback: use activity_description but we want exact match with target activity name
+            # We'll still use description but we'll also clean it.
+            desc = row.get('activity_description', '')
+            if pd.isna(desc) or desc == '':
+                return ''
+            # Clean description: remove extra spaces, lowercase, strip
+            return re.sub(r'\s+', ' ', str(desc).strip().lower())
+        
+        # For register, we'll create a column 'activity_name_for_match' that we can compare.
+        # We'll do this inside the loop per target to avoid memory.
+        # But we can preprocess the register dataframe.
+        if not df_tab4_reg.empty:
+            # Add a column 'match_key' that is the activity name from theme or cleaned description
+            df_tab4_reg['match_key'] = df_tab4_reg.apply(get_activity_name_for_register, axis=1)
+        else:
+            df_tab4_reg['match_key'] = []
+
         compliance_data = []
         if not df_tab4_tgts.empty:
             for _, row in df_tab4_tgts.iterrows():
@@ -880,6 +830,9 @@ def show():
                 target_val = safe_int(row.get('desired_target', 0))
                 t_act = row.get('activity', '')
 
+                # Clean target activity for matching
+                t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
+
                 target_w_id_safe = None if pd.isna(w_id) else w_id
                 dept_name = dept_map.get(d_id, 'Unknown')
                 wing_name = wing_map.get(target_w_id_safe, {}).get('wing_name', 'Main Dept.') if target_w_id_safe else 'Main Dept.'
@@ -888,9 +841,10 @@ def show():
 
                 contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
 
-                # --- BULLETPROOF COMPLIANCE COUNTER ---
+                # --- MATCH COUNT USING ACTIVITY NAME ---
                 entered_count = 0
                 if not df_tab4_reg.empty:
+                    # Filter by department, wing, block
                     mask = (df_tab4_reg['department_id'] == d_id)
                     if pd.notna(b_id) and b_id:
                         mask &= (df_tab4_reg['block_id'] == b_id)
@@ -900,15 +854,30 @@ def show():
                         mask &= (df_tab4_reg['wing_id'].isna())
                     
                     dept_reg = df_tab4_reg[mask]
-                    if 'activity_description' in dept_reg.columns:
-                        t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
-                        
-                        def is_match(work_desc, tgt=t_act_clean):
-                            if pd.isna(work_desc): return False
-                            wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
-                            return tgt in wd_clean
-                            
-                        entered_count = dept_reg['activity_description'].apply(is_match).sum()
+                    if not dept_reg.empty:
+                        # Now match by activity name: compare cleaned target with register's match_key
+                        # We want exact match after cleaning.
+                        # Some register entries might have additional text, but we use match_key which is either theme name or cleaned description.
+                        # For theme-based, it's exact activity name. For fallback, it's cleaned description.
+                        # We'll check if cleaned target equals match_key (or if match_key contains target? We'll use equality for theme-based).
+                        # To be safe, we'll check if cleaned target is contained in match_key (for descriptions that include extra text).
+                        # But better: we can use a stricter condition: if match_key == t_act_clean (exact) OR (if match_key contains t_act_clean and length difference is small?).
+                        # Given user's complaint, likely they want exact match of activity name.
+                        # We'll use equality for theme-based, and for fallback we'll use "in" but we'll also strip.
+                        # Actually, we can just compare cleaned target with match_key; if they are equal, count.
+                        # But match_key for descriptions may have extra location, so we use "in" as before.
+                        # However, to fix the issue, we will use equality if the register entry has thematic_category_id, else fallback to "in".
+                        # We'll implement that:
+                        for _, reg_row in dept_reg.iterrows():
+                            reg_match = reg_row.get('match_key', '')
+                            if reg_row.get('thematic_category_id') is not None:
+                                # theme-based, use exact equality after cleaning
+                                if reg_match == t_act_clean:
+                                    entered_count += 1
+                            else:
+                                # fallback: use contains
+                                if t_act_clean in reg_match:
+                                    entered_count += 1
 
                 gap = entered_count - target_val
                 status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
@@ -943,8 +912,8 @@ def show():
         else:
             st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
 
-        # ================= NEW TAB 5: PROGRESS AUDIT TRAIL & HISTORY =================
-    with tab5:
+    # ================= TAB 4 (was TAB 5) =================
+    with tab4:
         try:
             audit_query = supabase.table("progress_updates").select(
                 "*, convergence_register(id, activity_description, department_id, district_id, block_id), users(full_name, role, department_id, district_id, block_id)"
