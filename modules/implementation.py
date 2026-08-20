@@ -128,8 +128,8 @@ def show():
 
         if not df_t.empty:
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Unique Convergence Projects", df_t['project_head'].nunique())
-            k2.metric("Unique Activities Targeted", df_t['activity'].nunique())
+            k1.metric("Unique Convergence Projects", df_t['project_head'].nunique() if 'project_head' in df_t else 0)
+            k2.metric("Unique Activities Targeted", df_t['activity'].nunique() if 'activity' in df_t else 0)
             k3.metric("Converged Dept Fund (₹L)", f"₹{pd.to_numeric(df_t['department_fund'], errors='coerce').sum():,.2f}")
             k4.metric("Total Persondays Planned", f"{int(pd.to_numeric(df_t['expected_persondays'], errors='coerce').sum()):,}")
             st.markdown("<br>", unsafe_allow_html=True)
@@ -253,10 +253,10 @@ def show():
                                 "Block": block_name,
                                 "Project Head": t.get('project_head', ''),
                                 "Approved Activity": act_name,
-                                "Desired Target": t.get('desired_target', 0),
+                                "Desired Target": safe_int(t.get('desired_target', 0)),
                                 "Dept Fund (₹ Lakhs)": float(t.get('department_fund', 0.0)),
                                 "VB-G Fund (₹ Lakhs)": float(t.get('vbgramg_fund', 0.0)),
-                                "Expected Persondays": t.get('expected_persondays', 0)
+                                "Expected Persondays": safe_int(t.get('expected_persondays', 0))
                             })
                         df_editor = pd.DataFrame(rows)
                     else:
@@ -833,7 +833,7 @@ def show():
         else:
             st.info("No resolution records found in the global governance system.")
 
-    # ================= TAB 4 =================
+    # ================= TAB 4 (COMPLIANCE FIX) =================
     with tab4:
         q_t = supabase.table("department_targets").select("*")
         q_r = supabase.table("convergence_register").select("*")
@@ -884,14 +884,15 @@ def show():
                 dept_name = dept_map.get(d_id, 'Unknown')
                 wing_name = wing_map.get(target_w_id_safe, {}).get('wing_name', 'Main Dept.') if target_w_id_safe else 'Main Dept.'
                 dept_display = f"{dept_name} → {wing_name}" if target_w_id_safe else dept_name
-                block_name = block_map.get(b_id, 'All Blocks') if b_id else 'All Blocks'
+                block_name = block_map.get(b_id, 'All Blocks') if pd.notna(b_id) and b_id else 'All Blocks'
 
                 contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
 
+                # --- BULLETPROOF COMPLIANCE COUNTER ---
                 entered_count = 0
                 if not df_tab4_reg.empty:
                     mask = (df_tab4_reg['department_id'] == d_id)
-                    if b_id:
+                    if pd.notna(b_id) and b_id:
                         mask &= (df_tab4_reg['block_id'] == b_id)
                     if target_w_id_safe:
                         mask &= (df_tab4_reg['wing_id'] == target_w_id_safe)
