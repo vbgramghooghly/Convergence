@@ -128,8 +128,8 @@ def show():
 
         if not df_t.empty:
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Total Activities Targeted", len(df_t))
-            k2.metric("Total Project Planned", int(pd.to_numeric(df_t['desired_target'], errors='coerce').sum()))
+            k1.metric("Unique Convergence Projects", df_t['project_head'].nunique())
+            k2.metric("Unique Activities Targeted", df_t['activity'].nunique())
             k3.metric("Converged Dept Fund (₹L)", f"₹{pd.to_numeric(df_t['department_fund'], errors='coerce').sum():,.2f}")
             k4.metric("Total Persondays Planned", f"{int(pd.to_numeric(df_t['expected_persondays'], errors='coerce').sum()):,}")
             st.markdown("<br>", unsafe_allow_html=True)
@@ -179,7 +179,10 @@ def show():
                         dist_sel = col3.selectbox("District*", list(t_dist_dict.keys()) if t_dist_dict else ["None"])
                         dist_id = t_dist_dict.get(dist_sel)
 
-                    # Project Head in its own row
+                    # ---- CARD 3: BLOCK-WISE TARGET ENTRIES (LARGE) ----
+                    st.markdown("---")
+                    st.markdown("#### 📋 Block‑wise Target Entries")
+
                     PROJECT_HEAD_OPTIONS = [
                         "Canals, Check Dams & Dykes",
                         "Ponds & Water Harvesting",
@@ -209,11 +212,6 @@ def show():
                         "Embankments & Mitigation Works",
                         "Post-Disaster Restoration"
                     ]
-                    selected_theme_name = st.selectbox("Convergence Project Head*", PROJECT_HEAD_OPTIONS)
-
-                    # ---- CARD 3: BLOCK-WISE TARGET ENTRIES (LARGE) ----
-                    st.markdown("---")
-                    st.markdown("#### 📋 Block‑wise Target Entries")
 
                     # Get blocks for the district
                     if dist_id:
@@ -253,6 +251,7 @@ def show():
                                 continue
                             rows.append({
                                 "Block": block_name,
+                                "Project Head": t.get('project_head', ''),
                                 "Approved Activity": act_name,
                                 "Desired Target": t.get('desired_target', 0),
                                 "Dept Fund (₹ Lakhs)": float(t.get('department_fund', 0.0)),
@@ -263,6 +262,7 @@ def show():
                     else:
                         df_editor = pd.DataFrame({
                             "Block": [""],
+                            "Project Head": [""],
                             "Approved Activity": [""],
                             "Desired Target": [1],
                             "Dept Fund (₹ Lakhs)": [0.0],
@@ -280,6 +280,11 @@ def show():
                             "Block": st.column_config.SelectboxColumn(
                                 "Block*",
                                 options=block_names,
+                                required=True
+                            ),
+                            "Project Head": st.column_config.SelectboxColumn(
+                                "Convergence Project Head*",
+                                options=PROJECT_HEAD_OPTIONS,
                                 required=True
                             ),
                             "Approved Activity": st.column_config.SelectboxColumn(
@@ -320,14 +325,14 @@ def show():
                         errors = []
                         if not active_dept_id or not dist_id:
                             errors.append("Invalid Department or District.")
-                        if not selected_theme_name:
-                            errors.append("Please select a valid Convergence Project Head.")
                         if edited_df.empty or edited_df.isnull().all().all():
                             errors.append("At least one row with valid data is required.")
                         else:
                             for idx, row in edited_df.iterrows():
                                 if pd.isna(row['Block']) or row['Block'] == '':
                                     errors.append(f"Row {idx+1}: Block is required.")
+                                if pd.isna(row['Project Head']) or row['Project Head'] == '':
+                                    errors.append(f"Row {idx+1}: Convergence Project Head is required.")
                                 if pd.isna(row['Approved Activity']) or row['Approved Activity'] == '':
                                     errors.append(f"Row {idx+1}: Approved Activity is required.")
                                 if row['Desired Target'] < 1:
@@ -361,7 +366,8 @@ def show():
                                 if not block_id:
                                     continue
                                 act_name = row['Approved Activity']
-                                if not act_name:
+                                proj_head = row['Project Head']
+                                if not act_name or not proj_head:
                                     continue
                                 target_record = {
                                     "department_id": active_dept_id,
@@ -370,7 +376,7 @@ def show():
                                     "block_id": block_id,
                                     "financial_year_id": selected_fy_target_id,
                                     "financial_year": selected_fy_year,
-                                    "project_head": selected_theme_name,
+                                    "project_head": proj_head,
                                     "activity": act_name,
                                     "asset_count": 0,
                                     "annual_plan_scope": None,
@@ -891,12 +897,16 @@ def show():
                         mask &= (df_tab4_reg['wing_id'] == target_w_id_safe)
                     else:
                         mask &= (df_tab4_reg['wing_id'].isna())
+                    
                     dept_reg = df_tab4_reg[mask]
                     if 'activity_description' in dept_reg.columns:
-                        def is_match(work_desc):
-                            if pd.isna(work_desc) or not str(work_desc).strip(): return False
-                            # CHANGED: Use 'in' for exact substring matching to handle appended locations
-                            return str(t_act).strip().lower() in str(work_desc).strip().lower()
+                        t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
+                        
+                        def is_match(work_desc, tgt=t_act_clean):
+                            if pd.isna(work_desc): return False
+                            wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
+                            return tgt in wd_clean
+                            
                         entered_count = dept_reg['activity_description'].apply(is_match).sum()
 
                 gap = entered_count - target_val
