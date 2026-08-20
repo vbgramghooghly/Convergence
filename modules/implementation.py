@@ -759,160 +759,173 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3 (was TAB 4) =================
-    with tab3:
-        q_t = supabase.table("department_targets").select("*")
-        q_r = supabase.table("convergence_register").select("*")
+    # ================= TAB 3: TARGET COMPLIANCE (FIXED) =================
+with tab3:
+    q_t = supabase.table("department_targets").select("*")
+    q_r = supabase.table("convergence_register").select("*")
 
-        if role == 'district' and user.get('district_id'):
+    if role == 'district' and user.get('district_id'):
+        q_t = q_t.eq("district_id", user['district_id'])
+        q_r = q_r.eq("district_id", user['district_id'])
+    elif role == 'block':
+        if user.get('district_id'): q_t = q_t.eq("district_id", user['district_id'])
+        if user.get('block_id'): 
+            q_r = q_r.eq("block_id", user['block_id'])
+            q_t = q_t.eq("block_id", user['block_id'])
+    elif role == 'department':
+        if user.get('department_id'):
+            q_t = q_t.eq("department_id", user['department_id'])
+            q_r = q_r.eq("department_id", user['department_id'])
+        if user.get('district_id'):
             q_t = q_t.eq("district_id", user['district_id'])
             q_r = q_r.eq("district_id", user['district_id'])
-        elif role == 'block':
-            if user.get('district_id'): q_t = q_t.eq("district_id", user['district_id'])
-            if user.get('block_id'): 
-                q_r = q_r.eq("block_id", user['block_id'])
-                q_t = q_t.eq("block_id", user['block_id'])
-        elif role == 'department':
-            if user.get('department_id'):
-                q_t = q_t.eq("department_id", user['department_id'])
-                q_r = q_r.eq("department_id", user['department_id'])
-            if user.get('district_id'):
-                q_t = q_t.eq("district_id", user['district_id'])
-                q_r = q_r.eq("district_id", user['district_id'])
 
-        df_tab4_tgts = pd.DataFrame(q_t.execute().data or [])
-        df_tab4_reg = pd.DataFrame(q_r.execute().data or [])
+    df_tgts = pd.DataFrame(q_t.execute().data or [])
+    df_reg = pd.DataFrame(q_r.execute().data or [])
 
-        if not df_tab4_tgts.empty:
-            if 'financial_year_id' in df_tab4_tgts.columns and active_fy_id is not None:
-                df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year_id'] == active_fy_id]
-            elif 'financial_year' in df_tab4_tgts.columns:
-                df_tab4_tgts = df_tab4_tgts[df_tab4_tgts['financial_year'] == active_fy]
-            if 'desired_target' in df_tab4_tgts.columns:
-                df_tab4_tgts['desired_target'] = pd.to_numeric(df_tab4_tgts['desired_target'], errors='coerce').fillna(0)
+    # Filter by active financial year
+    if not df_tgts.empty and active_fy_id is not None:
+        if 'financial_year_id' in df_tgts.columns:
+            df_tgts = df_tgts[df_tgts['financial_year_id'] == active_fy_id]
+        elif 'financial_year' in df_tgts.columns:
+            df_tgts = df_tgts[df_tgts['financial_year'] == active_fy]
 
-        if not df_tab4_reg.empty:
-            if 'financial_year_id' in df_tab4_reg.columns and active_fy_id is not None:
-                df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year_id'] == active_fy_id]
-            elif 'financial_year' in df_tab4_reg.columns:
-                df_tab4_reg = df_tab4_reg[df_tab4_reg['financial_year'] == active_fy]
+    if not df_reg.empty and active_fy_id is not None:
+        if 'financial_year_id' in df_reg.columns:
+            df_reg = df_reg[df_reg['financial_year_id'] == active_fy_id]
+        elif 'financial_year' in df_reg.columns:
+            df_reg = df_reg[df_reg['financial_year'] == active_fy]
 
-        # --- IMPROVED COMPLIANCE LOGIC ---
-        # Build a map from register entry to activity name (via thematic_category_id)
-        # For entries without thematic_category_id, fallback to activity_description.
-        def get_activity_name_for_register(row):
+    # Build activity name map for thematic_category_id
+    act_id_to_name = {a['id']: a['activity_name'] for a in activities}
+
+    # Prepare register rows for matching
+    if not df_reg.empty:
+        # Add a column 'match_name' that is either the official activity name (if thematic_category_id is set)
+        # or the cleaned activity_description.
+        def get_match_name(row):
             theme_id = row.get('thematic_category_id')
-            if theme_id and theme_id in activity_id_to_name:
-                return activity_id_to_name[theme_id]
-            # fallback: use activity_description but we want exact match with target activity name
-            # We'll still use description but we'll also clean it.
+            if theme_id and theme_id in act_id_to_name:
+                return act_id_to_name[theme_id].strip().lower()
+            # fallback: clean description
             desc = row.get('activity_description', '')
-            if pd.isna(desc) or desc == '':
+            if pd.isna(desc):
                 return ''
-            # Clean description: remove extra spaces, lowercase, strip
             return re.sub(r'\s+', ' ', str(desc).strip().lower())
-        
-        # For register, we'll create a column 'activity_name_for_match' that we can compare.
-        # We'll do this inside the loop per target to avoid memory.
-        # But we can preprocess the register dataframe.
-        if not df_tab4_reg.empty:
-            # Add a column 'match_key' that is the activity name from theme or cleaned description
-            df_tab4_reg['match_key'] = df_tab4_reg.apply(get_activity_name_for_register, axis=1)
-        else:
-            df_tab4_reg['match_key'] = []
+        df_reg['match_name'] = df_reg.apply(get_match_name, axis=1)
+    else:
+        df_reg['match_name'] = []
 
-        compliance_data = []
-        if not df_tab4_tgts.empty:
-            for _, row in df_tab4_tgts.iterrows():
-                d_id = row['department_id']
-                w_id = row.get('wing_id')
-                b_id = row.get('block_id')
-                target_val = safe_int(row.get('desired_target', 0))
-                t_act = row.get('activity', '')
+    compliance_rows = []
 
-                # Clean target activity for matching
-                t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
+    if not df_tgts.empty:
+        # Iterate over each target row
+        for _, t_row in df_tgts.iterrows():
+            d_id = t_row['department_id']
+            b_id = t_row.get('block_id')
+            target_act = t_row.get('activity', '')
+            target_val = safe_int(t_row.get('desired_target', 0))
 
-                target_w_id_safe = None if pd.isna(w_id) else w_id
-                dept_name = dept_map.get(d_id, 'Unknown')
-                wing_name = wing_map.get(target_w_id_safe, {}).get('wing_name', 'Main Dept.') if target_w_id_safe else 'Main Dept.'
-                dept_display = f"{dept_name} → {wing_name}" if target_w_id_safe else dept_name
-                block_name = block_map.get(b_id, 'All Blocks') if pd.notna(b_id) and b_id else 'All Blocks'
+            # Clean target activity for matching
+            target_clean = re.sub(r'\s+', ' ', str(target_act).strip().lower())
 
-                contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == target_w_id_safe]
+            # Filter register rows by department and block (ignore wing)
+            mask = (df_reg['department_id'] == d_id)
+            if pd.notna(b_id) and b_id:
+                mask &= (df_reg['block_id'] == b_id)
+            # Optionally also filter by wing if you want, but we skip to be safe.
+            # If you still want wing, uncomment and adjust.
+            # if t_row.get('wing_id') is not None:
+            #     mask &= (df_reg['wing_id'] == t_row['wing_id'])
+            # else:
+            #     mask &= (df_reg['wing_id'].isna())
 
-                # --- MATCH COUNT USING ACTIVITY NAME ---
-                entered_count = 0
-                if not df_tab4_reg.empty:
-                    # Filter by department, wing, block
-                    mask = (df_tab4_reg['department_id'] == d_id)
-                    if pd.notna(b_id) and b_id:
-                        mask &= (df_tab4_reg['block_id'] == b_id)
-                    if target_w_id_safe:
-                        mask &= (df_tab4_reg['wing_id'] == target_w_id_safe)
+            candidate_reg = df_reg[mask]
+
+            # Count matches
+            entered_count = 0
+            if not candidate_reg.empty:
+                # We count if match_name contains target_clean (or exact if thematic)
+                # Since match_name is already cleaned, we check if target_clean is in match_name
+                # For thematic-based, match_name is exactly the activity name, so we do exact equality.
+                # We can differentiate: if row has thematic_category_id, use exact, else contains.
+                for _, r_row in candidate_reg.iterrows():
+                    match_name = r_row['match_name']
+                    if r_row.get('thematic_category_id') is not None:
+                        # exact match
+                        if match_name == target_clean:
+                            entered_count += 1
                     else:
-                        mask &= (df_tab4_reg['wing_id'].isna())
-                    
-                    dept_reg = df_tab4_reg[mask]
-                    if not dept_reg.empty:
-                        # Now match by activity name: compare cleaned target with register's match_key
-                        # We want exact match after cleaning.
-                        # Some register entries might have additional text, but we use match_key which is either theme name or cleaned description.
-                        # For theme-based, it's exact activity name. For fallback, it's cleaned description.
-                        # We'll check if cleaned target equals match_key (or if match_key contains target? We'll use equality for theme-based).
-                        # To be safe, we'll check if cleaned target is contained in match_key (for descriptions that include extra text).
-                        # But better: we can use a stricter condition: if match_key == t_act_clean (exact) OR (if match_key contains t_act_clean and length difference is small?).
-                        # Given user's complaint, likely they want exact match of activity name.
-                        # We'll use equality for theme-based, and for fallback we'll use "in" but we'll also strip.
-                        # Actually, we can just compare cleaned target with match_key; if they are equal, count.
-                        # But match_key for descriptions may have extra location, so we use "in" as before.
-                        # However, to fix the issue, we will use equality if the register entry has thematic_category_id, else fallback to "in".
-                        # We'll implement that:
-                        for _, reg_row in dept_reg.iterrows():
-                            reg_match = reg_row.get('match_key', '')
-                            if reg_row.get('thematic_category_id') is not None:
-                                # theme-based, use exact equality after cleaning
-                                if reg_match == t_act_clean:
-                                    entered_count += 1
-                            else:
-                                # fallback: use contains
-                                if t_act_clean in reg_match:
-                                    entered_count += 1
+                        # substring match
+                        if target_clean in match_name:
+                            entered_count += 1
 
-                gap = entered_count - target_val
-                status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
-                compliance_data.append({
-                    "Block": block_name,
-                    "Department / Wing": dept_display, 
-                    "Nodal Person": " | ".join(contacts) if contacts else "⚠️ No Login",
-                    "Target Activity": t_act, 
-                    "Target Set": target_val, 
-                    "Entries Captured": entered_count, 
-                    "Gap": gap, 
-                    "Status": status
-                })
+            gap = entered_count - target_val
+            status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
+
+            # Build display fields
+            dept_name = dept_map.get(d_id, 'Unknown')
+            wing_id = t_row.get('wing_id')
+            wing_name = wing_map.get(wing_id, {}).get('wing_name', 'Main Dept.') if wing_id and not pd.isna(wing_id) else 'Main Dept.'
+            dept_display = f"{dept_name} → {wing_name}" if wing_id and not pd.isna(wing_id) else dept_name
+            block_name = block_map.get(b_id, 'All Blocks') if pd.notna(b_id) and b_id else 'All Blocks'
+
+            contacts = [u.get('full_name', 'Unknown') for u in users_data if u.get('department_id') == d_id and (None if pd.isna(u.get('wing_id')) else u.get('wing_id')) == wing_id]
+
+            compliance_rows.append({
+                "Block": block_name,
+                "Department / Wing": dept_display,
+                "Nodal Person": " | ".join(contacts) if contacts else "⚠️ No Login",
+                "Target Activity": target_act,
+                "Target Set": target_val,
+                "Entries Captured": entered_count,
+                "Gap": gap,
+                "Status": status,
+                # For debugging: show candidate register entries count
+                "_candidate_count": len(candidate_reg)
+            })
+
+    # ----- Display Compliance Table -----
+    if compliance_rows:
+        df_comp = pd.DataFrame(compliance_rows)
+        # Add a debug expander to show why counts are zero
+        with st.expander("🔍 Debug: Show register entries considered for each block (click to expand)"):
+            for idx, row in df_comp.iterrows():
+                block = row['Block']
+                dept_wing = row['Department / Wing']
+                # Find the register entries for this block/dept
+                mask = (df_reg['block_id'] == block_map.get(block)) & (df_reg['department_id'] == dept_map.get(dept_wing.split('→')[0].strip()))
+                # Actually we need to map back, but simpler: we'll just show a few.
+                st.write(f"**{block}** – {dept_wing}: {row['Entries Captured']} captured out of {row['Target Set']} (candidate rows: {row['_candidate_count']})")
+                # Show first 3 register entries for that block/dept
+                sample = df_reg[mask].head(3)
+                if not sample.empty:
+                    st.dataframe(sample[['activity_description', 'match_name', 'thematic_category_id']])
+                else:
+                    st.write("No register entries matched the department/block filter.")
+        # Remove debug column before display
+        df_comp_display = df_comp.drop(columns=['_candidate_count'])
+
+        # Filters
+        col_f1, col_f2 = st.columns(2)
+        blocks = sorted(df_comp_display['Block'].unique())
+        sel_block = col_f1.selectbox("Filter by Block", options=["All"] + blocks)
+        depts = sorted(df_comp_display['Department / Wing'].unique())
+        sel_dept = col_f2.selectbox("Filter by Department / Wing", options=["All"] + depts)
+        if sel_block != "All":
+            df_comp_display = df_comp_display[df_comp_display['Block'] == sel_block]
+        if sel_dept != "All":
+            df_comp_display = df_comp_display[df_comp_display['Department / Wing'] == sel_dept]
 
         def style_compliance(row):
             if row['Status'] != "Target Matched":
                 return ['background-color: #ffebee; color: #b71c1c; font-weight: bold;'] * len(row)
             return ['background-color: #e8f5e9; color: #1b5e20; font-weight: bold;'] * len(row)
 
-        if compliance_data:
-            df_comp = pd.DataFrame(compliance_data)
-            col_f1, col_f2 = st.columns(2)
-            blocks = sorted(df_comp['Block'].unique())
-            sel_block = col_f1.selectbox("Filter by Block", options=["All"] + blocks)
-            depts = sorted(df_comp['Department / Wing'].unique())
-            sel_dept = col_f2.selectbox("Filter by Department / Wing", options=["All"] + depts)
-            if sel_block != "All":
-                df_comp = df_comp[df_comp['Block'] == sel_block]
-            if sel_dept != "All":
-                df_comp = df_comp[df_comp['Department / Wing'] == sel_dept]
-            st.dataframe(df_comp.style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
-        else:
-            st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
-
-    # ================= TAB 4 (was TAB 5) =================
+        st.dataframe(df_comp_display.style.apply(style_compliance, axis=1), use_container_width=True, hide_index=True)
+    else:
+        st.info(f"No Departmental Targets have been set yet for FY {active_fy}.")
+    # ================= TAB 4  =================
     with tab4:
         try:
             audit_query = supabase.table("progress_updates").select(
