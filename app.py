@@ -1,7 +1,3 @@
-# =====================================================================
-# FILE 2: app.py (Main Application Entry Point)
-# =====================================================================
-
 import streamlit as st
 import os
 import pandas as pd
@@ -298,10 +294,7 @@ def show_home():
             df_targets = pd.DataFrame(targets)
             df_register = pd.DataFrame(register)
 
-            def match_activity(work_desc, target_act):
-                if pd.isna(work_desc) or pd.isna(target_act): return False
-                return str(target_act).strip().lower() == str(work_desc).strip().lower()
-
+            # ---- Precise Substring Activity Matching Logic ----
             entries_count = {}
             if not df_register.empty and 'activity_description' in df_register.columns:
                 for _, row in df_register.iterrows():
@@ -309,13 +302,22 @@ def show_home():
                     reg_dept = row.get('department_id')
                     reg_wing = row.get('wing_id')
                     work_desc = row.get('activity_description', '')
+                    
                     for _, trow in df_targets.iterrows():
+                        t_block = trow.get('block_id')
                         t_dept = trow.get('department_id')
                         t_wing = trow.get('wing_id')
                         t_act = trow.get('activity', '')
-                        if reg_dept == t_dept and (reg_wing == t_wing or (pd.isna(reg_wing) and pd.isna(t_wing))):
-                            if match_activity(work_desc, t_act):
-                                key = (reg_block, t_dept, t_wing, t_act)
+                        
+                        # Match Dept, Wing, and Block context 
+                        dept_match = (reg_dept == t_dept)
+                        wing_match = (reg_wing == t_wing) or (pd.isna(reg_wing) and pd.isna(t_wing))
+                        block_match = pd.isna(t_block) or (reg_block == t_block)
+                        
+                        if dept_match and wing_match and block_match:
+                            # Use 'in' to check if target substring exists in the detailed work description
+                            if pd.notna(work_desc) and pd.notna(t_act) and str(t_act).strip().lower() in str(work_desc).strip().lower():
+                                key = (t_block, t_dept, t_wing, t_act)
                                 entries_count[key] = entries_count.get(key, 0) + 1
 
             report_rows = []
@@ -327,9 +329,9 @@ def show_home():
                 t_target = trow.get('desired_target', 0)
 
                 dept_name = dept_map.get(t_dept, 'Unknown')
-                wing_name = wing_map.get(t_wing, {}).get('wing_name', 'Main Dept.') if t_wing else 'Main Dept.'
-                dept_display = f"{dept_name} → {wing_name}" if t_wing else dept_name
-                block_name = block_map.get(t_block, 'All Blocks') if t_block else 'All Blocks'
+                wing_name = wing_map.get(t_wing, {}).get('wing_name', 'Main Dept.') if pd.notna(t_wing) and t_wing else 'Main Dept.'
+                dept_display = f"{dept_name} → {wing_name}" if pd.notna(t_wing) and t_wing else dept_name
+                block_name = block_map.get(t_block, 'All Blocks') if pd.notna(t_block) and t_block else 'All Blocks'
 
                 key = (t_block, t_dept, t_wing, t_act)
                 entries = entries_count.get(key, 0)
