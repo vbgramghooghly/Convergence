@@ -48,16 +48,19 @@ def show():
      
     supabase = get_supabase()
 
-    # Pre-fetch master data to reduce repetitive API calls
+    # Pre-fetch master data
     dist_data = supabase.table("districts").select("*").order("district_name").execute().data
     dept_data = supabase.table("departments").select("*").order("department_name").execute().data
     theme_data = supabase.table("themes").select("*").order("theme_name").execute().data
     fy_data = supabase.table("financial_years").select("*").order("year_name").execute().data
     desig_data = supabase.table("designations").select("*").order("designation_name").execute().data
+    block_data = supabase.table("blocks").select("*").order("block_name").execute().data
+    gps_data = supabase.table("gps").select("*, blocks(block_name, districts(district_name))").order("gp_name").execute().data
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "🗺️ Districts", "🏘️ Blocks", "🏢 Departments", "🏛️ Wings/Parastatals", 
-        "🎯 Themes", "🛠️ Activities", "📅 Financial Years", "🎓 Designations"
+        "🎯 Themes", "🛠️ Activities", "📅 Financial Years", "🎓 Designations",
+        "📍 Gram Panchayats (GP)"
     ])
 
     # ======================== TAB 1: DISTRICTS ========================
@@ -74,7 +77,6 @@ def show():
                     st.success("✅ District added successfully!")
                     st.rerun()
                 except Exception as e:
-                    # Failsafe: Check if it was actually inserted
                     check = supabase.table("districts").select("id").eq("district_name", dist_name).execute()
                     if check.data and len(check.data) > 0:
                         st.success("✅ District added successfully!")
@@ -293,7 +295,7 @@ def show():
                     else:
                         st.error(f"❌ Failed to add FY: {e}")
 
-    # ======================== TAB 8: DESIGNATIONS (UPDATED WITH FULL EDIT) ========================
+    # ======================== TAB 8: DESIGNATIONS ========================
     with tab8:
         st.subheader("🎓 Manage Designations & Statutory Committee Roles")
         st.caption("Designations flagged as statutory members will automatically be pre-selected when scheduling a District or Block meeting.")
@@ -304,7 +306,6 @@ def show():
         else:
             st.info("No designations found in the database yet.")
             
-        # Modern Edit / Create Toggle
         desig_action = st.radio("Choose Action", ["✏️ Edit Existing Designation", "➕ Create New Designation"], horizontal=True)
         
         if desig_action == "✏️ Edit Existing Designation":
@@ -317,7 +318,6 @@ def show():
                     with st.form("edit_desig_form"):
                         col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
                         
-                        # Pre-populate fields with current data
                         desig_name = col_des1.text_input("Designation Title", value=current_desig['designation_name'])
                         is_committee = col_des2.checkbox("Statutory Committee Member?", value=current_desig['is_committee_member'])
                         
@@ -344,7 +344,7 @@ def show():
             else:
                 st.info("No existing designations available to edit.")
 
-        else: # Create New Designation Branch
+        else: 
             with st.form("create_desig_form"):
                 col_des1, col_des2, col_des3 = st.columns([2, 1, 1])
                 desig_name = col_des1.text_input("Designation Title")
@@ -364,3 +364,84 @@ def show():
                             st.rerun()
                         else:
                             st.error(f"❌ Failed to add designation: {e}")
+                            
+    # ======================== TAB 9: GPS (Gram Panchayats) ========================
+    with tab9:
+        st.subheader("📍 Manage Gram Panchayats (GP)")
+        
+        if gps_data:
+            df_gps = pd.DataFrame(gps_data)
+            df_gps['District'] = df_gps['blocks'].apply(lambda x: x['districts']['district_name'] if isinstance(x, dict) and x.get('districts') else '')
+            df_gps['Block'] = df_gps['blocks'].apply(lambda x: x['block_name'] if isinstance(x, dict) else '')
+            st.dataframe(df_gps[['id', 'District', 'Block', 'gp_name', 'active']], use_container_width=True, hide_index=True)
+        else:
+            st.info("No Gram Panchayats found in the database.")
+
+        gp_action = st.radio("Choose Action", ["➕ Create New GP", "✏️ Edit Existing GP"], horizontal=True)
+
+        if gp_action == "➕ Create New GP":
+            with st.form("create_gp_form"):
+                col_g1, col_g2 = st.columns(2)
+                dist_opts = {d['district_name']: d['id'] for d in dist_data}
+                sel_dist = col_g1.selectbox("Parent District", list(dist_opts.keys()) if dist_opts else [])
+                
+                block_opts = {}
+                if sel_dist:
+                    block_opts = {b['block_name']: b['id'] for b in block_data if b['district_id'] == dist_opts[sel_dist]}
+                sel_block = col_g2.selectbox("Parent Block", list(block_opts.keys()) if block_opts else [])
+                
+                gp_name = st.text_input("Gram Panchayat Name")
+                
+                if st.form_submit_button("Save GP", type="primary"):
+                    if not sel_block or not gp_name:
+                        st.error("Please select a Block and enter a GP Name.")
+                    else:
+                        try:
+                            supabase.table("gps").insert({"block_id": block_opts[sel_block], "gp_name": gp_name, "active": True}).execute()
+                            st.success("✅ GP added successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            check = supabase.table("gps").select("id").eq("gp_name", gp_name).execute()
+                            if check.data and len(check.data) > 0:
+                                st.success("✅ GP added successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to add GP: {e}")
+
+        else: # Edit Existing GP
+            gp_dict = {g['gp_name']: g['id'] for g in gps_data} if gps_data else {}
+            if gp_dict:
+                selected_gp_name = st.selectbox("Select GP to Edit", list(gp_dict.keys()))
+                current_gp = next((g for g in gps_data if g['gp_name'] == selected_gp_name), None)
+
+                if current_gp:
+                    with st.form("edit_gp_form"):
+                        col_g1, col_g2 = st.columns(2)
+                        
+                        dist_opts = {d['district_name']: d['id'] for d in dist_data}
+                        current_dist_id = current_gp['blocks']['districts']['id']
+                        current_dist_name = next((d for d in dist_opts if dist_opts[d] == current_dist_id), list(dist_opts.keys())[0] if dist_opts else '')
+                        sel_dist = col_g1.selectbox("Parent District", list(dist_opts.keys()) if dist_opts else [], index=list(dist_opts.keys()).index(current_dist_name) if current_dist_name in dist_opts else 0)
+                        
+                        block_opts = {b['block_name']: b['id'] for b in block_data if b['district_id'] == dist_opts[sel_dist]}
+                        current_block_id = current_gp['block_id']
+                        current_block_name = next((b for b in block_opts if block_opts[b] == current_block_id), list(block_opts.keys())[0] if block_opts else '')
+                        sel_block = col_g2.selectbox("Parent Block", list(block_opts.keys()) if block_opts else [], index=list(block_opts.keys()).index(current_block_name) if current_block_name in block_opts else 0)
+                        
+                        gp_name = st.text_input("GP Name", value=current_gp['gp_name'])
+                        active = st.checkbox("Active", value=current_gp.get('active', True))
+
+                        if st.form_submit_button("Update GP", type="primary"):
+                            try:
+                                payload = {
+                                    "block_id": block_opts[sel_block],
+                                    "gp_name": gp_name,
+                                    "active": active
+                                }
+                                supabase.table("gps").update(payload).eq("id", current_gp['id']).execute()
+                                st.success("✅ GP updated successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Failed to update GP: {e}")
+            else:
+                st.info("No existing GPs available to edit.")
