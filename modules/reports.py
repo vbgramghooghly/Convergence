@@ -42,20 +42,20 @@ def show():
     districts = supabase.table("districts").select("id,district_name").execute().data or []
     blocks = supabase.table("blocks").select("id,block_name,district_id").execute().data or []
     departments = supabase.table("departments").select("id,department_name").execute().data or []
-    themes = supabase.table("themes").select("id,theme_name").execute().data or []
+    activities = supabase.table("activities").select("id,activity_name").execute().data or [] # <-- ADDED: Fetch activities
     wings = supabase.table("department_wings").select("id, department_id, wing_name, entity_type").execute().data or []
 
     dist_map = {d["id"]: d["district_name"] for d in districts}
     block_map = {b["id"]: b["block_name"] for b in blocks}
     dept_map = {d["id"]: d["department_name"] for d in departments}
-    theme_map = {t["id"]: t["theme_name"] for t in themes}
+    activity_map = {a["id"]: a["activity_name"] for a in activities} # <-- ADDED: Map Activity IDs to Names
     wing_map = {w["id"]: w['wing_name'] for w in wings}
 
     # Replace IDs with names safely
     df["district_name"] = df["district_id"].map(dist_map).fillna("Unknown")
     df["block_name"] = df["block_id"].map(block_map).fillna("Unknown")
     df["department_name"] = df["department_id"].map(dept_map).fillna("Unknown")
-    df["theme_name"] = df["thematic_category_id"].map(theme_map).fillna("Unassigned")
+    df["activity_name"] = df["activity_id"].map(activity_map).fillna("Unassigned") # <-- FIXED: Uses activity_id column
 
     if "convergence_type" not in df.columns: df["convergence_type"] = "Not Specified"
     if "total_converged_fund" not in df.columns: df["total_converged_fund"] = df.get("department_fund", 0.0) + df.get("vbgramg_fund", 0.0)
@@ -63,7 +63,6 @@ def show():
     # ==========================================
     # 5. REPORT SELECTION (SAME ROW with Filters)
     # ==========================================
-    # Updated to use a 3-column layout: Dropdown 1, Dropdown 2, Filters Button
     col_c1, col_c2, col_c3 = st.columns([3, 3, 1])
     
     with col_c1:
@@ -88,7 +87,7 @@ def show():
             "District Performance Dashboard",
             "Department Performance Dashboard",
             "Block Performance Dashboard",
-            "Activity-Wise Convergence Report", # Added for your 318 activities
+            "Activity-Wise Convergence Report",
             "Scheme Performance Report",
             "Personday Generation Report",
         ]
@@ -112,12 +111,12 @@ def show():
         report_type = st.selectbox("2. Select Specific Report Format", report_opts)
 
     # ==========================================
-    # 6. ADVANCED FILTERS (Now inside the 3rd column, same row!)
+    # 6. ADVANCED FILTERS
     # ==========================================
     filtered_df = df.copy()
     filter_values = {}
 
-    # Determine which filters to show
+    # Determine which filters to show (UPDATED: Removed 'theme', added 'activity')
     show_filters = []
     if report_type in ["Official VB-G RAM G Summary Report (Template)", "District-wise Summary Report",
                        "Department-wise Summary Report", "Block-wise Summary Report",
@@ -126,7 +125,7 @@ def show():
                        "Scheme Performance Report", "Personday Generation Report",
                        "Financial Convergence Report (Fund Gap Analysis)",
                        "Pending / Delayed Activities Report", "FY 2026–27 Master Convergence Statement"]:
-        show_filters = ["district", "department", "block", "theme", "status", "financial_year"]
+        show_filters = ["district", "department", "block", "activity", "status", "financial_year"]
     elif report_type == "Technical Convergence Report (NOC Status)":
         show_filters = ["district", "department", "block", "financial_year"]
     elif report_type in ["District Convergence Meeting Register", "Department-wise Resolution Statement"]:
@@ -138,8 +137,8 @@ def show():
         show_filters = [f for f in show_filters if f != "financial_year"]
     if "current_status" not in available_cols:
         show_filters = [f for f in show_filters if f != "status"]
-    if "theme_name" not in available_cols:
-        show_filters = [f for f in show_filters if f != "theme"]
+    if "activity_name" not in available_cols:
+        show_filters = [f for f in show_filters if f != "activity"]
 
     # Place the popover inside the 3rd column
     with col_c3:
@@ -166,11 +165,11 @@ def show():
                     if "Unknown" in dept_options: dept_options.remove("Unknown")
                     selected = col.multiselect("Department", dept_options, default=[])
                     filter_values["department"] = selected
-                elif f == "theme":
-                    theme_options = sorted(df["theme_name"].unique())
-                    if "Unassigned" in theme_options: theme_options.remove("Unassigned")
-                    selected = col.multiselect("Theme", theme_options, default=[])
-                    filter_values["theme"] = selected
+                elif f == "activity":
+                    activity_options = sorted(df["activity_name"].unique())
+                    if "Unassigned" in activity_options: activity_options.remove("Unassigned")
+                    selected = col.multiselect("Activity", activity_options, default=[])
+                    filter_values["activity"] = selected
                 elif f == "status":
                     status_options = sorted(df["current_status"].unique())
                     selected = col.multiselect("Status", status_options, default=[])
@@ -196,8 +195,8 @@ def show():
                 filtered_df = filtered_df[filtered_df["block_name"].isin(vals)]
             elif key == "department":
                 filtered_df = filtered_df[filtered_df["department_name"].isin(vals)]
-            elif key == "theme":
-                filtered_df = filtered_df[filtered_df["theme_name"].isin(vals)]
+            elif key == "activity":
+                filtered_df = filtered_df[filtered_df["activity_name"].isin(vals)]
             elif key == "status":
                 filtered_df = filtered_df[filtered_df["current_status"].isin(vals)]
             elif key == "financial_year":
@@ -277,7 +276,7 @@ def show():
         st.download_button("📥 Download Summary (Excel)", excel, f"{group_col}_summary_report.xlsx")
 
     elif report_type == "Activity-Wise Convergence Report":
-        st.subheader("Activity-Wise Convergence & Department Mapping (Across All 318 Activities)")
+        st.subheader("Activity-Wise Convergence & Department Mapping")
         act_summary = filtered_df.groupby("activity_description").agg(
             Total_Target=("desired_target", "sum"),
             Total_Fund=("total_converged_fund", "sum"),
