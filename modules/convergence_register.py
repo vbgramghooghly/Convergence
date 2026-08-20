@@ -1,5 +1,6 @@
 import io
 import pandas as pd
+import re  # <-- ADDED: Required for parsing the existing geo_location string
 import streamlit as st
 from auth.auth import get_current_user, require_role
 from utils.audit import log_action
@@ -315,13 +316,70 @@ def edit_delete_section(records, maps, supabase, user, master):
             default_index = valid_act_names_edit.index(current_base_act)
         
         new_base_act = st.selectbox("Base Activity*", valid_act_names_edit, index=default_index)
+        selected_act_edit_rec = next((a for a in valid_activities_edit if a["activity_name"] == new_base_act), None)
         
         # --- REMOVED PERMISSIBILITY CHECK ---
 
-        new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
-        new_work_name = f"{new_base_act} at {new_geo}" if new_geo else new_base_act
+        # ========================
+        # UPDATED: Allow separate GP & Location Details editing
+        # ========================
+        st.markdown("##### 📍 Gram Panchayat (GP) & Spatial Details")
+        
+        # Parse the existing geo_location string into its components
+        geo_str = rec.get("geo_location", "") or ""
+        current_loc = ""
+        current_gp = "Select GP"
+        current_addl_gp = "Select GP"
+        current_addl_portion = ""
+        has_addl = "No"
+
+        # Regex parsing
+        loc_match = re.search(r"Loc:\s*([^|]+)", geo_str)
+        if loc_match: current_loc = loc_match.group(1).strip()
+
+        gp_match = re.search(r"GP:\s*([^|]+)", geo_str)
+        if gp_match: current_gp = gp_match.group(1).strip()
+
+        addl_match = re.search(r"Addl GP:\s*([^(]+)", geo_str)
+        portion_match = re.search(r"Portion:\s*([^)]+)", geo_str)
+        if addl_match:
+            has_addl = "Yes"
+            current_addl_gp = addl_match.group(1).strip()
+            if portion_match:
+                current_addl_portion = portion_match.group(1).strip()
+
+        # Query dynamic GPs for the block
+        block_id = rec.get("block_id")
+        gps_in_block = []
+        if block_id:
+            res = supabase.table("gps").select("gp_name").eq("block_id", block_id).eq("active", True).execute()
+            gps_in_block = [r['gp_name'] for r in res.data]
+        gp_options = ["Select GP"] + sorted(gps_in_block) if gps_in_block else ["Select GP"]
+
+        col_gp1, col_gp2, col_gp3 = st.columns(3)
+        # Primary GP
+        gp_default_idx = 0
+        if current_gp in gp_options: gp_default_idx = gp_options.index(current_gp)
+        primary_gp = col_gp1.selectbox("Primary Gram Panchayat (GP)*", gp_options, index=gp_default_idx)
+
+        # Additional GP
+        has_add_gp = col_gp2.selectbox("Additional GP Covered?", ["No", "Yes"], index=0 if has_addl == "No" else 1)
+        additional_gp = "Select GP"
+        add_gp_portion = ""
+        if has_add_gp == "Yes":
+            addl_default_idx = 0
+            if current_addl_gp in gp_options: addl_default_idx = gp_options.index(current_addl_gp)
+            additional_gp = col_gp2.selectbox("Additional GP Name", gp_options, index=addl_default_idx)
+            add_gp_portion = col_gp3.text_input("Portion in Addl. GP", value=current_addl_portion, placeholder="e.g. 2 km or 40%")
+        
+        col_l1, col_l2 = st.columns(2)
+        inp_loc_details = col_l1.text_input("Location Details*", value=current_loc, placeholder="Village / Beneficiary Name / Chainage")
+        inp_lat_long = col_l2.text_input("Latitude & Longitude (Optional)", placeholder="e.g. 22.89, 88.01")
+
+        # Reconstruct the final Work Name based on Base Activity + Location Details
+        new_work_name = f"{new_base_act} at {inp_loc_details}" if inp_loc_details else new_base_act
         st.text_input("Final Work Name (Auto-generated)", value=new_work_name, disabled=True)
-        # -------------------------------------
+        # ========================
 
         new_outcome = st.text_area("Possible Outcome / Work Dimensions", value=rec.get("work_dimensions", "") or "")
 
@@ -360,12 +418,19 @@ def edit_delete_section(records, maps, supabase, user, master):
             if errors:
                 for err in errors: st.error(f"⚠️ {err}")
             else:
+                # Reconstruct the exact geo_string structure used by the Add form
+                geo_string = f"Loc: {inp_loc_details} | GP: {primary_gp}"
+                if has_add_gp == "Yes" and additional_gp and additional_gp != "Select GP":
+                    geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
+                if inp_lat_long:
+                    geo_string += f" | GPS: {inp_lat_long}"
+
                 update_payload = {
                     "current_status": new_status,
                     "convergence_type": new_conv_type,
                     "activity_description": new_work_name,
                     "scheme_name": None,
-                    "geo_location": new_geo,
+                    "geo_location": geo_string, # <-- Updated using reconstructed string
                     "work_dimensions": new_outcome,
                     "mis_code": new_mis.strip() if new_mis else None,
                     "origin_source": new_origin,
@@ -374,7 +439,7 @@ def edit_delete_section(records, maps, supabase, user, master):
                     "vbgramg_fund": new_v_fund,
                     "pia_type": new_pia,
                     "wing_id": new_wing_id,
-                    "activity_id": selected_act_edit_rec["id"] if selected_act_edit_rec else None, # <-- Preserved activity_id
+                    "activity_id": selected_act_edit_rec["id"] if selected_act_edit_rec else None,
                     "department_scheme_convergence": scheme_data["convergence"],
                     "department_scheme_name": scheme_data["scheme_name"],
                     "department_annual_plan_status": scheme_data["annual_plan_status"],
