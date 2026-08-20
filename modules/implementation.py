@@ -744,7 +744,7 @@ def show():
                         except Exception:
                             st.warning("Could not load history timeline.")
 
-    # ================= TAB 3: Target Compliance (FIXED) =================
+    # ================= TAB 3: Target Compliance =================
     with tab3:
         q_t = supabase.table("department_targets").select("*")
         q_r = supabase.table("convergence_register").select("*")
@@ -781,30 +781,23 @@ def show():
             elif 'financial_year' in df_reg.columns:
                 df_reg = df_reg[df_reg['financial_year'] == active_fy]
 
-        # Build activity name map for thematic_category_id
+        # Build activity name map
         act_id_to_name = {a['id']: a['activity_name'] for a in activities}
 
         # Prepare register rows for matching
         if not df_reg.empty:
-            # <--- NEW CORRECTED MATCHING LOGIC STARTS HERE --->
             def get_match_name(row):
                 # 1. HIGHEST PRIORITY: Use the direct activity_id link
                 act_id = row.get('activity_id')
                 if act_id and act_id in act_id_to_name:
                     return act_id_to_name[act_id].strip().lower()
                 
-                # 2. FALLBACK: Use the thematic_category_id (Legacy/incorrect mapping)
-                theme_id = row.get('thematic_category_id')
-                if theme_id and theme_id in act_id_to_name:
-                    return act_id_to_name[theme_id].strip().lower()
-                    
-                # 3. FINAL FALLBACK: Clean description for non-linked records
+                # 2. FINAL FALLBACK: Clean description for non-linked records
                 desc = row.get('activity_description', '')
                 if pd.isna(desc):
                     return ''
                 return re.sub(r'\s+', ' ', str(desc).strip().lower())
             df_reg['match_name'] = df_reg.apply(get_match_name, axis=1)
-            # <--- NEW CORRECTED MATCHING LOGIC ENDS HERE --->
         else:
             df_reg['match_name'] = []
 
@@ -825,11 +818,6 @@ def show():
                 mask = (df_reg['department_id'] == d_id)
                 if pd.notna(b_id) and b_id:
                     mask &= (df_reg['block_id'] == b_id)
-                # Optionally also filter by wing if you want, but we skip to be safe.
-                # if t_row.get('wing_id') is not None:
-                #     mask &= (df_reg['wing_id'] == t_row['wing_id'])
-                # else:
-                #     mask &= (df_reg['wing_id'].isna())
 
                 candidate_reg = df_reg[mask]
 
@@ -840,10 +828,6 @@ def show():
                         match_name = r_row['match_name']
                         if r_row.get('activity_id') is not None:
                             # exact match based on ID mapping
-                            if match_name == target_clean:
-                                entered_count += 1
-                        elif r_row.get('thematic_category_id') is not None:
-                            # exact match based on theme mapping
                             if match_name == target_clean:
                                 entered_count += 1
                         else:
