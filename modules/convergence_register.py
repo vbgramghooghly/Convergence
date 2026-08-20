@@ -335,11 +335,8 @@ def edit_delete_section(records, maps, supabase, user, master):
             default_index = valid_act_names_edit.index(current_base_act)
         
         new_base_act = st.selectbox("Base Activity*", valid_act_names_edit, index=default_index)
-        selected_act_edit_rec = next((a for a in valid_activities_edit if a["activity_name"] == new_base_act), None)
-        is_edit_activity_permissible = selected_act_edit_rec.get('vbgramg_permissible', False) if selected_act_edit_rec else False
         
-        if not is_edit_activity_permissible:
-            st.error("🚫 **ERROR:** The selected Base Activity is 'Not Permissible'. You must choose a different activity.")
+        # --- REMOVED PERMISSIBILITY CHECK ---
 
         new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
         new_work_name = f"{new_base_act} at {new_geo}" if new_geo else new_base_act
@@ -369,8 +366,6 @@ def edit_delete_section(records, maps, supabase, user, master):
 
         if st.form_submit_button("Commit Changes", type="primary"):
             errors = []
-            if not is_edit_activity_permissible:
-                errors.append("Base Activity is not permissible.")
             if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
                 new_d_fund = new_v_fund = 0.0
             if new_pia == "Select PIA":
@@ -511,7 +506,8 @@ def show():
             valid_act_names = [a["activity_name"] for a in valid_activities]
 
             col_act1, col_loc1 = st.columns(2)
-            is_activity_permissible = False # <--- ADDED
+            
+            # REMOVED PERMISSIBILITY CHECKS
             if not valid_act_names:
                 st.warning(f"No approved activities found for {sel_dept_label}.")
                 sel_act_name = col_act1.selectbox("Base Activity*", ["No activities available"], disabled=True)
@@ -520,17 +516,18 @@ def show():
                 sel_act_name = col_act1.selectbox("Base Activity*", valid_act_names)
                 selected_act_record = next((a for a in valid_activities if a["activity_name"] == sel_act_name), None)
                 theme_id = selected_act_record["theme_id"] if selected_act_record else None
-                
-                # <--- NEW PERMISSIBILITY CHECK ---
-                is_activity_permissible = selected_act_record.get('vbgramg_permissible', False) if selected_act_record else False
-                if not is_activity_permissible:
-                    st.error("🚫 **ERROR:** The selected Base Activity is marked as 'Not Permissible'. Please choose a different activity from the list.")
 
             inp_loc_details = col_loc1.text_input("Location Details*", placeholder="Village / Beneficiary Name / Chainage")
             auto_desc = f"{sel_act_name} at {inp_loc_details}" if sel_act_name and sel_act_name != "No activities available" and inp_loc_details else ""
 
             col_wn, col_ll = st.columns(2)
-            final_work_name = col_wn.text_input("Work Name*", value=auto_desc)
+            
+            # ---- MODIFIED: Locking the Work Name Input ----
+            with col_wn:
+                st.text_input("Work Name (Auto-generated)", value=auto_desc, disabled=True)
+            final_work_name = auto_desc  # Strictly enforce this for insertion
+            # ----------------------------------------------
+
             inp_lat_long = col_ll.text_input("Latitude & Longitude (Optional)", placeholder="e.g. 22.89, 88.01")
 
             sel_conv_type = st.selectbox("Type of Convergence*", CONVERGENCE_TYPES)
@@ -567,7 +564,7 @@ def show():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Commit Activity Registration", type="primary", use_container_width=True):
                 errors = []
-                if not is_activity_permissible: errors.append("Selected Base Activity is not permissible.") # <--- ADDED
+                # REMOVED PERMISSIBILITY ERROR CHECK
                 if selected_pia == "Select PIA": errors.append("Please select a valid Project Implementing Agency (PIA).")
                 if not valid_act_names: errors.append("Approved activity required.")
                 if sel_block == "Select Block": errors.append("Please select a valid Block.")
