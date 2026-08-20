@@ -885,7 +885,8 @@ def show():
                         sample = pd.DataFrame()
                     st.write(f"**{block}** – {dept_wing}: {row['Entries Captured']} captured out of {row['Target Set']} (candidate rows: {row['_candidate_count']})")
                     if not sample.empty:
-                        st.dataframe(sample[['activity_description', 'match_name', 'thematic_category_id']])
+                        # --- FIX: REMOVED 'thematic_category_id' FROM DATA FRAME DISPLAY ---
+                        st.dataframe(sample[['activity_description', 'match_name']])
                     else:
                         st.write("No register entries matched the department/block filter.")
             # Remove debug column before display
