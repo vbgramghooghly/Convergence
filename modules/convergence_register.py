@@ -125,12 +125,10 @@ def display_register(df, maps):
     df_display["Block"] = df_display["block_id"].map(maps["block_reverse"])
     df_display["Department"] = df_display["department_id"].map(maps["dept_reverse"])
     
-    # ---- Map wing_id to wing name ----
     df_display["Wing"] = df_display["wing_id"].apply(
         lambda x: maps["wing_map"].get(x, {}).get("wing_name", "Direct Parent Department") if pd.notna(x) and x else "Direct Parent Department"
     )
 
-    # ---- NEW: Extract Base Activity from activity_description ----
     def extract_base_activity(desc):
         if not desc:
             return ""
@@ -138,7 +136,6 @@ def display_register(df, maps):
             return desc.split(" at ", 1)[0].strip()
         return desc.strip()
     df_display["Base Activity"] = df_display["activity_description"].apply(extract_base_activity)
-    # -------------------------------------------------------------
 
     for col in ["convergence_type", "mis_code", "origin_source"]:
         if col not in df_display.columns: df_display[col] = "Not Specified" if col == "convergence_type" else ""
@@ -162,7 +159,6 @@ def display_register(df, maps):
         inplace=True
     )
 
-    # ---- Insert "Base Activity" before "Work Name" ----
     display_cols = [
         "FY", "District", "Block", "Department", "Wing",
         "Base Activity",
@@ -230,7 +226,6 @@ def edit_delete_section(records, maps, supabase, user, master):
 
     st.markdown("#### 🔍 Advanced Search & Filter")
     
-    # Extract unique values for filters
     block_ids = list(set(r.get("block_id") for r in records if r.get("block_id")))
     block_names = sorted(list(set(maps["block_reverse"].get(b, "Unknown") for b in block_ids)))
     
@@ -242,7 +237,6 @@ def edit_delete_section(records, maps, supabase, user, master):
         sel_block = col1.selectbox("Filter by Block", ["All"] + block_names)
         sel_dept = col2.selectbox("Filter by Department", ["All"] + dept_names)
         
-        # --- FIX 1: DYNAMIC GP LIST ---
         if sel_block != "All":
             block_key = str(sel_block).upper().strip()
             gp_names = sorted(HOOGHLY_GPS.get(block_key, []))
@@ -260,7 +254,6 @@ def edit_delete_section(records, maps, supabase, user, master):
         sel_gp = col3.selectbox("Filter by GP", ["All"] + gp_names)
         search_text = col4.text_input("Search Activity / Work Name", placeholder="Type to search...")
     
-    # Apply Filters
     filtered_records = records
     if sel_block != "All":
         block_id = maps["block_map"].get(sel_block)
@@ -280,7 +273,6 @@ def edit_delete_section(records, maps, supabase, user, master):
     st.markdown("---")
     st.markdown("#### 🛠️ Modify Selected Activity")
     
-    # --- FIX 2: NO TRUNCATION FOR ACTIVITY NAME ---
     display_options = {
         r["id"]: f"{r['activity_description']} - {maps['dept_reverse'].get(r['department_id'], 'Unknown')} (₹{r.get('total_converged_fund', 0)} L)"
         for r in filtered_records
@@ -329,10 +321,31 @@ def edit_delete_section(records, maps, supabase, user, master):
             index=default_idx
         )
         new_wing_id = wing_ids[wing_labels.index(selected_wing_label)]
+
+        # ---- MODIFIED: Edit Base Activity using Dropdown ----
+        mapped_act_ids_edit = [m["activity_id"] for m in master["act_dept_mapping"] if m["department_id"] == dept_id]
+        valid_activities_edit = [a for a in master["activities"] if a["id"] in mapped_act_ids_edit]
+        valid_act_names_edit = [a["activity_name"] for a in valid_activities_edit]
+        
+        current_desc = rec.get("activity_description", "")
+        current_base_act = current_desc.split(" at ", 1)[0].strip() if " at " in current_desc else current_desc
+        
+        default_index = 0
+        if current_base_act in valid_act_names_edit:
+            default_index = valid_act_names_edit.index(current_base_act)
+        
+        new_base_act = st.selectbox("Base Activity*", valid_act_names_edit, index=default_index)
+        selected_act_edit_rec = next((a for a in valid_activities_edit if a["activity_name"] == new_base_act), None)
+        is_edit_activity_permissible = selected_act_edit_rec.get('vbgramg_permissible', False) if selected_act_edit_rec else False
+        
+        if not is_edit_activity_permissible:
+            st.error("🚫 **ERROR:** The selected Base Activity is 'Not Permissible'. You must choose a different activity.")
+
+        new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
+        new_work_name = f"{new_base_act} at {new_geo}" if new_geo else new_base_act
+        st.text_input("Final Work Name (Auto-generated)", value=new_work_name, disabled=True)
         # -------------------------------------
 
-        new_work_name = st.text_input("Work Name*", value=rec.get("activity_description", "") or "")
-        new_geo = st.text_input("Location Details & GP Mapping", value=rec.get("geo_location", "") or "")
         new_outcome = st.text_area("Possible Outcome / Work Dimensions", value=rec.get("work_dimensions", "") or "")
 
         col_det5, col_det6 = st.columns(2)
@@ -355,23 +368,27 @@ def edit_delete_section(records, maps, supabase, user, master):
         scheme_data = render_scheme_convergence_section(defaults, key_prefix="edit")
 
         if st.form_submit_button("Commit Changes", type="primary"):
+            errors = []
+            if not is_edit_activity_permissible:
+                errors.append("Base Activity is not permissible.")
             if new_conv_type == "Technical Convergence (Zero Fund/NOC)":
                 new_d_fund = new_v_fund = 0.0
             if new_pia == "Select PIA":
-                st.error("⚠️ Please select a valid Project Implementing Agency (PIA).")
+                errors.append("⚠️ Please select a valid Project Implementing Agency (PIA).")
             elif scheme_data["convergence"] and not scheme_data["scheme_name"]:
-                st.error("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
-            elif not new_work_name.strip():
-                st.error("⚠️ Work Name cannot be empty.")
+                errors.append("⚠️ Scheme / Fund name is mandatory when Convergence = Yes.")
             elif new_conv_type != "Technical Convergence (Zero Fund/NOC)" and new_d_fund == 0.0 and new_v_fund == 0.0:
-                st.error("⚠️ Financial Convergence requires a Fund amount > 0.")
+                errors.append("⚠️ Financial Convergence requires a Fund amount > 0.")
             elif new_pd <= 0:
-                st.error("⚠️ Expected Persondays is mandatory and must be greater than zero.")
+                errors.append("⚠️ Expected Persondays is mandatory and must be greater than zero.")
+
+            if errors:
+                for err in errors: st.error(f"⚠️ {err}")
             else:
                 update_payload = {
                     "current_status": new_status,
                     "convergence_type": new_conv_type,
-                    "activity_description": new_work_name,
+                    "activity_description": new_work_name, # Auto-generated validated string
                     "scheme_name": None,
                     "geo_location": new_geo,
                     "work_dimensions": new_outcome,
@@ -415,7 +432,6 @@ def show():
 
     render_kpi_cards(df_records, exact_count)
 
-    # dynamically generate tabs based on user role
     tab_list = [
         "📋 Master Work Register",
         "➕ Add New Activity"
@@ -495,6 +511,7 @@ def show():
             valid_act_names = [a["activity_name"] for a in valid_activities]
 
             col_act1, col_loc1 = st.columns(2)
+            is_activity_permissible = False # <--- ADDED
             if not valid_act_names:
                 st.warning(f"No approved activities found for {sel_dept_label}.")
                 sel_act_name = col_act1.selectbox("Base Activity*", ["No activities available"], disabled=True)
@@ -503,6 +520,11 @@ def show():
                 sel_act_name = col_act1.selectbox("Base Activity*", valid_act_names)
                 selected_act_record = next((a for a in valid_activities if a["activity_name"] == sel_act_name), None)
                 theme_id = selected_act_record["theme_id"] if selected_act_record else None
+                
+                # <--- NEW PERMISSIBILITY CHECK ---
+                is_activity_permissible = selected_act_record.get('vbgramg_permissible', False) if selected_act_record else False
+                if not is_activity_permissible:
+                    st.error("🚫 **ERROR:** The selected Base Activity is marked as 'Not Permissible'. Please choose a different activity from the list.")
 
             inp_loc_details = col_loc1.text_input("Location Details*", placeholder="Village / Beneficiary Name / Chainage")
             auto_desc = f"{sel_act_name} at {inp_loc_details}" if sel_act_name and sel_act_name != "No activities available" and inp_loc_details else ""
@@ -516,7 +538,6 @@ def show():
             st.markdown("##### 🎯 Targets & Financial Allocation")
             col_f1, col_f2 = st.columns(2)
 
-            # --- BARE MINIMUM DYNAMIC ORIGIN CHANGE ---
             if role == "district":
                 dist_name = maps["dist_reverse"].get(user.get("district_id"), "District")
                 origin_options = ["District Annual Action Plan", f"District Meeting ({dist_name})"]
@@ -524,11 +545,9 @@ def show():
                 block_name = maps["block_reverse"].get(user.get("block_id"), "Block")
                 origin_options = ["Block Annual Action Plan", f"Block Meeting ({block_name})"]
             else:
-                # Superadmin sees the original generic options
                 origin_options = ["District Plan", "Block Plan", "District Meeting", "Block Meeting"]
             
             inp_origin = col_f1.selectbox("Source of Activity Linkage", origin_options)
-            # --- END CHANGE ---
 
             persondays = col_f2.number_input("Expected Persondays*", min_value=0)
             possible_outcome = st.text_area("Expected Deliverables / Outcome", placeholder="e.g. 50 farmers benefited, 1 AWC constructed")
@@ -548,6 +567,7 @@ def show():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("Commit Activity Registration", type="primary", use_container_width=True):
                 errors = []
+                if not is_activity_permissible: errors.append("Selected Base Activity is not permissible.") # <--- ADDED
                 if selected_pia == "Select PIA": errors.append("Please select a valid Project Implementing Agency (PIA).")
                 if not valid_act_names: errors.append("Approved activity required.")
                 if sel_block == "Select Block": errors.append("Please select a valid Block.")
@@ -569,7 +589,6 @@ def show():
                         geo_string += f" | Addl GP: {additional_gp} (Portion: {add_gp_portion})"
                     if inp_lat_long: geo_string += f" | GPS: {inp_lat_long}"
 
-                    # 🛡️ STRICT DUPLICATE CHECK (Prevents duplicates entirely)
                     duplicate_check = supabase.table("convergence_register").select("id")\
                         .eq("financial_year_id", selected_fy_id)\
                         .eq("block_id", block_id)\
@@ -608,12 +627,10 @@ def show():
                             else:
                                 st.error(f"Error saving record: {e}")
 
-    # Render tab 3 if role is appropriate
     if len(tabs) > 2:
         with tabs[2]:
             edit_delete_section(records, maps, supabase, user, master)
 
-    # ---- Display Requested Global Footer Text ----
     st.markdown(
         """
         <div style='text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0; color: #64748B; font-size: 14px; font-weight: 600;'>
