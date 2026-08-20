@@ -157,6 +157,14 @@ if 'current_page' not in st.session_state:
     else:
         st.session_state.current_page = "Home"
 
+def safe_int(val):
+    if pd.isna(val) or val is None or val == '':
+        return 0
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return 0
+
 # ---------- REUSABLE UI COMPONENTS ----------
 def render_profile_menu():
     first_name = user.get('full_name', 'User').split()[0]
@@ -251,7 +259,6 @@ def show_home():
     dept_map = {d['id']: d['department_name'] for d in departments}
     wing_map = {w['id']: w for w in wings}
     block_map = {b['id']: b['block_name'] for b in blocks}
-    block_name_to_id = {b['block_name']: b['id'] for b in blocks}
 
     active_fy = st.session_state.get("selected_fy", "2026-27")
     fy_id = None
@@ -263,13 +270,6 @@ def show_home():
     if not fy_id:
         st.warning("No active financial year found. Please set one in your profile.")
     else:
-        if role == 'block' and block_id:
-            block_list = [b for b in blocks if b['id'] == block_id]
-        elif role in ['district', 'department'] and district_id:
-            block_list = [b for b in blocks if b['district_id'] == district_id]
-        else:
-            block_list = blocks
-
         q_t = supabase.table("department_targets").select("*").eq("financial_year", active_fy)
         if role == 'department' and department_id:
             q_t = q_t.eq("department_id", department_id)
@@ -294,48 +294,42 @@ def show_home():
             df_targets = pd.DataFrame(targets)
             df_register = pd.DataFrame(register)
 
-            entries_count = {}
-            if not df_register.empty and 'activity_description' in df_register.columns:
-                for _, row in df_register.iterrows():
-                    reg_block = row.get('block_id')
-                    reg_dept = row.get('department_id')
-                    reg_wing = row.get('wing_id')
-                    work_desc = row.get('activity_description', '')
-                    wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
-                    
-                    for _, trow in df_targets.iterrows():
-                        t_dept = trow.get('department_id')
-                        t_wing = trow.get('wing_id')
-                        t_act = trow.get('activity', '')
-                        t_block = trow.get('block_id')
-                        
-                        # Match Dept, Wing, and Block context 
-                        dept_match = (reg_dept == t_dept)
-                        wing_match = (reg_wing == t_wing) or (pd.isna(reg_wing) and pd.isna(t_wing))
-                        block_match = pd.isna(t_block) or (reg_block == t_block)
-                        
-                        if dept_match and wing_match and block_match:
-                            t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
-                            if t_act_clean and t_act_clean in wd_clean:
-                                key = (t_block, t_dept, t_wing, t_act)
-                                entries_count[key] = entries_count.get(key, 0) + 1
-
+            # --- BULLETPROOF COMPLIANCE COUNTER ---
             report_rows = []
             for _, trow in df_targets.iterrows():
                 t_block = trow.get('block_id')
                 t_dept = trow.get('department_id')
                 t_wing = trow.get('wing_id')
                 t_act = trow.get('activity', '')
-                t_target = trow.get('desired_target', 0)
+                t_target = safe_int(trow.get('desired_target', 0))
 
                 dept_name = dept_map.get(t_dept, 'Unknown')
                 wing_name = wing_map.get(t_wing, {}).get('wing_name', 'Main Dept.') if pd.notna(t_wing) and t_wing else 'Main Dept.'
                 dept_display = f"{dept_name} → {wing_name}" if pd.notna(t_wing) and t_wing else dept_name
                 block_name = block_map.get(t_block, 'All Blocks') if pd.notna(t_block) and t_block else 'All Blocks'
 
-                key = (t_block, t_dept, t_wing, t_act)
-                entries = entries_count.get(key, 0)
-                gap = entries - t_target
+                entered_count = 0
+                if not df_register.empty:
+                    mask = (df_register['department_id'] == t_dept)
+                    if pd.notna(t_block) and t_block:
+                        mask &= (df_register['block_id'] == t_block)
+                    if pd.notna(t_wing) and t_wing:
+                        mask &= (df_register['wing_id'] == t_wing)
+                    else:
+                        mask &= (df_register['wing_id'].isna())
+                    
+                    dept_reg = df_register[mask]
+                    if 'activity_description' in dept_reg.columns:
+                        t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
+                        
+                        def is_match(work_desc, tgt=t_act_clean):
+                            if pd.isna(work_desc): return False
+                            wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
+                            return tgt in wd_clean
+                            
+                        entered_count = dept_reg['activity_description'].apply(is_match).sum()
+
+                gap = entered_count - t_target
                 status = "Less Entered (Needs Update)" if gap < 0 else "Extra Entered (Mismatch)" if gap > 0 else "Target Matched"
 
                 report_rows.append({
@@ -344,7 +338,7 @@ def show_home():
                     "Department / Wing": dept_display,
                     "Target Activity": t_act,
                     "Target Set": t_target,
-                    "Entries Captured": entries,
+                    "Entries Captured": entered_count,
                     "Gap": gap,
                     "Status": status
                 })
