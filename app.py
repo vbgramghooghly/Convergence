@@ -294,7 +294,6 @@ def show_home():
             df_targets = pd.DataFrame(targets)
             df_register = pd.DataFrame(register)
 
-            # ---- Precise Substring Activity Matching Logic ----
             entries_count = {}
             if not df_register.empty and 'activity_description' in df_register.columns:
                 for _, row in df_register.iterrows():
@@ -302,12 +301,13 @@ def show_home():
                     reg_dept = row.get('department_id')
                     reg_wing = row.get('wing_id')
                     work_desc = row.get('activity_description', '')
+                    wd_clean = re.sub(r'\s+', ' ', str(work_desc).strip().lower())
                     
                     for _, trow in df_targets.iterrows():
-                        t_block = trow.get('block_id')
                         t_dept = trow.get('department_id')
                         t_wing = trow.get('wing_id')
                         t_act = trow.get('activity', '')
+                        t_block = trow.get('block_id')
                         
                         # Match Dept, Wing, and Block context 
                         dept_match = (reg_dept == t_dept)
@@ -315,8 +315,8 @@ def show_home():
                         block_match = pd.isna(t_block) or (reg_block == t_block)
                         
                         if dept_match and wing_match and block_match:
-                            # Use 'in' to check if target substring exists in the detailed work description
-                            if pd.notna(work_desc) and pd.notna(t_act) and str(t_act).strip().lower() in str(work_desc).strip().lower():
+                            t_act_clean = re.sub(r'\s+', ' ', str(t_act).strip().lower())
+                            if t_act_clean and t_act_clean in wd_clean:
                                 key = (t_block, t_dept, t_wing, t_act)
                                 entries_count[key] = entries_count.get(key, 0) + 1
 
