@@ -1,3 +1,7 @@
+# =====================================================================
+# FILE 2: app.py (Main Application Entry Point)
+# =====================================================================
+
 import streamlit as st
 import os
 import pandas as pd
@@ -295,10 +299,8 @@ def show_home():
             df_register = pd.DataFrame(register)
 
             def match_activity(work_desc, target_act):
-                target_words = set(re.findall(r'\w+', str(target_act).lower()))
-                work_words = set(re.findall(r'\w+', str(work_desc).lower()))
-                common = target_words.intersection(work_words)
-                return len(common) >= 3
+                if pd.isna(work_desc) or pd.isna(target_act): return False
+                return str(target_act).strip().lower() == str(work_desc).strip().lower()
 
             entries_count = {}
             if not df_register.empty and 'activity_description' in df_register.columns:
@@ -311,7 +313,7 @@ def show_home():
                         t_dept = trow.get('department_id')
                         t_wing = trow.get('wing_id')
                         t_act = trow.get('activity', '')
-                        if reg_dept == t_dept and (reg_wing == t_wing or (reg_wing is None and t_wing is None)):
+                        if reg_dept == t_dept and (reg_wing == t_wing or (pd.isna(reg_wing) and pd.isna(t_wing))):
                             if match_activity(work_desc, t_act):
                                 key = (reg_block, t_dept, t_wing, t_act)
                                 entries_count[key] = entries_count.get(key, 0) + 1
